@@ -16,6 +16,30 @@ The role of a CPU is to execute a program consisting of binaries sequentially by
 - Decode: Splits an instruction sequence into a form that makes sense to the CPU, defined in [Volume I: Unprivileged ISA](https://riscv.org/technical/specifications/).
 - Execute: Performs the action required by the instruction. In hardware, arithmetic operations such as addition and subtraction are performed by ALU (Arithmetic logic unit).
 
+## Build and Run
+
+Build the emulator:
+```shell
+$ make
+```
+
+Download prebuilt xv6 kernel and file system image:
+```shell
+$ make check
+```
+
+Please be patient while `semu` is running.
+
+Reference output:
+```
+$ ./semu kernel.bin fs.img
+
+xv6 kernel is booting
+
+init: starting sh
+$
+```
+
 ## Acknowledgements
 
 `semu` is inspired by [rvemu](https://github.com/d0iasm/rvemu).
