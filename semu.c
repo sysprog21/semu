@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
