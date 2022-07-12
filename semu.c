@@ -305,7 +305,8 @@ static void *uart_thread_func(void *priv)
     struct uart *uart = (struct uart *) priv;
     while (1) {
         char c;
-        read(STDIN_FILENO, &c, 1);
+        if (read(STDIN_FILENO, &c, 1) <= 0)  /* an error or EOF */
+            continue;
         pthread_mutex_lock(&uart->lock);
         while ((uart->data[UART_LSR - UART_BASE] & UART_LSR_RX) == 1)
             pthread_cond_wait(&uart->cond, &uart->lock);
@@ -1303,7 +1304,9 @@ size_t read_file(FILE *f, uint8_t **r)
     fseek(f, 0, SEEK_SET);
 
     uint8_t *content = malloc(fsize + 1);
-    fread(content, fsize, 1, f);
+    if (fread(content, fsize, 1, f) != 1) /* less than fsize bytes */
+        fatal("read file content");
+
     content[fsize] = 0;
     *r = content;
 
