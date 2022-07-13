@@ -55,7 +55,7 @@ enum { VIRTIO_VRING_DESC_SIZE = 16, VIRTIO_DESC_NUM = 8 };
  *     if ((signed)((x - minx) | (maxx - x)) >= 0) ...
  */
 #define RANGE_CHECK(x, minx, size) \
-    ((int32_t)((x - minx) | (minx + size - 1 - x)) >= 0)
+    ((int32_t) ((x - minx) | (minx + size - 1 - x)) >= 0)
 
 /* Machine level CSRs */
 enum { MSTATUS = 0x300, MEDELEG = 0x302, MIDELEG, MIE, MTVEC };
@@ -129,17 +129,17 @@ exception_t ram_load(const struct ram *ram,
     uint64_t index = addr - RAM_BASE, tmp = 0;
     switch (size) {
     case 64:
-        tmp |= (uint64_t)(ram->data[index + 7]) << 56;
-        tmp |= (uint64_t)(ram->data[index + 6]) << 48;
-        tmp |= (uint64_t)(ram->data[index + 5]) << 40;
-        tmp |= (uint64_t)(ram->data[index + 4]) << 32;
+        tmp |= (uint64_t) (ram->data[index + 7]) << 56;
+        tmp |= (uint64_t) (ram->data[index + 6]) << 48;
+        tmp |= (uint64_t) (ram->data[index + 5]) << 40;
+        tmp |= (uint64_t) (ram->data[index + 4]) << 32;
     case 32:
-        tmp |= (uint64_t)(ram->data[index + 3]) << 24;
-        tmp |= (uint64_t)(ram->data[index + 2]) << 16;
+        tmp |= (uint64_t) (ram->data[index + 3]) << 24;
+        tmp |= (uint64_t) (ram->data[index + 2]) << 16;
     case 16:
-        tmp |= (uint64_t)(ram->data[index + 1]) << 8;
+        tmp |= (uint64_t) (ram->data[index + 1]) << 8;
     case 8:
-        tmp |= (uint64_t)(ram->data[index + 0]) << 0;
+        tmp |= (uint64_t) (ram->data[index + 0]) << 0;
         *result = tmp;
         return OK;
     default:
@@ -305,7 +305,7 @@ static void *uart_thread_func(void *priv)
     struct uart *uart = (struct uart *) priv;
     while (1) {
         char c;
-        if (read(STDIN_FILENO, &c, 1) <= 0)  /* an error or EOF */
+        if (read(STDIN_FILENO, &c, 1) <= 0) /* an error or EOF */
             continue;
         pthread_mutex_lock(&uart->lock);
         while ((uart->data[UART_LSR - UART_BASE] & UART_LSR_RX) == 1)
@@ -769,19 +769,19 @@ inline exception_t cpu_store(struct cpu *cpu,
     return bus_store(cpu->bus, pa, size, value);
 }
 
-exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
+exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
 {
-    uint64_t opcode = inst & 0x7f;
-    uint64_t rd = (inst >> 7) & 0x1f;
-    uint64_t rs1 = (inst >> 15) & 0x1f, rs2 = (inst >> 20) & 0x1f;
-    uint64_t funct3 = (inst >> 12) & 0x7, funct7 = (inst >> 25) & 0x7f;
+    uint64_t opcode = insn & 0x7f;
+    uint64_t rd = (insn >> 7) & 0x1f;
+    uint64_t rs1 = (insn >> 15) & 0x1f, rs2 = (insn >> 20) & 0x1f;
+    uint64_t funct3 = (insn >> 12) & 0x7, funct7 = (insn >> 25) & 0x7f;
 
     cpu->regs[0] = 0; /* x0 register is always zero */
 
     exception_t e;
     switch (opcode) {
     case 0x03: {
-        uint64_t imm = (int32_t) inst >> 20;
+        uint64_t imm = (int32_t) insn >> 20;
         uint64_t addr = cpu->regs[rs1] + imm;
         switch (funct3) {
         case 0x0: /* lb */ {
@@ -848,7 +848,7 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
         }
         break;
     case 0x13: {
-        uint64_t imm = (int32_t)(inst & 0xfff00000) >> 20;
+        uint64_t imm = (int32_t) (insn & 0xfff00000) >> 20;
         uint32_t shamt = imm & 0x3f;
 
         switch (funct3) {
@@ -873,7 +873,7 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
                 cpu->regs[rd] = cpu->regs[rs1] >> shamt;
                 break;
             case 0x10: /* srai */
-                cpu->regs[rd] = (int64_t)(cpu->regs[rs1]) >> shamt;
+                cpu->regs[rd] = (int64_t) (cpu->regs[rs1]) >> shamt;
                 break;
             default:
                 return ILLEGAL_INSTRUCTION;
@@ -891,27 +891,27 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
         break;
     }
     case 0x17: /* auipc */ {
-        uint64_t imm = (int32_t)(inst & 0xfffff000);
+        uint64_t imm = (int32_t) (insn & 0xfffff000);
         cpu->regs[rd] = cpu->pc + imm - 4;
         break;
     }
     case 0x1b: {
-        uint64_t imm = (int32_t) inst >> 20;
+        uint64_t imm = (int32_t) insn >> 20;
         uint32_t shamt = imm & 0x1f;
         switch (funct3) {
         case 0x0: /* addiw */
-            cpu->regs[rd] = (int32_t)(cpu->regs[rs1] + imm);
+            cpu->regs[rd] = (int32_t) (cpu->regs[rs1] + imm);
             break;
         case 0x1: /* slliw */
-            cpu->regs[rd] = (int32_t)(cpu->regs[rs1] << shamt);
+            cpu->regs[rd] = (int32_t) (cpu->regs[rs1] << shamt);
             break;
         case 0x5: {
             switch (funct7) {
             case 0x00: /* srliw */
-                cpu->regs[rd] = (int32_t)((uint32_t) cpu->regs[rs1] >> shamt);
+                cpu->regs[rd] = (int32_t) ((uint32_t) cpu->regs[rs1] >> shamt);
                 break;
             case 0x20: /* sraiw */
-                cpu->regs[rd] = (int32_t)(cpu->regs[rs1]) >> shamt;
+                cpu->regs[rd] = (int32_t) (cpu->regs[rs1]) >> shamt;
                 break;
             default:
                 return ILLEGAL_INSTRUCTION;
@@ -924,8 +924,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
         break;
     }
     case 0x23: {
-        uint64_t imm = (uint64_t)((int32_t)(inst & 0xfe000000) >> 20) |
-                       ((inst >> 7) & 0x1f);
+        uint64_t imm = (uint64_t) ((int32_t) (insn & 0xfe000000) >> 20) |
+                       ((insn >> 7) & 0x1f);
         uint64_t addr = cpu->regs[rs1] + imm;
         switch (funct3) {
         case 0x0: /* sb */
@@ -1017,18 +1017,18 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
         break;
     }
     case 0x37: /* lui */
-        cpu->regs[rd] = (int32_t)(inst & 0xfffff000);
+        cpu->regs[rd] = (int32_t) (insn & 0xfffff000);
         break;
     case 0x3b: {
         uint32_t shamt = cpu->regs[rs2] & 0x1f;
         if (funct3 == 0x0 && funct7 == 0x00) { /* addw */
-            cpu->regs[rd] = (int32_t)(cpu->regs[rs1] + cpu->regs[rs2]);
+            cpu->regs[rd] = (int32_t) (cpu->regs[rs1] + cpu->regs[rs2]);
         } else if (funct3 == 0x0 && funct7 == 0x20) { /* subw */
-            cpu->regs[rd] = (int32_t)(cpu->regs[rs1] - cpu->regs[rs2]);
+            cpu->regs[rd] = (int32_t) (cpu->regs[rs1] - cpu->regs[rs2]);
         } else if (funct3 == 0x1 && funct7 == 0x00) { /* sllw */
-            cpu->regs[rd] = (int32_t)((uint32_t) cpu->regs[rs1] << shamt);
+            cpu->regs[rd] = (int32_t) ((uint32_t) cpu->regs[rs1] << shamt);
         } else if (funct3 == 0x5 && funct7 == 0x00) { /* srlw */
-            cpu->regs[rd] = (int32_t)((uint32_t) cpu->regs[rs1] >> shamt);
+            cpu->regs[rd] = (int32_t) ((uint32_t) cpu->regs[rs1] >> shamt);
         } else if (funct3 == 0x5 && funct7 == 0x01) { /* divu */
             cpu->regs[rd] =
                 cpu->regs[rs2] == 0 ? -1 : cpu->regs[rs1] / cpu->regs[rs2];
@@ -1037,17 +1037,17 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
         } else if (funct3 == 0x7 && funct7 == 0x01) { /* remuw */
             cpu->regs[rd] = cpu->regs[rs2] == 0
                                 ? cpu->regs[rs1]
-                                : (int32_t)((uint32_t) cpu->regs[rs1] %
-                                            (uint32_t) cpu->regs[rs2]);
+                                : (int32_t) ((uint32_t) cpu->regs[rs1] %
+                                             (uint32_t) cpu->regs[rs2]);
         } else {
             return ILLEGAL_INSTRUCTION;
         }
         break;
     }
     case 0x63: {
-        uint64_t imm = (uint64_t)((int32_t)(inst & 0x80000000) >> 19) |
-                       ((inst & 0x80) << 4) | ((inst >> 20) & 0x7e0) |
-                       ((inst >> 7) & 0x1e);
+        uint64_t imm = (uint64_t) ((int32_t) (insn & 0x80000000) >> 19) |
+                       ((insn & 0x80) << 4) | ((insn >> 20) & 0x7e0) |
+                       ((insn >> 7) & 0x1e);
 
         switch (funct3) {
         case 0x0: /* beq */
@@ -1081,7 +1081,7 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
     }
     case 0x67: { /* jalr */
         uint64_t t = cpu->pc;
-        uint64_t imm = (int32_t)(inst & 0xfff00000) >> 20;
+        uint64_t imm = (int32_t) (insn & 0xfff00000) >> 20;
         cpu->pc = (cpu->regs[rs1] + imm) & ~1;
 
         cpu->regs[rd] = t;
@@ -1090,15 +1090,15 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t inst)
     case 0x6f: { /* jal */
         cpu->regs[rd] = cpu->pc;
 
-        uint64_t imm = (uint64_t)((int32_t)(inst & 0x80000000) >> 11) |
-                       (inst & 0xff000) | ((inst >> 9) & 0x800) |
-                       ((inst >> 20) & 0x7fe);
+        uint64_t imm = (uint64_t) ((int32_t) (insn & 0x80000000) >> 11) |
+                       (insn & 0xff000) | ((insn >> 9) & 0x800) |
+                       ((insn >> 20) & 0x7fe);
 
         cpu->pc += imm - 4;
         break;
     }
     case 0x73: {
-        uint16_t addr = (inst & 0xfff00000) >> 20;
+        uint16_t addr = (insn & 0xfff00000) >> 20;
         switch (funct3) {
         case 0x0:
             if (rs2 == 0x0 && funct7 == 0x0) { /* ecall */
@@ -1341,19 +1341,19 @@ int main(int argc, char **argv)
 
     while (1) {
         /* Fetch instruction */
-        uint64_t inst;
+        uint64_t insn;
         exception_t e;
-        if ((e = cpu_fetch(cpu, &inst)) != OK) {
+        if ((e = cpu_fetch(cpu, &insn)) != OK) {
             cpu_take_trap(cpu, e, NONE);
             if (exception_is_fatal(e))
                 break;
-            inst = 0;
+            insn = 0;
         }
 
         cpu->pc += 4; /* advance pc */
 
         /* decode and execute */
-        if ((e = cpu_execute(cpu, inst)) != OK) {
+        if ((e = cpu_execute(cpu, insn)) != OK) {
             cpu_take_trap(cpu, e, NONE);
             if (exception_is_fatal(e))
                 break;
