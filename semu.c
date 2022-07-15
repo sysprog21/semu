@@ -6,6 +6,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef ENABLE_RISCV_TESTS
+#include "tests/test.h"
+#endif
+
 /* xv6 uses only 128MiB of memory. */
 #define RAM_SIZE (1024 * 1024 * 128)
 
@@ -120,6 +124,14 @@ struct ram *ram_new(const uint8_t *code, const size_t code_size)
     memcpy(ram->data, code, code_size);
     return ram;
 }
+
+#ifdef ENABLE_RISCV_TESTS
+void ram_free(struct ram *ram)
+{
+    free(ram->data);
+    free(ram);
+}
+#endif
 
 exception_t ram_load(const struct ram *ram,
                      const uint64_t addr,
@@ -621,9 +633,12 @@ void bus_disk_access(struct bus *bus)
 
 typedef enum { USER = 0x0, SUPERVISOR = 0x1, MACHINE = 0x3 } cpu_mode_t;
 
+#define NUM_REG 32
+#define NUM_CSR 4096
+
 struct cpu {
-    uint64_t regs[32], pc;
-    uint64_t csrs[4096];
+    uint64_t regs[NUM_REG], pc;
+    uint64_t csrs[NUM_CSR];
     cpu_mode_t mode;
     struct bus *bus;
     bool enable_paging;
@@ -1313,13 +1328,102 @@ size_t read_file(FILE *f, uint8_t **r)
     return fsize;
 }
 
-int main(int argc, char **argv)
+#ifdef ENABLE_RISCV_TESTS
+#define TOHOST_ADDR 0x80001000
+#define TOHOST_EXCEPTION_MAGIC 1337
+
+int semu_test_start(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("Usage: %s <filename> [<image>]\n", argv[0]);
-        return 2;
+    struct cpu *cpu = NULL;
+    uint64_t tohost = 0;
+
+    /* iterate test data */
+    for (int n = 0; n < n_riscv_tests; n++) {
+        FILE *f = fopen(riscv_tests[n].file_path, "rb");
+        if (!f)
+            fatal("open test binary file");
+
+        uint8_t *binary = NULL;
+        size_t fsize = read_file(f, &binary);
+        fclose(f);
+
+        if (!cpu) {
+            cpu = cpu_new(binary, fsize,
+                          NULL); /* allocate new CPU for first time */
+        } else {
+            /* Reset CPU and free RAM */
+            ram_free(cpu->bus->ram);
+            memset(cpu->regs, 0, NUM_REG * sizeof(cpu->regs[0]));
+            memset(cpu->csrs, 0, NUM_CSR * sizeof(cpu->csrs[0]));
+            cpu->regs[2] = RAM_BASE + RAM_SIZE;
+            cpu->pc = RAM_BASE, cpu->mode = MACHINE;
+            /* New RAM content */
+            cpu->bus->ram = ram_new(binary, fsize);
+        }
+        free(binary);
+
+        while (1) {
+            /*
+             * Once the test is done, the test binary writes a value into
+             * tohost variable, which is located at address 0x80001000.
+             *
+             * When each test stars, tohost will be initialized as 0.
+             * If tohost is changed to 1, it menas SEMU passes all the test.
+             * If tohost is less than 1337, the fail test number will be
+             * (tohost >> 1)
+             * If tohost is greater than 1337, there are some exceptions
+             * occurred.
+             */
+            if (bus_load(cpu->bus, TOHOST_ADDR, 64, &tohost) != OK)
+                break;
+            if (tohost != 0)
+                break;
+
+            /* Fetch instruction */
+            uint64_t insn;
+            exception_t e;
+            if ((e = cpu_fetch(cpu, &insn)) != OK) {
+                cpu_take_trap(cpu, e, NONE);
+                if (exception_is_fatal(e))
+                    break;
+                insn = 0;
+            }
+
+            cpu->pc += 4; /* advance pc */
+
+            /* decode and execute */
+            if ((e = cpu_execute(cpu, insn)) != OK) {
+                cpu_take_trap(cpu, e, NONE);
+                if (exception_is_fatal(e))
+                    break;
+            }
+        }
+
+        /*
+         * Test result is stored at a0 (x10).
+         * The riscv-tests set a0 to 0 when all tests pass.
+         * Otherwise it indicates a failure or exception.
+         */
+        if (cpu->regs[10] == 0) {
+            riscv_tests[n].result = TEST_PASS;
+        } else {
+            printf("\nTest binary %s fail...\n", riscv_tests[n].name);
+            printf("a0 = 0x%lx\n", cpu->regs[10]);
+            printf("tohost = 0x%lx\n", tohost);
+            if (tohost < TOHOST_EXCEPTION_MAGIC)
+                printf("Fail test case = %ld.\n", tohost >> 1);
+            else
+                printf("An exception occurred.\n");
+        }
     }
 
+    print_test_result();
+    return 0;
+}
+#endif
+
+int semu_start(int argc, char **argv)
+{
     FILE *f = fopen(argv[1], "rb");
     if (!f)
         fatal("open kernel image file");
@@ -1365,4 +1469,21 @@ int main(int argc, char **argv)
     }
 
     return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: %s <filename> [<image>]\n", argv[0]);
+#ifdef ENABLE_RISCV_TESTS
+        printf("Usage: %s --test\n", argv[0]);
+#endif
+        return 2;
+    }
+
+#ifdef ENABLE_RISCV_TESTS
+    if (!strncmp(argv[1], "--test", 6))
+        return semu_test_start(argc, argv);
+#endif
+    return semu_start(argc, argv);
 }
