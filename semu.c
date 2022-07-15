@@ -1,3 +1,4 @@
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -304,9 +305,15 @@ static void *uart_thread_func(void *priv)
 {
     struct uart *uart = (struct uart *) priv;
     while (1) {
+        struct pollfd pfd = {0, POLLIN, 0};
+        poll(&pfd, 1, 0);
+        if (!(pfd.revents & POLLIN))
+            continue;
+
         char c;
         if (read(STDIN_FILENO, &c, 1) <= 0) /* an error or EOF */
             continue;
+
         pthread_mutex_lock(&uart->lock);
         while ((uart->data[UART_LSR - UART_BASE] & UART_LSR_RX) == 1)
             pthread_cond_wait(&uart->cond, &uart->lock);
