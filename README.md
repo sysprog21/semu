@@ -40,6 +40,23 @@ init: starting sh
 $
 ```
 
+## RISC-V ISA Coverage Test
+
+Although `semu` was intended to run xv6 with minimal efforts, it would be still better if we can validate the ISA compatibility.
+The support of [riscv-tests](https://github.com/riscv-software-src/riscv-tests) is integrated, and you should set up [RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) in advance.
+You can obtain prebuilt GNU toolchain for `riscv64` via [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
+Then, run the following command:
+```shell
+$ make riscv-tests
+```
+
+You can check the generated report as following:
+```
+=======================
+Test result: 53/71
+=======================
+```
+
 ## Acknowledgements
 
 `semu` is inspired by [rvemu](https://github.com/d0iasm/rvemu).
