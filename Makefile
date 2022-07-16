@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS = -O2 -Wall
 LDFLAGS = -lpthread
 
-# For compiling riscv-tests
+# For building riscv-tests
 CROSS_COMPILE ?= riscv64-unknown-elf-
 
 CUR_DIR := $(shell pwd)
@@ -37,12 +37,12 @@ kernel.bin:
 check: all kernel.bin
 	./semu kernel.bin fs.img
 
-tests/riscv-tests/configure:
+$(RISCV_TESTS_DIR)/configure:
 	git submodule update --init --recursive
 
 # Fetch and build riscv-tests project
 # Transform the original elf format to binary format
-build-riscv-tests: tests/riscv-tests/configure
+build-riscv-tests: $(RISCV_TESTS_DIR)/configure
 	cd $(RISCV_TESTS_DIR); autoconf; ./configure --prefix=$(RISCV_TESTS_TARGET_DIR)
 	$(MAKE) -C $(RISCV_TESTS_DIR)
 	$(MAKE) -C $(RISCV_TESTS_DIR) install

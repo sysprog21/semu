@@ -7,10 +7,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#ifdef ENABLE_RISCV_TESTS
-#include "tests/test.h"
-#endif
-
 /* xv6 uses only 128MiB of memory. */
 #define RAM_SIZE (1024 * 1024 * 128)
 
@@ -1336,6 +1332,7 @@ size_t read_file(FILE *f, uint8_t **r)
 }
 
 #ifdef ENABLE_RISCV_TESTS
+#include "tests/test.h"
 #define TOHOST_ADDR 0x80001000
 #define TOHOST_EXCEPTION_MAGIC 1337
 
