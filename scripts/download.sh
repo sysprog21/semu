@@ -10,8 +10,14 @@ ROOTFS_CHECKSUM=27fd366b4383f1176f44095fa270d23e9b3f4deb
 
 echo "Downloading..."
 
-wget -q -c $BASE_URL/kernel.bin || exit 1
+if [[ $OSTYPE == 'darwin'* ]]; then
+	DOWNLOAD_CMD="curl -s -O -L -C -"
+else
+	DOWNLOAD_CMD="wget -q -c"
+fi
+
+$DOWNLOAD_CMD $BASE_URL/kernel.bin || exit 1
 echo "${KERNEL_CHECKSUM}  kernel.bin" | shasum -c || exit 1
 
-wget -q -c $BASE_URL/fs.img || exit 1
+$DOWNLOAD_CMD $BASE_URL/fs.img || exit 1
 echo "${ROOTFS_CHECKSUM}  fs.img" | shasum -c || exit 1
