@@ -47,6 +47,7 @@ The support of [riscv-tests](https://github.com/riscv-software-src/riscv-tests) 
 You can obtain prebuilt GNU toolchain for `riscv64` via [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
 Then, run the following command:
 ```shell
+$ make ENABLE_RISCV_TESTS=1 clean all
 $ make riscv-tests
 ```
 
