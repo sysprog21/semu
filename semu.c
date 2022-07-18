@@ -976,7 +976,7 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
             if ((e = cpu_store(cpu, cpu->regs[rs1], 32, t + cpu->regs[rs2])) !=
                 OK)
                 return e;
-            cpu->regs[rd] = t;
+            cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x00) { /* amoadd.d */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
@@ -991,7 +991,7 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             if ((e = cpu_store(cpu, cpu->regs[rs1], 32, cpu->regs[rs2])) != OK)
                 return e;
-            cpu->regs[rd] = t;
+            cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x01) { /* amoswap.d */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
