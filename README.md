@@ -54,7 +54,7 @@ $ make riscv-tests
 You can check the generated report as following:
 ```
 =======================
-Test result: 53/71
+Test result: 55/71
 =======================
 ```
 
