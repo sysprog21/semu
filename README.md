@@ -52,10 +52,42 @@ $ make riscv-tests
 ```
 
 You can check the generated report as following:
+```shell
+[==========] Running 71 test(s) from riscv-tests.
+[ RUN      ] rv64ui_p_add
+[       OK ] rv64ui_p_add
+[ RUN      ] rv64ui_p_addi
+[       OK ] rv64ui_p_addi
+
+...
+
+[ RUN      ] rv64ua_p_lrsc
+  a0 = 0x80002008
+  tohost = 0x53b
+  An exception occurred.
+[  FAILED  ] rv64ua_p_lrsc
+[==========] 71 test(s) from riscv-tests ran.
+[  PASSED  ] 55 test(s).
+[  FAILED  ] 16 test(s), listed below:
+[  FAILED  ] rv64ui_p_fence_i
+[  FAILED  ] rv64ua_p_amoand_d
+...
 ```
-=======================
-Test result: 55/71
-=======================
+
+If you want to execute a specific test instead of the whole test, please run the following command:
+```shell
+$ ./semu --test <test_case_name>
+```
+
+You can refer to `tests/isa-test.c` for the name of specific test case.
+Take `rv64ui_p_add` for example, the report would be:
+```shell
+$ ./semu --test rv64ui_p_add
+[==========] Running 1 test(s) from riscv-tests.
+[ RUN      ] rv64ui_p_add
+[       OK ] rv64ui_p_add
+[==========] 1 test(s) from riscv-tests ran.
+[  PASSED  ] 1 test(s).
 ```
 
 ## Acknowledgements

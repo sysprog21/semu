@@ -1,3 +1,5 @@
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "test.h"
@@ -85,20 +87,61 @@ const int n_riscv_tests = sizeof(riscv_tests) / sizeof(struct testdata);
 #define C_DR "\033[0;31m" /* Dark Red */
 #define C_DG "\033[0;32m" /* Dark Green */
 
-void print_test_result(void)
+void print_test_iter_start(int n_test)
 {
-    int pass = 0;
+    printf(C_DG "[==========] " C_RST);
+    printf("Running %d test(s) from riscv-tests.\n", n_test);
+}
 
+void print_test_start(struct testdata *test)
+{
+    printf(C_DG "[ RUN      ] " C_RST);
+    printf("%s\n", test->name);
+}
+
+void print_test_end(struct testdata *test, uint64_t a0, uint64_t tohost)
+{
+#define TOHOST_EXCEPTION_MAGIC 1337
+
+    if (test->result == TEST_Passed) {
+        printf(C_DG "[       OK ] " C_RST);
+    } else {
+        printf("  a0 = 0x%lx\n", a0);
+        printf("  tohost = 0x%lx\n", tohost);
+        if (tohost < TOHOST_EXCEPTION_MAGIC)
+            printf("  Fail test case = %ld.\n", tohost >> 1);
+        else
+            printf("  An exception occurred.\n");
+        printf(C_DR "[  FAILED  ] " C_RST);
+    }
+    printf("%s\n", test->name);
+}
+
+void print_test_iter_end(int n_tested)
+{
+    int n_pass = 0;
+
+    printf(C_DG "[==========] " C_RST);
+    printf("%d test(s) from riscv-tests ran.\n", n_tested);
+
+    /* Count how many tests are passed. */
     for (int n = 0; n < n_riscv_tests; n++) {
-        if (riscv_tests[n].result != TEST_PASS) {
-            printf(C_DR "Fail: %s" C_RST "\n", riscv_tests[n].name);
-        } else {
-            printf(C_DG "Pass: %s" C_RST "\n", riscv_tests[n].name);
-            pass++;
-        }
+        if (riscv_tests[n].result == TEST_Passed)
+            n_pass++;
     }
 
-    puts("\n=======================");
-    printf("Test result: %d/%d\n", pass, n_riscv_tests);
-    puts("=======================");
+    printf(C_DG "[  PASSED  ] " C_RST);
+    printf("%d test(s).\n", n_pass);
+
+    /* If there are some failed tests, we print them. */
+    if (n_pass != n_tested) {
+        printf(C_DR "[  FAILED  ] " C_RST);
+        printf("%d test(s), listed below:\n", n_tested - n_pass);
+        for (int n = 0; n < n_riscv_tests; n++) {
+            if (riscv_tests[n].result == TEST_Failed) {
+                printf(C_DR "[  FAILED  ] " C_RST);
+                printf("%s\n", riscv_tests[n].name);
+            }
+        }
+    }
 }

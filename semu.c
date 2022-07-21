@@ -1334,94 +1334,109 @@ size_t read_file(FILE *f, uint8_t **r)
 #ifdef ENABLE_RISCV_TESTS
 #include "tests/test.h"
 #define TOHOST_ADDR 0x80001000
-#define TOHOST_EXCEPTION_MAGIC 1337
+
+void run_riscv_test(struct cpu *cpu, int idx)
+{
+    uint64_t tohost;
+
+    FILE *f = fopen(riscv_tests[idx].file_path, "rb");
+    if (!f)
+        fatal("open test binary file");
+
+    uint8_t *binary = NULL;
+    size_t fsize = read_file(f, &binary);
+    fclose(f);
+
+    if (!cpu) {
+        /* allocate new CPU for first time */
+        cpu = cpu_new(binary, fsize, NULL);
+    } else {
+        /* Reset CPU and free RAM */
+        ram_free(cpu->bus->ram);
+        memset(cpu->regs, 0, NUM_REG * sizeof(cpu->regs[0]));
+        memset(cpu->csrs, 0, NUM_CSR * sizeof(cpu->csrs[0]));
+        cpu->regs[2] = RAM_BASE + RAM_SIZE;
+        cpu->pc = RAM_BASE, cpu->mode = MACHINE;
+        /* New RAM content */
+        cpu->bus->ram = ram_new(binary, fsize);
+    }
+    free(binary);
+
+    print_test_start(&riscv_tests[idx]);
+    while (1) {
+        /*
+         * Once the test is done, the test binary writes a value into
+         * tohost variable, which is located at address 0x80001000.
+         *
+         * When each test stars, tohost will be initialized as 0.
+         * If tohost is changed to 1, it menas SEMU passes all the test.
+         * If tohost is less than 1337, the fail test number will be
+         * (tohost >> 1)
+         * If tohost is greater than 1337, there are some exceptions
+         * occurred.
+         */
+        if (bus_load(cpu->bus, TOHOST_ADDR, 64, &tohost) != OK)
+            break;
+        if (tohost != 0)
+            break;
+
+        /* Fetch instruction */
+        uint64_t insn;
+        exception_t e;
+        if ((e = cpu_fetch(cpu, &insn)) != OK) {
+            cpu_take_trap(cpu, e, NONE);
+            if (exception_is_fatal(e))
+                break;
+            insn = 0;
+        }
+
+        cpu->pc += 4; /* advance pc */
+
+        /* decode and execute */
+        if ((e = cpu_execute(cpu, insn)) != OK) {
+            cpu_take_trap(cpu, e, NONE);
+            if (exception_is_fatal(e))
+                break;
+        }
+    }
+
+    /*
+     * Test result is stored at a0 (x10).
+     * The riscv-tests set a0 to 0 when all tests pass.
+     * Otherwise it indicates a failure or exception.
+     */
+    riscv_tests[idx].result = (cpu->regs[10] == 0) ? TEST_Passed : TEST_Failed;
+    print_test_end(&riscv_tests[idx], cpu->regs[10], tohost);
+}
 
 int semu_test_start(int argc, char **argv)
 {
     struct cpu *cpu = NULL;
-    uint64_t tohost = 0;
 
-    /* iterate test data */
-    for (int n = 0; n < n_riscv_tests; n++) {
-        FILE *f = fopen(riscv_tests[n].file_path, "rb");
-        if (!f)
-            fatal("open test binary file");
-
-        uint8_t *binary = NULL;
-        size_t fsize = read_file(f, &binary);
-        fclose(f);
-
-        if (!cpu) {
-            cpu = cpu_new(binary, fsize,
-                          NULL); /* allocate new CPU for first time */
-        } else {
-            /* Reset CPU and free RAM */
-            ram_free(cpu->bus->ram);
-            memset(cpu->regs, 0, NUM_REG * sizeof(cpu->regs[0]));
-            memset(cpu->csrs, 0, NUM_CSR * sizeof(cpu->csrs[0]));
-            cpu->regs[2] = RAM_BASE + RAM_SIZE;
-            cpu->pc = RAM_BASE, cpu->mode = MACHINE;
-            /* New RAM content */
-            cpu->bus->ram = ram_new(binary, fsize);
-        }
-        free(binary);
-
-        while (1) {
-            /*
-             * Once the test is done, the test binary writes a value into
-             * tohost variable, which is located at address 0x80001000.
-             *
-             * When each test stars, tohost will be initialized as 0.
-             * If tohost is changed to 1, it menas SEMU passes all the test.
-             * If tohost is less than 1337, the fail test number will be
-             * (tohost >> 1)
-             * If tohost is greater than 1337, there are some exceptions
-             * occurred.
-             */
-            if (bus_load(cpu->bus, TOHOST_ADDR, 64, &tohost) != OK)
+    if (argc == 3) {
+        /* test one case */
+        int idx = 0;
+        for (idx = 0; idx < n_riscv_tests; idx++) {
+            if (strlen(argv[2]) == strlen(riscv_tests[idx].name) &&
+                !strncmp(argv[2], riscv_tests[idx].name,
+                         strlen(riscv_tests[idx].name)))
                 break;
-            if (tohost != 0)
-                break;
-
-            /* Fetch instruction */
-            uint64_t insn;
-            exception_t e;
-            if ((e = cpu_fetch(cpu, &insn)) != OK) {
-                cpu_take_trap(cpu, e, NONE);
-                if (exception_is_fatal(e))
-                    break;
-                insn = 0;
-            }
-
-            cpu->pc += 4; /* advance pc */
-
-            /* decode and execute */
-            if ((e = cpu_execute(cpu, insn)) != OK) {
-                cpu_take_trap(cpu, e, NONE);
-                if (exception_is_fatal(e))
-                    break;
-            }
         }
 
-        /*
-         * Test result is stored at a0 (x10).
-         * The riscv-tests set a0 to 0 when all tests pass.
-         * Otherwise it indicates a failure or exception.
-         */
-        if (cpu->regs[10] == 0) {
-            riscv_tests[n].result = TEST_PASS;
-        } else {
-            printf("\nTest binary %s fail...\n", riscv_tests[n].name);
-            printf("a0 = 0x%lx\n", cpu->regs[10]);
-            printf("tohost = 0x%lx\n", tohost);
-            if (tohost < TOHOST_EXCEPTION_MAGIC)
-                printf("Fail test case = %ld.\n", tohost >> 1);
-            else
-                printf("An exception occurred.\n");
-        }
+        if (idx == n_riscv_tests)
+            fatal("find specific test data");
+
+        print_test_iter_start(1);
+        run_riscv_test(cpu, idx);
+        print_test_iter_end(1);
+    } else {
+        /* test all */
+        print_test_iter_start(n_riscv_tests);
+        for (int n = 0; n < n_riscv_tests; n++)
+            run_riscv_test(cpu, n);
+        print_test_iter_end(n_riscv_tests);
     }
 
-    print_test_result();
     return 0;
 }
 #endif
