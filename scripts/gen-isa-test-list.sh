@@ -2,11 +2,10 @@
 
 function parse-tests()
 {
-    > contributors
+    # TODO: cache the parsed test items
     while read -r line; do
-	item=$(echo "$line" | awk -F "(" '{print $2}' | awk -F ")" '{print $1}')
-        echo "$item"
-    done <<< $(grep "ADD_INSN_TEST" tests/isa-test.c )
+	echo "$line" | awk -F "(" '{print $2}' | awk -F ")" '{print $1}'
+    done <<< $(grep "ADD_INSN_TEST" tests/isa-test.c)
 }
 
 parse-tests
