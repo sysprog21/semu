@@ -1495,14 +1495,17 @@ int main(int argc, char **argv)
     if (argc < 2) {
         printf("Usage: %s <filename> [<image>]\n", argv[0]);
 #ifdef ENABLE_RISCV_TESTS
-        printf("Usage: %s --test\n", argv[0]);
+        printf("Usage: %s --test [<item>]\n", argv[0]);
 #endif
         return 2;
     }
 
+    if (!strncmp(argv[1], "--test", 6)) {
 #ifdef ENABLE_RISCV_TESTS
-    if (!strncmp(argv[1], "--test", 6))
         return semu_test_start(argc, argv);
 #endif
+        /* Warn if ENABLE_RISCV_TESTS is not set */
+        fatal("run riscv-tests. Rebuild with ENABLE_RISCV_TESTS=1");
+    }
     return semu_start(argc, argv);
 }
