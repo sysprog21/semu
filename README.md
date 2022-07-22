@@ -47,30 +47,29 @@ The support of [riscv-tests](https://github.com/riscv-software-src/riscv-tests) 
 You can obtain prebuilt GNU toolchain for `riscv64` via [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
 Then, run the following command:
 ```shell
-$ make ENABLE_RISCV_TESTS=1 clean all
-$ make riscv-tests
+$ make ENABLE_RISCV_TESTS=1 clean run-tests
 ```
 
 You can check the generated report as following:
 ```shell
 [==========] Running 71 test(s) from riscv-tests.
-[ RUN      ] rv64ui_p_add
-[       OK ] rv64ui_p_add
-[ RUN      ] rv64ui_p_addi
-[       OK ] rv64ui_p_addi
+[ RUN      ] rv64ui-p-add
+[       OK ] rv64ui-p-add
+[ RUN      ] rv64ui-p-addi
+[       OK ] rv64ui-p-addi
 
 ...
 
-[ RUN      ] rv64ua_p_lrsc
+[ RUN      ] rv64ua-p-lrsc
   a0 = 0x80002008
   tohost = 0x53b
   An exception occurred.
-[  FAILED  ] rv64ua_p_lrsc
+[  FAILED  ] rv64ua-p-lrsc
 [==========] 71 test(s) from riscv-tests ran.
 [  PASSED  ] 55 test(s).
 [  FAILED  ] 16 test(s), listed below:
-[  FAILED  ] rv64ui_p_fence_i
-[  FAILED  ] rv64ua_p_amoand_d
+[  FAILED  ] rv64ui-p-fence_i
+[  FAILED  ] rv64ua-p-amoand_d
 ...
 ```
 

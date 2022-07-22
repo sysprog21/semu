@@ -7,3 +7,6 @@ semu
 # xv6
 kernel.bin
 fs.img
+
+# riscv-tests
+tests/riscv-tests-data
