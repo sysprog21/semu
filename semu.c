@@ -1401,11 +1401,11 @@ void run_riscv_test(struct cpu *cpu, int idx)
     }
 
     /*
-     * Test result is stored at a0 (x10).
-     * The riscv-tests set a0 to 0 when all tests pass.
-     * Otherwise it indicates a failure or exception.
+     * The riscv-tests set a0 to 0 and tohost to 1 when all tests are
+     * successful. Otherwise it indicates a failure or exception.
      */
-    riscv_tests[idx].result = (cpu->regs[10] == 0) ? TEST_Passed : TEST_Failed;
+    bool success = (cpu->regs[10] == 0) && (tohost == 1);
+    riscv_tests[idx].result = success ? TEST_Passed : TEST_Failed;
     print_test_end(&riscv_tests[idx], cpu->regs[10], tohost);
 }
 
