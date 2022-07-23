@@ -79,12 +79,12 @@ $ ./semu --test <test_case_name>
 ```
 
 You can refer to `tests/isa-test.c` for the name of specific test case.
-Take `rv64ui_p_add` for example, the report would be:
+Take `rv64ui-p-add` for example, the report would be:
 ```shell
-$ ./semu --test rv64ui_p_add
+$ ./semu --test rv64ui-p-add
 [==========] Running 1 test(s) from riscv-tests.
-[ RUN      ] rv64ui_p_add
-[       OK ] rv64ui_p_add
+[ RUN      ] rv64ui-p-add
+[       OK ] rv64ui-p-add
 [==========] 1 test(s) from riscv-tests ran.
 [  PASSED  ] 1 test(s).
 ```
