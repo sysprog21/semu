@@ -9,7 +9,6 @@ struct testdata riscv_tests[] = {
     /* rv64ui-p-* */
     ADD_INSN_TEST(rv64ui-p-add),
     ADD_INSN_TEST(rv64ui-p-addi),
-    ADD_INSN_TEST(rv64ui-p-addi),
     ADD_INSN_TEST(rv64ui-p-addiw),
     ADD_INSN_TEST(rv64ui-p-addw),
     ADD_INSN_TEST(rv64ui-p-and),
