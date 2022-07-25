@@ -58,6 +58,10 @@ enum { VIRTIO_VRING_DESC_SIZE = 16, VIRTIO_DESC_NUM = 8 };
 #define RANGE_CHECK(x, minx, size) \
     ((int32_t) ((x - minx) | (minx + size - 1 - x)) >= 0)
 
+/* CSR is Control Status Register representation in RISC-V privileged
+ * architecture.
+ */
+
 /* Machine level CSRs */
 enum { MSTATUS = 0x300, MEDELEG = 0x302, MIDELEG, MIE, MTVEC };
 enum { MEPC = 0x341, MCAUSE, MTVAL, MIP };
@@ -634,14 +638,19 @@ void bus_disk_access(struct bus *bus)
         fatal("write to RAM");
 }
 
+/* USER is a mode for application which runs on operating system.
+ * SUPERVISOR is a mode for operating system.
+ * MACHINE is a mode for RISC-V hart internal operation, sometimes called
+ * kernal-mode or protect-mode in other architecture.
+ */
 typedef enum { USER = 0x0, SUPERVISOR = 0x1, MACHINE = 0x3 } cpu_mode_t;
 
-#define NUM_REG 32
-#define NUM_CSR 4096
+#define N_REG 32
+#define N_CSR 4096 /**< The number of CSR registers. */
 
 struct cpu {
-    uint64_t regs[NUM_REG], pc;
-    uint64_t csrs[NUM_CSR];
+    uint64_t regs[N_REG], pc;
+    uint64_t csrs[N_CSR];
     cpu_mode_t mode;
     struct bus *bus;
     bool enable_paging;
@@ -1356,8 +1365,8 @@ void run_riscv_test(struct cpu *cpu, int idx)
     } else {
         /* Reset CPU and free RAM */
         ram_free(cpu->bus->ram);
-        memset(cpu->regs, 0, NUM_REG * sizeof(cpu->regs[0]));
-        memset(cpu->csrs, 0, NUM_CSR * sizeof(cpu->csrs[0]));
+        memset(cpu->regs, 0, N_REG * sizeof(cpu->regs[0]));
+        memset(cpu->csrs, 0, N_CSR * sizeof(cpu->csrs[0]));
         cpu->regs[2] = RAM_BASE + RAM_SIZE;
         cpu->pc = RAM_BASE, cpu->mode = MACHINE;
         /* New RAM content */
