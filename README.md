@@ -89,6 +89,24 @@ $ ./semu --test rv64ui-p-add
 [  PASSED  ] 1 test(s).
 ```
 
+### Note for macOS users
+On macOS, `md5sum` is no longer installed by default so you might run into errors like below while running RISC-V tests.
+```shell
+semu/tests/riscv-tests/isa/../env/v/vm.c: In function 'vm_boot':
+<command-line>: error: invalid suffix "x" on integer constant
+semu/tests/riscv-tests/isa/../env/v/vm.c:228:21: note: in expansion of macro 'ENTROPY'
+  228 |   uint64_t random = ENTROPY;
+      |                     ^~~~~~~
+```
+It is because of how `ENTROPY` was defined in [riscv-test/isa/Makefile](https://github.com/riscv-software-src/riscv-tests/blob/74a62ef0f3eefa759c1c49ae1c756879232f96da/isa/Makefile#L64)
+
+```
+-DENTROPY=0x$$(shell echo \$$@ | md5sum | cut -c 1-7)
+```
+
+You can fix it by `brew install md5sha1sum`, see [reference](https://github.com/riscv-software-src/riscv-tests/issues/190).
+
+
 ## Acknowledgements
 
 `semu` is inspired by [rvemu](https://github.com/d0iasm/rvemu).
