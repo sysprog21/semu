@@ -1337,6 +1337,9 @@ size_t read_file(FILE *f, uint8_t **r)
 
 void run_riscv_test(struct cpu *cpu, int idx)
 {
+    /* tohost is an special address which shows a message from program to the
+     * host. For now, tohost is used to terminate the execution of riscv-tests.
+     */
     uint64_t tohost;
 
     FILE *f = fopen(riscv_tests[idx].file_path, "rb");
@@ -1363,6 +1366,12 @@ void run_riscv_test(struct cpu *cpu, int idx)
     free(binary);
 
     print_test_start(&riscv_tests[idx]);
+    /* Start the emulator fetch-decode-exec cycle.
+     *
+     * It runs a loop until a fatal trap occurs. Meanwhile, it optionally
+     * can stop running if the given binary contains .tohost address,
+     * which is a part of RISC-V specification.
+     */
     while (1) {
         /*
          * Once the test is done, the test binary writes a value into
