@@ -1,3 +1,5 @@
+include mk/common.mk
+
 CC ?= gcc
 CFLAGS = -O2 -Wall
 LDFLAGS = -lpthread
@@ -17,49 +19,33 @@ CFLAGS += -DENABLE_RISCV_TESTS
 OBJS += tests/isa-test.o
 endif
 
+deps := $(OBJS:%.o=%.o.d)
+
 %.o: %.c
-	$(CC) -o $@ $(CFLAGS) -c $<
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS)
+	$(VECHO) "  LD\t$@\n"
+	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
-kernel.bin:
-	scripts/download.sh
+# Rules for downloading xv6 kernel and root file system
+include mk/external.mk
 
-check: all kernel.bin
-	./semu kernel.bin fs.img
+check: $(BIN) $(KERNEL_DATA) $(ROOTFS_DATA)
+	@$(call notice, Ready to launch xv6. Please be patient.)
+	$(Q)./$(BIN) $(KERNEL_DATA) $(ROOTFS_DATA)
 
-RISCV_TESTS_DIR := tests/riscv-tests
-RISCV_TESTS_ISA_DIR := $(RISCV_TESTS_DIR)/isa
-RISCV_TESTS_BIN_DIR := tests/riscv-tests-data
-
-$(RISCV_TESTS_DIR)/configure:
-	git submodule update --init --recursive
-
-RISCV_TESTS_LIST := $(shell scripts/gen-isa-test-list.sh)
-RISCV_TESTS_BINS := $(addprefix $(RISCV_TESTS_BIN_DIR)/, $(RISCV_TESTS_LIST))
-
-# Build riscv-tests
-# FIXME: make it more generic without specifying rv64ui-p-add
-$(RISCV_TESTS_ISA_DIR)/rv64ui-p-add: $(RISCV_TESTS_DIR)/configure
-	cd $(RISCV_TESTS_DIR); ./configure
-	$(MAKE) -C $(RISCV_TESTS_DIR) isa -j$(shell nproc)
-
-# Convert generated ELF files to raw binary
-$(RISCV_TESTS_BIN_DIR)/rv64%: $(RISCV_TESTS_ISA_DIR)/rv64%
-	mkdir -p $(RISCV_TESTS_BIN_DIR)
-	$(CROSS_COMPILE)objcopy -O binary $^ $@
-
-ifeq ("$(ENABLE_RISCV_TESTS)", "1")
-run-tests: $(BIN) $(RISCV_TESTS_BINS)
-	./semu --test
-endif
+# unit tests for RISC-V processors
+include mk/riscv-tests.mk
 
 clean:
-	rm -f $(BIN) $(OBJS)
+	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
-	rm -f kernel.bin fs.img
-	-$(MAKE) -C tests/riscv-tests/isa clean
-	rm -rf $(RISCV_TESTS_BIN_DIR)
+	$(Q)rm -rf $(KERNEL_DATA) $(ROOTFS_DATA)
+	-$(Q)$(MAKE) -C tests/riscv-tests/isa clean $(REDIR)
+	$(Q)rm -rf $(RISCV_TESTS_BIN_DIR)
+
+-include $(deps)

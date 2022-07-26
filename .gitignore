@@ -2,6 +2,7 @@ semu
 .vscode
 .dbg.
 *.o
+*.o.d
 *.dSYM
 
 # xv6
