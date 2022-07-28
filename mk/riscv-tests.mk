@@ -16,7 +16,7 @@ ifndef CROSS_COMPILE
 	$(error "GNU Toolchain for RISC-V is required. Please check package installation")
 endif
 	$(VECHO) "Building riscv-tests...\n"
-	$(Q)$(cd $(RISCV_TESTS_DIR); ./configure) $(REDIR)
+	$(Q) cd $(RISCV_TESTS_DIR); ./configure $(REDIR)
 	$(Q)$(MAKE) -C $(RISCV_TESTS_DIR) RISCV_PREFIX=$(CROSS_COMPILE) isa -j $(shell nproc) $(REDIR)
 
 # Convert generated ELF files to raw binary
