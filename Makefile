@@ -45,7 +45,7 @@ clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
 	$(Q)rm -rf $(KERNEL_DATA) $(ROOTFS_DATA)
-	-$(Q)$(MAKE) -C tests/riscv-tests/isa clean $(REDIR)
+	-$(Q)$(MAKE) -C $(RISCV_TESTS_DIR)/isa clean $(REDIR)
 	$(Q)rm -rf $(RISCV_TESTS_BIN_DIR)
 
 -include $(deps)
