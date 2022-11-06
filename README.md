@@ -52,7 +52,7 @@ $ make ENABLE_RISCV_TESTS=1 clean run-tests
 
 You can check the generated report as following:
 ```shell
-[==========] Running 70 test(s) from riscv-tests.
+[==========] Running 83 test(s) from riscv-tests.
 [ RUN      ] rv64ui-p-add
 [       OK ] rv64ui-p-add
 [ RUN      ] rv64ui-p-addi
@@ -65,8 +65,8 @@ You can check the generated report as following:
   tohost = 0x53b
   An exception occurred.
 [  FAILED  ] rv64ua-p-lrsc
-[==========] 70 test(s) from riscv-tests ran.
-[  PASSED  ] 54 test(s).
+[==========] 83 test(s) from riscv-tests ran.
+[  PASSED  ] 67 test(s).
 [  FAILED  ] 16 test(s), listed below:
 [  FAILED  ] rv64ui-p-fence_i
 [  FAILED  ] rv64ua-p-amoand_d

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "mul128.h"
 
 /* xv6 uses only 128MiB of memory. */
 #define RAM_SIZE (1024 * 1024 * 128)
@@ -1023,21 +1024,77 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
             cpu->regs[rd] = cpu->regs[rs1] - cpu->regs[rs2];
         } else if (funct3 == 0x1 && funct7 == 0x00) { /* sll */
             cpu->regs[rd] = cpu->regs[rs1] << shamt;
+        } else if (funct3 == 0x1 && funct7 == 0x01) { /* mulh */
+#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__
+            cpu->regs[rd] = ((__int128) (int64_t) cpu->regs[rs1] *
+                             (__int128) (int64_t) cpu->regs[rs2]) >>
+                            64;
+#else
+            cpu->regs[rd] =
+                mulh((int64_t) cpu->regs[rs1], (int64_t) cpu->regs[rs2]);
+#endif
         } else if (funct3 == 0x2 && funct7 == 0x00) { /* slt */
             cpu->regs[rd] =
                 !!((int64_t) cpu->regs[rs1] < (int64_t) cpu->regs[rs2]);
+        } else if (funct3 == 0x2 && funct7 == 0x01) { /* mulhsu */
+#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__
+            cpu->regs[rd] = ((__int128) (int64_t) cpu->regs[rs1] *
+                             (unsigned __int128) cpu->regs[rs2]) >>
+                            64;
+#else
+            cpu->regs[rd] =
+                mulhsu((int64_t) cpu->regs[rs1], (uint64_t) cpu->regs[rs2]);
+#endif
         } else if (funct3 == 0x3 && funct7 == 0x00) { /* sltu */
             cpu->regs[rd] = !!(cpu->regs[rs1] < cpu->regs[rs2]);
+        } else if (funct3 == 0x3 && funct7 == 0x01) { /* mulhu */
+#if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__
+            cpu->regs[rd] = ((unsigned __int128) cpu->regs[rs1] *
+                             (unsigned __int128) cpu->regs[rs2]) >>
+                            64;
+#else
+            cpu->regs[rd] =
+                mulhu((uint64_t) cpu->regs[rs1], (uint64_t) cpu->regs[rs2]);
+
+#endif
         } else if (funct3 == 0x4 && funct7 == 0x00) { /* xor */
             cpu->regs[rd] = cpu->regs[rs1] ^ cpu->regs[rs2];
+        } else if (funct3 == 0x4 && funct7 == 0x01) { /* div */
+            int64_t dividend = (int64_t) cpu->regs[rs1];
+            int64_t divisor = (int64_t) cpu->regs[rs2];
+            if (divisor == 0) {
+                cpu->regs[rd] = -1;
+            } else if (dividend == INT64_MIN && divisor == -1) { /* overflow */
+                cpu->regs[rd] = INT64_MIN;
+            } else {
+                cpu->regs[rd] = dividend / divisor;
+            }
         } else if (funct3 == 0x5 && funct7 == 0x00) { /* srl */
             cpu->regs[rd] = cpu->regs[rs1] >> shamt;
+        } else if (funct3 == 0x5 && funct7 == 0x01) { /* divu */
+            cpu->regs[rd] = (cpu->regs[rs2] == 0)
+                                ? UINT64_MAX
+                                : (cpu->regs[rs1] / cpu->regs[rs2]);
         } else if (funct3 == 0x5 && funct7 == 0x20) { /* sra */
             cpu->regs[rd] = (int64_t) cpu->regs[rs1] >> shamt;
+        } else if (funct3 == 0x6 && funct7 == 0x01) { /* rem */
+            if (cpu->regs[rs2] == 0) {
+                cpu->regs[rd] = cpu->regs[rs1];
+            } else if ((int64_t) cpu->regs[rs1] == INT64_MIN &&
+                       (int64_t) cpu->regs[rs2] == -1) { /* overflow */
+                cpu->regs[rd] = 0;
+            } else {
+                cpu->regs[rd] =
+                    (int64_t) cpu->regs[rs1] % (int64_t) cpu->regs[rs2];
+            }
         } else if (funct3 == 0x6 && funct7 == 0x00) { /* or */
             cpu->regs[rd] = cpu->regs[rs1] | cpu->regs[rs2];
         } else if (funct3 == 0x7 && funct7 == 0x00) { /* and */
             cpu->regs[rd] = cpu->regs[rs1] & cpu->regs[rs2];
+        } else if (funct3 == 0x7 && funct7 == 0x01) { /* remu */
+            cpu->regs[rd] = (cpu->regs[rs2] == 0)
+                                ? cpu->regs[rs1]
+                                : (cpu->regs[rs1] % cpu->regs[rs2]);
         } else {
             return ILLEGAL_INSTRUCTION;
         }
@@ -1050,19 +1107,43 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
         uint32_t shamt = cpu->regs[rs2] & 0x1f;
         if (funct3 == 0x0 && funct7 == 0x00) { /* addw */
             cpu->regs[rd] = (int32_t) (cpu->regs[rs1] + cpu->regs[rs2]);
+        } else if (funct3 == 0x0 && funct7 == 0x01) { /* mulw */
+            cpu->regs[rd] = (int32_t) cpu->regs[rs1] * (int32_t) cpu->regs[rs2];
         } else if (funct3 == 0x0 && funct7 == 0x20) { /* subw */
             cpu->regs[rd] = (int32_t) (cpu->regs[rs1] - cpu->regs[rs2]);
         } else if (funct3 == 0x1 && funct7 == 0x00) { /* sllw */
             cpu->regs[rd] = (int32_t) ((uint32_t) cpu->regs[rs1] << shamt);
+        } else if (funct3 == 0x4 && funct7 == 0x01) { /* divw */
+            if (cpu->regs[rs2] == 0) {
+                cpu->regs[rd] = -1;
+            } else if ((int32_t) cpu->regs[rs1] == INT32_MIN &&
+                       (int32_t) cpu->regs[rs2] == -1) { /* overflow */
+                cpu->regs[rd] = INT32_MIN;
+            } else {
+                cpu->regs[rd] =
+                    (int32_t) cpu->regs[rs1] / (int32_t) cpu->regs[rs2];
+            }
         } else if (funct3 == 0x5 && funct7 == 0x00) { /* srlw */
             cpu->regs[rd] = (int32_t) ((uint32_t) cpu->regs[rs1] >> shamt);
-        } else if (funct3 == 0x5 && funct7 == 0x01) { /* divu */
-            cpu->regs[rd] =
-                cpu->regs[rs2] == 0 ? -1 : cpu->regs[rs1] / cpu->regs[rs2];
+        } else if (funct3 == 0x5 && funct7 == 0x01) { /* divuw */
+            cpu->regs[rd] = (cpu->regs[rs2] == 0)
+                                ? UINT64_MAX
+                                : (int32_t) ((uint32_t) cpu->regs[rs1] /
+                                             (uint32_t) cpu->regs[rs2]);
         } else if (funct3 == 0x5 && funct7 == 0x20) { /* sraw */
             cpu->regs[rd] = (int32_t) cpu->regs[rs1] >> (int32_t) shamt;
+        } else if (funct3 == 0x6 && funct7 == 0x01) { /* remw */
+            if (cpu->regs[rs2] == 0) {
+                cpu->regs[rd] = cpu->regs[rs1];
+            } else if ((int32_t) cpu->regs[rs1] == INT32_MIN &&
+                       (int32_t) cpu->regs[rs2] == -1) { /* overflow */
+                cpu->regs[rd] = 0;
+            } else {
+                cpu->regs[rd] =
+                    (int32_t) cpu->regs[rs1] % (int32_t) cpu->regs[rs2];
+            }
         } else if (funct3 == 0x7 && funct7 == 0x01) { /* remuw */
-            cpu->regs[rd] = cpu->regs[rs2] == 0
+            cpu->regs[rd] = (cpu->regs[rs2] == 0)
                                 ? cpu->regs[rs1]
                                 : (int32_t) ((uint32_t) cpu->regs[rs1] %
                                              (uint32_t) cpu->regs[rs2]);
