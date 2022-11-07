@@ -115,6 +115,12 @@ typedef enum {
         _a < _b ? _a : _b;      \
     })
 
+/* Check alignement of the address (Assume alignment is a power of 2.)
+ * x is the address to be checked.
+ * a is the alignment constaint and must be power of 2.
+ */
+#define IS_ALIGNED(x, a) (((x) & ((typeof(x)) (a) -1)) == 0)
+
 bool exception_is_fatal(const exception_t e)
 {
     switch (e) {
@@ -996,6 +1002,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
     case 0x2f: {
         uint64_t funct5 = (funct7 & 0x7c) >> 2;
         if (funct3 == 0x2 && funct5 == 0x00) { /* amoadd.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1004,6 +1012,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x01) { /* amoswap.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1011,6 +1021,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x04) { /* amoxor.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1019,6 +1031,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x08) { /* amoor.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1027,6 +1041,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x0c) { /* amoand.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1035,6 +1051,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x10) { /* amomin.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1043,6 +1061,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x14) { /* amomax.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1051,6 +1071,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x18) { /* amominu.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1059,6 +1081,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x1c) { /* amomaxu.w */
+            if (!IS_ALIGNED(cpu->regs[rs1], 4))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
@@ -1067,6 +1091,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x00) { /* amoadd.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1075,6 +1101,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x01) { /* amoswap.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1082,6 +1110,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x04) { /* amoxor.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1090,6 +1120,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x08) { /* amoor.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1098,6 +1130,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x0c) { /* amoand.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1106,6 +1140,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x10) { /* amomin.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1114,6 +1150,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x14) { /* amomax.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1122,6 +1160,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x18) { /* amominu.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t, min;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
@@ -1130,6 +1170,8 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x1c) { /* amomaxu.d */
+            if (!IS_ALIGNED(cpu->regs[rs1], 8))
+                return LOAD_ADDRESS_MISALIGNED;
             uint64_t t, max;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
