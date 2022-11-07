@@ -101,14 +101,14 @@ typedef enum {
     MACHINE_EXTERNAL_INTERRUPT = 11,
 } interrupt_t;
 
-#define max(a, b)               \
+#define MAX(a, b)               \
     ({                          \
         __typeof__(a) _a = (a); \
         __typeof__(b) _b = (b); \
         _a > _b ? _a : _b;      \
     })
 
-#define min(a, b)               \
+#define MIN(a, b)               \
     ({                          \
         __typeof__(a) _a = (a); \
         __typeof__(b) _b = (b); \
@@ -1038,32 +1038,32 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
-            int32_t minimum = min((int32_t) t, (int32_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, minimum)) != OK)
+            int32_t min = MIN((int32_t) t, (int32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, min)) != OK)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x14) { /* amomax.w */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
-            int32_t maximum = max((int32_t) t, (int32_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, maximum)) != OK)
+            int32_t max = MAX((int32_t) t, (int32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, max)) != OK)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x18) { /* amominu.w */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
-            uint32_t minimum = min((uint32_t) t, (uint32_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, minimum)) != OK)
+            uint32_t min = MIN((uint32_t) t, (uint32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, min)) != OK)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x2 && funct5 == 0x1c) { /* amomaxu.w */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
                 return e;
-            uint32_t maximum = max((uint32_t) t, (uint32_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, maximum)) != OK)
+            uint32_t max = MAX((uint32_t) t, (uint32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, max)) != OK)
                 return e;
             cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x00) { /* amoadd.d */
@@ -1109,32 +1109,32 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
-            int64_t minimum = min((int64_t) t, (int64_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, minimum)) != OK)
+            int64_t min = MIN((int64_t) t, (int64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, min)) != OK)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x14) { /* amomax.d */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
-            int64_t maximum = max((int64_t) t, (int64_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, maximum)) != OK)
+            int64_t max = MAX((int64_t) t, (int64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, max)) != OK)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x18) { /* amominu.d */
-            uint64_t t, minimum;
+            uint64_t t, min;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
-            minimum = min((uint64_t) t, (uint64_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, minimum)) != OK)
+            min = MIN((uint64_t) t, (uint64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, min)) != OK)
                 return e;
             cpu->regs[rd] = t;
         } else if (funct3 == 0x3 && funct5 == 0x1c) { /* amomaxu.d */
-            uint64_t t, maximum;
+            uint64_t t, max;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
-            maximum = max((uint64_t) t, (uint64_t) cpu->regs[rs2]);
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, maximum)) != OK)
+            max = MAX((uint64_t) t, (uint64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, max)) != OK)
                 return e;
             cpu->regs[rd] = t;
         } else {
