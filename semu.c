@@ -101,6 +101,20 @@ typedef enum {
     MACHINE_EXTERNAL_INTERRUPT = 11,
 } interrupt_t;
 
+#define max(a, b)               \
+    ({                          \
+        __typeof__(a) _a = (a); \
+        __typeof__(b) _b = (b); \
+        _a > _b ? _a : _b;      \
+    })
+
+#define min(a, b)               \
+    ({                          \
+        __typeof__(a) _a = (a); \
+        __typeof__(b) _b = (b); \
+        _a < _b ? _a : _b;      \
+    })
+
 bool exception_is_fatal(const exception_t e)
 {
     switch (e) {
@@ -201,10 +215,10 @@ struct clint *clint_new()
     return calloc(1, sizeof(struct clint));
 }
 
-inline exception_t clint_load(const struct clint *clint,
-                              const uint64_t addr,
-                              const uint64_t size,
-                              uint64_t *result)
+static inline exception_t clint_load(const struct clint *clint,
+                                     const uint64_t addr,
+                                     const uint64_t size,
+                                     uint64_t *result)
 {
     if (size != 64)
         return LOAD_ACCESS_FAULT;
@@ -222,10 +236,10 @@ inline exception_t clint_load(const struct clint *clint,
     return OK;
 }
 
-inline exception_t clint_store(struct clint *clint,
-                               const uint64_t addr,
-                               const uint64_t size,
-                               const uint64_t value)
+static inline exception_t clint_store(struct clint *clint,
+                                      const uint64_t addr,
+                                      const uint64_t size,
+                                      const uint64_t value)
 {
     if (size != 64)
         return STORE_AMO_ACCESS_FAULT;
@@ -498,7 +512,7 @@ exception_t virtio_store(struct virtio *vio,
     return OK;
 }
 
-inline bool virtio_is_interrupting(struct virtio *vio)
+static inline bool virtio_is_interrupting(struct virtio *vio)
 {
     if (vio->queue_notify != -1) {
         vio->queue_notify = -1;
@@ -507,22 +521,24 @@ inline bool virtio_is_interrupting(struct virtio *vio)
     return false;
 }
 
-inline uint64_t virtio_desc_addr(const struct virtio *vio)
+static inline uint64_t virtio_desc_addr(const struct virtio *vio)
 {
     return (uint64_t) vio->queue_pfn * (uint64_t) vio->page_size;
 }
 
-inline uint64_t virtio_disk_read(const struct virtio *vio, uint64_t addr)
+static inline uint64_t virtio_disk_read(const struct virtio *vio, uint64_t addr)
 {
     return vio->disk[addr];
 }
 
-inline void virtio_disk_write(struct virtio *vio, uint64_t addr, uint64_t value)
+static inline void virtio_disk_write(struct virtio *vio,
+                                     uint64_t addr,
+                                     uint64_t value)
 {
     vio->disk[addr] = (uint8_t) value;
 }
 
-inline uint64_t virtio_new_id(struct virtio *vio)
+static inline uint64_t virtio_new_id(struct virtio *vio)
 {
     return ++(vio->id);
 }
@@ -671,8 +687,8 @@ struct cpu *cpu_new(uint8_t *code, const size_t code_size, uint8_t *disk)
     return cpu;
 }
 
-uint64_t cpu_load_csr(const struct cpu *cpu, const uint16_t addr);
-inline void cpu_update_paging(struct cpu *cpu, const uint16_t csr_addr)
+static uint64_t cpu_load_csr(const struct cpu *cpu, const uint16_t addr);
+static inline void cpu_update_paging(struct cpu *cpu, const uint16_t csr_addr)
 {
     if (csr_addr != SATP)
         return;
@@ -741,7 +757,7 @@ exception_t cpu_translate(const struct cpu *cpu,
 }
 
 /* Fetch an instruction from current PC from RAM. */
-inline exception_t cpu_fetch(struct cpu *cpu, uint64_t *result)
+static inline exception_t cpu_fetch(struct cpu *cpu, uint64_t *result)
 {
     uint64_t ppc;
     exception_t e = cpu_translate(cpu, cpu->pc, INSTRUCTION_PAGE_FAULT, &ppc);
@@ -753,16 +769,16 @@ inline exception_t cpu_fetch(struct cpu *cpu, uint64_t *result)
     return OK;
 }
 
-inline uint64_t cpu_load_csr(const struct cpu *cpu, const uint16_t addr)
+static inline uint64_t cpu_load_csr(const struct cpu *cpu, const uint16_t addr)
 {
     if (addr == SIE)
         return cpu->csrs[MIE] & cpu->csrs[MIDELEG];
     return cpu->csrs[addr];
 }
 
-inline void cpu_store_csr(struct cpu *cpu,
-                          const uint16_t addr,
-                          const uint64_t value)
+static inline void cpu_store_csr(struct cpu *cpu,
+                                 const uint16_t addr,
+                                 const uint64_t value)
 {
     if (addr == SIE) {
         cpu->csrs[MIE] = (cpu->csrs[MIE] & ~cpu->csrs[MIDELEG]) |
@@ -772,10 +788,10 @@ inline void cpu_store_csr(struct cpu *cpu,
     cpu->csrs[addr] = value;
 }
 
-inline exception_t cpu_load(struct cpu *cpu,
-                            const uint64_t addr,
-                            const uint64_t size,
-                            uint64_t *result)
+static inline exception_t cpu_load(struct cpu *cpu,
+                                   const uint64_t addr,
+                                   const uint64_t size,
+                                   uint64_t *result)
 {
     uint64_t pa;
     exception_t e = cpu_translate(cpu, addr, LOAD_PAGE_FAULT, &pa);
@@ -784,10 +800,10 @@ inline exception_t cpu_load(struct cpu *cpu,
     return bus_load(cpu->bus, pa, size, result);
 }
 
-inline exception_t cpu_store(struct cpu *cpu,
-                             const uint64_t addr,
-                             const uint64_t size,
-                             const uint64_t value)
+static inline exception_t cpu_store(struct cpu *cpu,
+                                    const uint64_t addr,
+                                    const uint64_t size,
+                                    const uint64_t value)
 {
     uint64_t pa;
     exception_t e = cpu_translate(cpu, addr, STORE_AMO_PAGE_FAULT, &pa);
@@ -987,6 +1003,69 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 OK)
                 return e;
             cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x01) { /* amoswap.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, cpu->regs[rs2])) != OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x04) { /* amoxor.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, t ^ cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x08) { /* amoor.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, t | cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x0c) { /* amoand.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, t & cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x10) { /* amomin.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            int32_t minimum = min((int32_t) t, (int32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, minimum)) != OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x14) { /* amomax.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            int32_t maximum = max((int32_t) t, (int32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, maximum)) != OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x18) { /* amominu.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            uint32_t minimum = min((uint32_t) t, (uint32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, minimum)) != OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
+        } else if (funct3 == 0x2 && funct5 == 0x1c) { /* amomaxu.w */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
+                return e;
+            uint32_t maximum = max((uint32_t) t, (uint32_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, maximum)) != OK)
+                return e;
+            cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x00) { /* amoadd.d */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
@@ -995,18 +1074,67 @@ exception_t cpu_execute(struct cpu *cpu, const uint64_t insn)
                 OK)
                 return e;
             cpu->regs[rd] = t;
-        } else if (funct3 == 0x2 && funct5 == 0x01) { /* amoswap.w */
-            uint64_t t;
-            if ((e = cpu_load(cpu, cpu->regs[rs1], 32, &t)) != OK)
-                return e;
-            if ((e = cpu_store(cpu, cpu->regs[rs1], 32, cpu->regs[rs2])) != OK)
-                return e;
-            cpu->regs[rd] = (int32_t) t;
         } else if (funct3 == 0x3 && funct5 == 0x01) { /* amoswap.d */
             uint64_t t;
             if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
                 return e;
             if ((e = cpu_store(cpu, cpu->regs[rs1], 64, cpu->regs[rs2])) != OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x04) { /* amoxor.d */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, t ^ cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x08) { /* amoor.d */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, t | cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x0c) { /* amoand.d */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, t & cpu->regs[rs2])) !=
+                OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x10) { /* amomin.d */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            int64_t minimum = min((int64_t) t, (int64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, minimum)) != OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x14) { /* amomax.d */
+            uint64_t t;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            int64_t maximum = max((int64_t) t, (int64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, maximum)) != OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x18) { /* amominu.d */
+            uint64_t t, minimum;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            minimum = min((uint64_t) t, (uint64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, minimum)) != OK)
+                return e;
+            cpu->regs[rd] = t;
+        } else if (funct3 == 0x3 && funct5 == 0x1c) { /* amomaxu.d */
+            uint64_t t, maximum;
+            if ((e = cpu_load(cpu, cpu->regs[rs1], 64, &t)) != OK)
+                return e;
+            maximum = max((uint64_t) t, (uint64_t) cpu->regs[rs2]);
+            if ((e = cpu_store(cpu, cpu->regs[rs1], 64, maximum)) != OK)
                 return e;
             cpu->regs[rd] = t;
         } else {
