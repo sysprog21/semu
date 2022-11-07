@@ -66,11 +66,10 @@ You can check the generated report as following:
   An exception occurred.
 [  FAILED  ] rv64ua-p-lrsc
 [==========] 83 test(s) from riscv-tests ran.
-[  PASSED  ] 67 test(s).
-[  FAILED  ] 16 test(s), listed below:
+[  PASSED  ] 81 test(s).
+[  FAILED  ] 2 test(s), listed below:
 [  FAILED  ] rv64ui-p-fence_i
-[  FAILED  ] rv64ua-p-amoand_d
-...
+[  FAILED  ] rv64ua-p-lrsc
 ```
 
 If you want to execute a specific test instead of the whole test, please run the following command:
