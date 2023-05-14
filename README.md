@@ -11,6 +11,13 @@ A minimalist RISC-V emulator capable of running Linux the kernel and correspondi
 - Standard SBI, with the timer extension
 - VirtIO: virtio-net, mapped as TAP interface
 
+## Prerequisites
+
+[Device Tree](https://www.kernel.org/doc/html/latest/devicetree/) compiler (dtc) is required. Install by entering the following command:
+```shell
+sudo apt install device-tree-compiler
+```
+
 ## Build and Run
 
 Build the emulator:
