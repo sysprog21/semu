@@ -3,10 +3,8 @@
 #   _DATA : the file to be read by specific executable.
 #   _DATA_SHA1 : the checksum of the content in _DATA
 
-BASE_URL = https://github.com/jserv/semu/raw/blob
-
 # kernel
-KERNEL_DATA_URL = $(BASE_URL)/Image
+KERNEL_DATA_URL = https://github.com/jserv/semu/raw/blob/Image
 KERNEL_DATA = Image
 KERNEL_DATA_SHA1 = 4a1cf1465c1df564dbd88d9cb6f46773d2555ceb
 
