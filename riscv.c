@@ -763,7 +763,7 @@ void vm_step(vm_t *vm)
         uint8_t idx = 32;
         while (!(applicable & (1 << --idx)))
             ; /* TODO: Rewrite with faster a lookup table. */
-        vm->exc_cause = (1 << 31) | idx;
+        vm->exc_cause = (1U << 31) | idx;
         vm->stval = 0;
         vm_trap(vm);
     }
