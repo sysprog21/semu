@@ -42,6 +42,7 @@ static void emu_update_uart_interrupts(vm_t *vm)
     plic_update_interrupts(vm, &data->plic);
 }
 
+#if defined(ENABLE_VIRTIONET)
 static void emu_update_vnet_interrupts(vm_t *vm)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -51,6 +52,7 @@ static void emu_update_vnet_interrupts(vm_t *vm)
         data->plic.active &= ~IRQ_VNET_BIT;
     plic_update_interrupts(vm, &data->plic);
 }
+#endif
 
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
@@ -74,10 +76,12 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             u8250_read(vm, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(vm);
             return;
+#if defined(ENABLE_VIRTIONET)
         case 0x41: /* VirtIO-Net */
             virtio_net_read(vm, &data->vnet, addr & 0xFFFFF, width, value);
             emu_update_vnet_interrupts(vm);
             return;
+#endif
         }
     }
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
@@ -105,10 +109,12 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             u8250_write(vm, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(vm);
             return;
+#if defined(ENABLE_VIRTIONET)
         case 0x41: /* VirtIO-Net */
             virtio_net_write(vm, &data->vnet, addr & 0xFFFFF, width, value);
             emu_update_vnet_interrupts(vm);
             return;
+#endif
         }
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
@@ -261,9 +267,11 @@ static int semu_start(int argc, char **argv)
 
     /* Set up peripherals */
     emu.uart.in_fd = 0, emu.uart.out_fd = 1;
+#if defined(ENABLE_VIRTIONET)
     if (!virtio_net_init(&(emu.vnet)))
         fprintf(stderr, "No virtio-net functioned\n");
     emu.vnet.ram = emu.ram;
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -275,9 +283,11 @@ static int semu_start(int argc, char **argv)
             if (emu.uart.in_ready)
                 emu_update_uart_interrupts(&vm);
 
+#if defined(ENABLE_VIRTIONET)
             virtio_net_refresh_queue(&emu.vnet);
             if (emu.vnet.InterruptStatus)
                 emu_update_vnet_interrupts(&vm);
+#endif
         }
 
         if (vm.insn_count_hi > emu.timer_hi ||

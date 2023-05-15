@@ -13,9 +13,15 @@ A minimalist RISC-V emulator capable of running Linux the kernel and correspondi
 
 ## Prerequisites
 
-[Device Tree](https://www.kernel.org/doc/html/latest/devicetree/) compiler (dtc) is required. Install by entering the following command:
+[Device Tree](https://www.kernel.org/doc/html/latest/devicetree/) compiler (dtc) is required.
+To install it on Debian/Ubuntu Linux, enter the following command:
 ```shell
-sudo apt install device-tree-compiler
+$ sudo apt install device-tree-compiler
+```
+
+For macOS, use the following command:
+```shell
+$ brew install dtc
 ```
 
 ## Build and Run

@@ -71,6 +71,7 @@ void u8250_check_ready(u8250_state_t *uart);
 
 /* VirtIO-Net */
 
+#if defined(ENABLE_VIRTIONET)
 #define IRQ_VNET 2
 #define IRQ_VNET_BIT (1 << IRQ_VNET)
 
@@ -113,6 +114,7 @@ void virtio_net_write(vm_t *core,
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 
 bool virtio_net_init(virtio_net_state_t *vnet);
+#endif /* ENABLE_VIRTIONET */
 
 /* memory mapping */
 
@@ -121,6 +123,8 @@ typedef struct {
     uint32_t *ram;
     plic_state_t plic;
     u8250_state_t uart;
+#if defined(ENABLE_VIRTIONET)
     virtio_net_state_t vnet;
+#endif
     uint32_t timer_lo, timer_hi;
 } emu_state_t;

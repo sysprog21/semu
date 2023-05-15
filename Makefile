@@ -4,6 +4,16 @@ CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
 
+OBJS_EXTRA :=
+
+ifeq ($(UNAME_S),Linux)
+CFLAGS += -D ENABLE_VIRTIONET
+OBJS_EXTRA += virtio-net.o
+MINIMAL_DTS = minimal-virtio.dts
+else
+MINIMAL_DTS = minimal.dts
+endif
+
 BIN = semu
 all: $(BIN) minimal.dtb
 
@@ -12,8 +22,8 @@ OBJS := \
 	ram.o \
 	plic.o \
 	uart.o \
-	virtio-net.o \
-	main.o
+	main.o \
+	$(OBJS_EXTRA)
 
 deps := $(OBJS:%.o=.%.o.d)
 
@@ -27,7 +37,7 @@ $(BIN): $(OBJS)
 
 DTC ?= dtc
 
-minimal.dtb: minimal.dts
+minimal.dtb: $(MINIMAL_DTS)
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(DTC) $< > $@
 
