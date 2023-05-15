@@ -8,8 +8,8 @@
             vm_set_exception(vm, exc_cause, vm->exc_val); \
             break;                                        \
         }                                                 \
-        offset = (addr & 0b11) * 8;                       \
-        cell = &mem[addr >> 2];                           \
+        UNUSED uint8_t offset = (addr & 0b11) * 8;        \
+        uint32_t *cell = &mem[addr >> 2];                 \
         code;                                             \
     } while (0)
 
@@ -19,8 +19,6 @@ void ram_read(vm_t *vm,
               const uint8_t width,
               uint32_t *value)
 {
-    uint32_t *cell;
-    uint8_t offset;
     const uint32_t exc_cause = RV_EXC_LOAD_MISALIGN;
     switch (width) {
     case RV_MEM_LW:
@@ -51,8 +49,6 @@ void ram_write(vm_t *vm,
                const uint8_t width,
                const uint32_t value)
 {
-    uint32_t *cell;
-    uint8_t offset;
     const uint32_t exc_cause = RV_EXC_STORE_MISALIGN;
     switch (width) {
     case RV_MEM_SW:
