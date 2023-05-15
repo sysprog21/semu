@@ -34,7 +34,7 @@ minimal.dtb: minimal.dts
 # Rules for downloading prebuilt Linux kernel image
 include mk/external.mk
 
-check: $(BIN) $(KERNEL_DATA)
+check: $(BIN) minimal.dtb $(KERNEL_DATA)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
 	$(Q)./$(BIN) $(KERNEL_DATA)
 
