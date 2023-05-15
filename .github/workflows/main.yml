@@ -1,0 +1,25 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  rv32emu:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: install-dependencies
+      run: | 
+            sudo apt-get install build-essential device-tree-compiler
+    - name: default build
+      run: make
+      shell: bash
+
+  coding_style:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: coding convention
+      run: |
+            sudo apt-get install -q -y clang-format-12
+            sh .ci/check-format.sh
+      shell: bash
