@@ -4,7 +4,7 @@
 /* RAM handlers (address must be relative, assumes it is within bounds) */
 #define RAM_FUNC(width, code)                             \
     do {                                                  \
-        if (unlikely((addr & ((width) -1)))) {            \
+        if (unlikely((addr & (width - 1)))) {             \
             vm_set_exception(vm, exc_cause, vm->exc_val); \
             break;                                        \
         }                                                 \
