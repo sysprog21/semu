@@ -51,6 +51,8 @@ buildroot login:
 
 Enter `root` to access shell.
 
+## Build Linux kernel image and root file system
+
 ## License
 
 `semu` is released under the MIT License.
