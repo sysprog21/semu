@@ -93,7 +93,7 @@ static void u8250_reg_read(u8250_state_t *uart, uint32_t addr, uint8_t *value)
         break;
     case 5:
         /* LSR = no error, TX done & ready */
-        *value = 0x60 | (uart->in_ready ? 1 : 0);
+        *value = 0x60 | (uint8_t) uart->in_ready;
         break;
     case 6:
         /* MSR = carrier detect, no ring, data ready, clear to send. */
