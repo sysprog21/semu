@@ -267,6 +267,7 @@ static int semu_start(int argc, char **argv)
 
     /* Set up peripherals */
     emu.uart.in_fd = 0, emu.uart.out_fd = 1;
+    capture_keyboard_input(); /* set up uart */
 #if defined(ENABLE_VIRTIONET)
     if (!virtio_net_init(&(emu.vnet)))
         fprintf(stderr, "No virtio-net functioned\n");
