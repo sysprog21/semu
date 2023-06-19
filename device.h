@@ -68,6 +68,7 @@ void u8250_write(vm_t *core,
                  uint8_t width,
                  uint32_t value);
 void u8250_check_ready(u8250_state_t *uart);
+void capture_keyboard_input();
 
 /* VirtIO-Net */
 

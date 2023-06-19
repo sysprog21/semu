@@ -1,7 +1,9 @@
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "device.h"
@@ -11,6 +13,27 @@
 /* Emulate 8250 (plain, without loopback mode support) */
 
 #define U8250_INT_THRE 1
+
+static void reset_keyboard_input()
+{
+    /* Re-enable echo, etc. on keyboard. */
+    struct termios term;
+    tcgetattr(0, &term);
+    term.c_lflag |= ICANON | ECHO;
+    tcsetattr(0, TCSANOW, &term);
+}
+
+/* Asynchronous communication to capture all keyboard input for the VM. */
+void capture_keyboard_input()
+{
+    /* Hook exit, because we want to re-enable keyboard. */
+    atexit(reset_keyboard_input);
+
+    struct termios term;
+    tcgetattr(0, &term);
+    term.c_lflag &= ~(ICANON | ECHO); /* Disable echo as well */
+    tcsetattr(0, TCSANOW, &term);
+}
 
 void u8250_update_interrupts(u8250_state_t *uart)
 {
@@ -60,6 +83,14 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
         fprintf(stderr, "failed to read UART input: %s\n", strerror(errno));
     uart->in_ready = false;
     u8250_check_ready(uart);
+
+    if (value == 1) {           /* start of heading (Ctrl-a) */
+        if (getchar() == 120) { /* keyboard x */
+            printf("\n");       /* end emulator with newline */
+            exit(0);
+        }
+    }
+
     return value;
 }
 
