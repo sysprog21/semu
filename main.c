@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <time.h>
 
 #include "device.h"
 #include "riscv.h"
@@ -219,11 +223,19 @@ static void read_file_into_ram(char **ram_loc, const char *name)
         exit(2);
     }
 
-    /* TODO: use memory mapping instead of reading */
-    while (!feof(input_file)) {
-        *ram_loc += fread(*ram_loc, sizeof(char), 1024 * 1024, input_file);
-        assert(!ferror(input_file));
+    fseek(input_file, 0, SEEK_END);
+    long file_size = ftell(input_file);
+
+    /* remap to a memory region, then using memory copy to the specified location */
+    *ram_loc = mmap(*ram_loc, file_size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE, fileno(input_file), 0);
+    if (*ram_loc == MAP_FAILED) {
+        perror("mmap");
+        exit(2);
     }
+
+    /* update the pointer */
+    *ram_loc += file_size;
+
     fclose(input_file);
 }
 
