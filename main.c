@@ -1,8 +1,11 @@
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "device.h"
 #include "riscv.h"
@@ -211,20 +214,52 @@ static void handle_sbi_ecall(vm_t *vm)
     vm->error = ERR_NONE;
 }
 
-static void read_file_into_ram(char **ram_loc, const char *name)
+struct mapper {
+    char *addr;
+    uint32_t size;
+};
+
+/* FIXME: avoid hardcode capacity */
+static struct mapper mapper[4] = {0};
+static int map_index = 0;
+static void unmap_files(void)
 {
-    FILE *input_file = fopen(name, "r");
-    if (!input_file) {
+    while (map_index--) {
+        if (!mapper[map_index].addr)
+            continue;
+        munmap(mapper[map_index].addr, mapper[map_index].size);
+    }
+}
+
+static void map_file(char **ram_loc, const char *name)
+{
+    int fd = open(name, O_RDONLY);
+    if (fd < 0) {
         fprintf(stderr, "could not open %s\n", name);
         exit(2);
     }
 
-    /* TODO: use memory mapping instead of reading */
-    while (!feof(input_file)) {
-        *ram_loc += fread(*ram_loc, sizeof(char), 1024 * 1024, input_file);
-        assert(!ferror(input_file));
+    /* get file size */
+    struct stat st;
+    fstat(fd, &st);
+
+    /* remap to a memory region */
+    *ram_loc = mmap(*ram_loc, st.st_size, PROT_READ | PROT_WRITE,
+                    MAP_FIXED | MAP_PRIVATE, fd, 0);
+    if (*ram_loc == MAP_FAILED) {
+        perror("mmap");
+        close(fd);
+        exit(2);
     }
-    fclose(input_file);
+
+    mapper[map_index].addr = *ram_loc;
+    mapper[map_index].size = st.st_size;
+    map_index++;
+
+    /* kernel picks a nearby page boundary and attempt to create the mapping */
+    *ram_loc += st.st_size;
+
+    close(fd);
 }
 
 static int semu_start(int argc, char **argv)
@@ -252,12 +287,14 @@ static int semu_start(int argc, char **argv)
 
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
-    read_file_into_ram(&ram_loc, argv[1]);
+    map_file(&ram_loc, argv[1]);
     /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
-    read_file_into_ram(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
+    map_file(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
     /* TODO: load disk image via virtio_blk */
+    /* Hook for unmap files */
+    atexit(unmap_files);
 
     /* Set up RISC-V hart */
     emu.timer_hi = emu.timer_lo = 0xFFFFFFFF;
