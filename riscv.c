@@ -3,7 +3,7 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
-/* returns the identifier for an error code as a string */
+/* Return the string representation of an error code identifier */
 static const char *vm_error_str(vm_error_t err)
 {
     static const char *errors[] = {
@@ -16,7 +16,7 @@ static const char *vm_error_str(vm_error_t err)
     return "UNKNOWN";
 }
 
-/* returns a readable description for a RISC-V exception cause */
+/* Return a human-readable description for a RISC-V exception cause */
 static const char *vm_exc_cause_str(uint32_t err)
 {
     static const char *errors[] = {
@@ -167,8 +167,8 @@ static inline uint32_t read_rs2(const vm_t *vm, uint32_t insn)
 
 /* virtual addressing */
 
-/* Pre-verify the root page table, so that at most 1 page table access is done
- * at translation time.
+/* Pre-verify the root page table to minimize page table access during
+ * translation time.
  */
 static void mmu_set(vm_t *vm, uint32_t satp)
 {

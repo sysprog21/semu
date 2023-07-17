@@ -1,6 +1,6 @@
 # semu
 
-A minimalist RISC-V emulator capable of running Linux the kernel and corresponding userland.
+A minimalist RISC-V system emulator capable of running Linux the kernel and corresponding userland.
 `semu` implements the following:
 - RISC-V instruction set architecture: RV32IMA
 - Privilege levels: S and U modes

@@ -11,8 +11,8 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
-/* Define fetch separately because it is much simpler (width is fixed,
- * alignment already checked, only main RAM is executable)
+/* Define fetch separately since it is simpler (fixed width, already checked
+ * alignment, only main RAM is executable).
  */
 static void mem_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
 {
@@ -25,7 +25,7 @@ static void mem_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
     *value = data->ram[addr >> 2];
 }
 
-/* similarly only main memory pages can be used as page_tables */
+/* Similarly, only main memory pages can be used as page tables. */
 static uint32_t *mem_page_table(const vm_t *vm, uint32_t ppn)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -219,7 +219,7 @@ struct mapper {
     uint32_t size;
 };
 
-/* FIXME: avoid hardcode capacity */
+/* FIXME: Avoid hardcoding the capacity */
 static struct mapper mapper[4] = {0};
 static int map_index = 0;
 static void unmap_files(void)
@@ -256,7 +256,9 @@ static void map_file(char **ram_loc, const char *name)
     mapper[map_index].size = st.st_size;
     map_index++;
 
-    /* kernel picks a nearby page boundary and attempt to create the mapping */
+    /* The kernel selects a nearby page boundary and attempts to create
+     * the mapping.
+     */
     *ram_loc += st.st_size;
 
     close(fd);
@@ -293,7 +295,7 @@ static int semu_start(int argc, char **argv)
     ram_loc = ((char *) emu.ram) + dtb_addr;
     map_file(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
     /* TODO: load disk image via virtio_blk */
-    /* Hook for unmap files */
+    /* Hook for unmapping files */
     atexit(unmap_files);
 
     /* Set up RISC-V hart */
@@ -334,7 +336,6 @@ static int semu_start(int argc, char **argv)
         else
             vm.sip &= ~RV_INT_STI_BIT;
 
-        /* TODO: Implement the key sequence Ctrl-a x to exit the emulator */
         vm_step(&vm);
         if (likely(!vm.error))
             continue;
