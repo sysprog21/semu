@@ -31,7 +31,7 @@ void capture_keyboard_input()
 
     struct termios term;
     tcgetattr(0, &term);
-    term.c_lflag &= ~(ICANON | ECHO); /* Disable echo as well */
+    term.c_lflag &= ~(ICANON | ECHO | ISIG); /* Disable echo as well */
     tcsetattr(0, TCSANOW, &term);
 }
 
