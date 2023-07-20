@@ -8,7 +8,9 @@ OBJS_EXTRA :=
 
 ifeq ($(UNAME_S),Linux)
 CFLAGS += -D ENABLE_VIRTIONET
+CFLAGS += -D ENABLE_VIRTIOBLK
 OBJS_EXTRA += virtio-net.o
+OBJS_EXTRA += virtio-blk.o
 MINIMAL_DTS = minimal-virtio.dts
 else
 MINIMAL_DTS = minimal.dts

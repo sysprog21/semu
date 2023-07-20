@@ -14,19 +14,9 @@
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "virtio.h"
 
 #define TAP_INTERFACE "tap%d"
-
-#define VIRTIO_VENDOR_ID 0x12345678
-
-#define VIRTIO_STATUS__DRIVER_OK 4
-#define VIRTIO_STATUS__DEVICE_NEEDS_RESET 64
-
-#define VIRTIO_INT__USED_RING 1
-#define VIRTIO_INT__CONF_CHANGE 2
-
-#define VIRTIO_DESC_F_NEXT 1
-#define VIRTIO_DESC_F_WRITE 2
 
 #define VNET_FEATURES_0 0
 #define VNET_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */

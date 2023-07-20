@@ -57,6 +57,18 @@ static void emu_update_vnet_interrupts(vm_t *vm)
 }
 #endif
 
+#if defined(ENABLE_VIRTIOBLK)
+static void emu_update_vblk_interrupts(vm_t *vm)
+{
+    emu_state_t *data = (emu_state_t *) vm->priv;
+    if (data->vblk.InterruptStatus)
+        data->plic.active |= IRQ_VBLK_BIT;
+    else
+        data->plic.active &= ~IRQ_VBLK_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -85,8 +97,14 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* virtio-blk */
+            virtio_blk_read(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
     }
+#endif
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
 }
 
@@ -118,7 +136,13 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* virtio-blk */
+            virtio_blk_write(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
+#endif
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
 }
@@ -293,7 +317,7 @@ static int semu_start(int argc, char **argv)
     /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
-    map_file(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
+    map_file(&ram_loc, (argc >= 3) ? argv[2] : "minimal.dtb");
     /* TODO: load disk image via virtio_blk */
     /* Hook for unmapping files */
     atexit(unmap_files);
@@ -312,6 +336,11 @@ static int semu_start(int argc, char **argv)
         fprintf(stderr, "No virtio-net functioned\n");
     emu.vnet.ram = emu.ram;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+    char *disk_file = (argc >= 4) ? argv[3] : NULL;
+    emu.vblk.ram = emu.ram;
+    emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -327,6 +356,11 @@ static int semu_start(int argc, char **argv)
             virtio_net_refresh_queue(&emu.vnet);
             if (emu.vnet.InterruptStatus)
                 emu_update_vnet_interrupts(&vm);
+#endif
+
+#if defined(ENABLE_VIRTIOBLK)
+            if (emu.vblk.InterruptStatus)
+                emu_update_vblk_interrupts(&vm);
 #endif
         }
 
@@ -361,7 +395,7 @@ static int semu_start(int argc, char **argv)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <linux-image> [<dtb>]\n", argv[0]);
+        printf("Usage: %s <linux-image> [<dtb>] [<disk-img>]\n", argv[0]);
         return 2;
     }
     return semu_start(argc, argv);

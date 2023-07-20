@@ -117,15 +117,66 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 bool virtio_net_init(virtio_net_state_t *vnet);
 #endif /* ENABLE_VIRTIONET */
 
+/* VirtIO-Block */
+#if defined(ENABLE_VIRTIOBLK)
+
+#define IRQ_VBLK 3
+#define IRQ_VBLK_BIT (1 << IRQ_VBLK)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_blk_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_blk_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    uint32_t *disk;
+    uint64_t capacity;
+} virtio_blk_state_t;
+
+void virtio_blk_read(vm_t *vm,
+                     virtio_blk_state_t *vblk,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_blk_write(vm_t *vm,
+                      virtio_blk_state_t *vblk,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
+#endif /* ENABLE_VIRTIOBLK */
+
 /* memory mapping */
 
 typedef struct {
     bool stopped;
     uint32_t *ram;
+    uint32_t *disk;
     plic_state_t plic;
     u8250_state_t uart;
 #if defined(ENABLE_VIRTIONET)
     virtio_net_state_t vnet;
+#endif
+#if defined(ENABLE_VIRTIOBLK)
+    virtio_blk_state_t vblk;
 #endif
     uint32_t timer_lo, timer_hi;
 } emu_state_t;
