@@ -51,6 +51,8 @@ buildroot login:
 
 Enter `root` to access shell.
 
+You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwards press X)
+
 ## Build Linux kernel image and root file system
 
 An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source.
