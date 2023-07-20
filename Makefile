@@ -48,6 +48,9 @@ check: $(BIN) minimal.dtb $(KERNEL_DATA)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
 	$(Q)./$(BIN) $(KERNEL_DATA)
 
+build-image:
+	scripts/build-image.sh
+
 clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 

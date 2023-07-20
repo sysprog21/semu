@@ -53,6 +53,13 @@ Enter `root` to access shell.
 
 ## Build Linux kernel image and root file system
 
+An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source.
+Please note that it only supports the Linux host environment.
+
+```shell
+$ make build-image
+```
+
 ## License
 
 `semu` is released under the MIT License.
