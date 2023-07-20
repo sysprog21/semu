@@ -6,7 +6,7 @@
 # kernel
 KERNEL_DATA_URL = https://github.com/jserv/semu/raw/blob/Image
 KERNEL_DATA = Image
-KERNEL_DATA_SHA1 = 4a1cf1465c1df564dbd88d9cb6f46773d2555ceb
+KERNEL_DATA_SHA1 = 4ffc3bb847920187a19c48e1964fae618165333a
 
 define download
 $($(T)_DATA):
