@@ -23,6 +23,7 @@ function do_buildroot
 {
     ASSERT git clone https://github.com/buildroot/buildroot -b 2023.05.1 --depth=1
     cp -f configs/buildroot.config buildroot/.config
+    cp -f configs/busybox.config buildroot/busybox.config
     # Otherwise, the error below raises:
     #   You seem to have the current working directory in your
     #   LD_LIBRARY_PATH environment variable. This doesn't work.
