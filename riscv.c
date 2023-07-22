@@ -677,9 +677,12 @@ static void do_jump(vm_t *vm, uint32_t addr)
 
 static void op_jump_link(vm_t *vm, uint32_t insn, uint32_t addr)
 {
-    /* TODO: If the jump fails (misalign), shall rd have to be updated? */
-    set_dest(vm, insn, vm->pc);
-    do_jump(vm, addr);
+    if (unlikely(addr & 0b11)) {
+        vm_set_exception(vm, RV_EXC_PC_MISALIGN, addr);
+    } else {
+        set_dest(vm, insn, vm->pc);
+        vm->pc = addr;
+    }
 }
 
 #define AMO_OP(STORED_EXPR)                                   \
