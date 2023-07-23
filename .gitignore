@@ -1,7 +1,9 @@
 *.o
 *.o.d
+*.sw*
 semu
 
 # Linux-specific
 *.dtb
 Image
+ext4.img
