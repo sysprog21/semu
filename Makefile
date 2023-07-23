@@ -52,7 +52,7 @@ ext4.img:
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) ext4.img
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) $(KERNEL_DATA) minimal.dtb ext4.img
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -d ext4.img
 
 build-image:
 	scripts/build-image.sh

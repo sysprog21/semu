@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -288,8 +289,67 @@ static void map_file(char **ram_loc, const char *name)
     close(fd);
 }
 
+static void usage(const char *execpath)
+{
+    fprintf(stderr, "Usage: %s -k linux-image [-b dtb] [-d disk-image]\n",
+            execpath);
+}
+
+static void handle_options(int argc,
+                           char **argv,
+                           char **kernel_file,
+                           char **dtb_file,
+                           char **disk_file)
+{
+    *kernel_file = *dtb_file = *disk_file = NULL;
+
+    int optidx = 0;
+    struct option opts[] = {
+        {"kernel", 1, NULL, 'k'},
+        {"dtb", 1, NULL, 'b'},
+        {"disk", 1, NULL, 'd'},
+        {"help", 0, NULL, 'h'},
+    };
+
+    int c;
+    while ((c = getopt_long(argc, argv, "k:b:d:h", opts, &optidx)) != -1) {
+        switch (c) {
+        case 'k':
+            *kernel_file = optarg;
+            break;
+        case 'b':
+            *dtb_file = optarg;
+            break;
+        case 'd':
+            *disk_file = optarg;
+            break;
+        case 'h':
+            usage(argv[0]);
+            exit(0);
+        default:
+            break;
+        }
+    }
+
+    if (!*kernel_file) {
+        fprintf(stderr,
+                "Linux kernel image file must "
+                "be provided via -k option.\n");
+        usage(argv[0]);
+        exit(2);
+    }
+
+    if (!*dtb_file)
+        *dtb_file = "minimal.dtb";
+}
+
 static int semu_start(int argc, char **argv)
 {
+    char *kernel_file;
+    char *dtb_file;
+    char *disk_file;
+    handle_options(argc, argv, &kernel_file, &dtb_file, &disk_file);
+
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
@@ -313,11 +373,11 @@ static int semu_start(int argc, char **argv)
 
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
-    map_file(&ram_loc, argv[1]);
+    map_file(&ram_loc, kernel_file);
     /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
-    map_file(&ram_loc, (argc >= 3) ? argv[2] : "minimal.dtb");
+    map_file(&ram_loc, dtb_file);
     /* TODO: load disk image via virtio_blk */
     /* Hook for unmapping files */
     atexit(unmap_files);
@@ -337,7 +397,6 @@ static int semu_start(int argc, char **argv)
     emu.vnet.ram = emu.ram;
 #endif
 #if defined(ENABLE_VIRTIOBLK)
-    char *disk_file = (argc >= 4) ? argv[3] : NULL;
     emu.vblk.ram = emu.ram;
     emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
 #endif
@@ -394,9 +453,5 @@ static int semu_start(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("Usage: %s <linux-image> [<dtb>] [<disk-img>]\n", argv[0]);
-        return 2;
-    }
     return semu_start(argc, argv);
 }
