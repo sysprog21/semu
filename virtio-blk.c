@@ -63,8 +63,8 @@ static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
                                      uint32_t desc_addr,
                                      uint32_t len)
 {
-    char *dest = (char *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
-    char *src = (char *) ((uintptr_t) vblk->ram + desc_addr);
+    void *dest = (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
+    void *src = (void *) ((uintptr_t) vblk->ram + desc_addr);
     memcpy(dest, src, len);
 }
 
@@ -73,8 +73,8 @@ static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
                                     uint32_t desc_addr,
                                     uint32_t len)
 {
-    char *dest = (char *) ((uintptr_t) vblk->ram + desc_addr);
-    char *src = (char *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
+    void *dest = (void *) ((uintptr_t) vblk->ram + desc_addr);
+    void *src = (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
     memcpy(dest, src, len);
 }
 
@@ -123,10 +123,10 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     }
 
     /* Process the header */
-    struct vblk_req_header *hdr =
+    struct vblk_req_header *header =
         (struct vblk_req_header *) ((uintptr_t) vblk->ram + vq_desc[0].addr);
-    uint32_t type = hdr->type;
-    uint64_t sector = hdr->sector;
+    uint32_t type = header->type;
+    uint64_t sector = header->sector;
     uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
 
     /* Check sector index is valid */

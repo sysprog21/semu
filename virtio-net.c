@@ -57,7 +57,7 @@ static bool vnet_iovec_write(struct iovec **vecs,
     while (n && *nvecs) {
         if (n < (*vecs)->iov_len) {
             memcpy((*vecs)->iov_base, src, n);
-            (*vecs)->iov_base = ((char *) (*vecs)->iov_base) + n;
+            (*vecs)->iov_base = (void *) ((uintptr_t) (*vecs)->iov_base + n);
             (*vecs)->iov_len -= n;
             return true;
         }
@@ -79,7 +79,7 @@ static bool vnet_iovec_read(struct iovec **vecs,
     while (n && *nvecs) {
         if (n < (*vecs)->iov_len) {
             memcpy(dst, (*vecs)->iov_base, n);
-            (*vecs)->iov_base = ((char *) (*vecs)->iov_base) + n;
+            (*vecs)->iov_base = (void *) ((uintptr_t) (*vecs)->iov_base + n);
             (*vecs)->iov_len -= n;
             return true;
         }
@@ -122,7 +122,8 @@ static bool vnet_iovec_read(struct iovec **vecs,
     buffer_niovs = 0;                                                     \
     VNET_ITERATE_BUFFER(                                                  \
         false, uint32_t desc_addr = desc[0]; uint32_t desc_len = desc[2]; \
-        buffer_iovs[buffer_niovs].iov_base = ((char *) ram) + desc_addr;  \
+        buffer_iovs[buffer_niovs].iov_base =                              \
+            (void *) ((uintptr_t) ram + desc_addr);                       \
         buffer_iovs[buffer_niovs].iov_len = desc_len; buffer_niovs++;)
 
 #define VNET_GENERATE_QUEUE_HANDLER(NAME_SUFFIX, VERB, QUEUE_IDX, READ)        \
