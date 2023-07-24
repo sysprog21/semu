@@ -103,9 +103,9 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             virtio_blk_read(vm, &data->vblk, addr & 0xFFFFF, width, value);
             emu_update_vblk_interrupts(vm);
             return;
+#endif
         }
     }
-#endif
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
 }
 
@@ -142,8 +142,8 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             virtio_blk_write(vm, &data->vblk, addr & 0xFFFFF, width, value);
             emu_update_vblk_interrupts(vm);
             return;
-        }
 #endif
+        }
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
 }
