@@ -6,14 +6,25 @@ CFLAGS += -include common.h
 
 OBJS_EXTRA :=
 
-ifeq ($(UNAME_S),Linux)
-CFLAGS += -D ENABLE_VIRTIONET
-CFLAGS += -D ENABLE_VIRTIOBLK
-OBJS_EXTRA += virtio-net.o
+# virtio-blk
+ENABLE_VIRTIOBLK ?= 1
 OBJS_EXTRA += virtio-blk.o
+$(call set-feature, VIRTIOBLK)
+
+# virtio-net
+ENABLE_VIRTIONET ?= 1
+ifeq ($(UNAME_S),Linux)
+OBJS_EXTRA += virtio-net.o
+else
+ENABLE_VIRTIONET := 0
+endif
+$(call set-feature, VIRTIONET)
+
+# device tree
+# TODO: generate device tree source upon configurations
+ifeq ($(UNAME_S),Linux)
 MINIMAL_DTS = minimal-virtio.dts
 else
-CFLAGS += -D ENABLE_VIRTIOBLK
 MINIMAL_DTS = minimal.dts
 endif
 
