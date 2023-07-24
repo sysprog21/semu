@@ -118,6 +118,7 @@ bool virtio_net_init(virtio_net_state_t *vnet);
 #endif /* SEMU_HAS(VIRTIONET) */
 
 /* VirtIO-Block */
+
 #if SEMU_HAS(VIRTIOBLK)
 
 #define IRQ_VBLK 3

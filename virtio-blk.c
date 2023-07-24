@@ -83,8 +83,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
                                    uint32_t desc_idx,
                                    uint32_t *plen)
 {
-    /*
-     * A full virtio_blk_req is represented by 3 descriptors, where
+    /* A full virtio_blk_req is represented by 3 descriptors, where
      * the first descriptor contains:
      *   le32 type
      *   le32 reserved
@@ -94,7 +93,6 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
      * the third descriptor contains:
      *   u8 status
      */
-
     struct virtq_desc vq_desc[3];
 
     /* Collect the descriptors */
@@ -109,8 +107,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
         desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
     }
 
-    /*
-     * The next flag for the first and second descriptors should be set,
+    /* The next flag for the first and second descriptors should be set,
      * whereas for the third descriptor is should not be set
      */
     if (!(vq_desc[0].flags & VIRTIO_DESC_F_NEXT) ||
@@ -181,8 +178,7 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
         /* Obtain the index in the ring buffer */
         uint16_t queue_idx = queue->last_avail % queue->QueueNum;
 
-        /*
-         * Since each buffer index occupies 2 bytes but the memory is aligned
+        /* Since each buffer index occupies 2 bytes but the memory is aligned
          * with 4 bytes, and the first element of the available queue is stored
          * at ram[queue->QueueAvail + 1], to acquire the buffer index, it
          * requires the following array index calculation and bit shifting.
@@ -192,7 +188,8 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
                               (16 * (queue_idx % 2));
 
         /* Consume request from the available queue and process the data in the
-         * descriptor list */
+         * descriptor list.
+         */
         uint32_t len = 0;
         int result = virtio_blk_desc_handler(vblk, queue, buffer_idx, &len);
         if (result != 0)
@@ -221,12 +218,10 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
                                 uint32_t addr,
                                 uint32_t *value)
 {
-    /*
-     * TODO: replace the register address with enum.
+    /* TODO: replace the register address with enum.
      * For the address after the configuration space, it should be
      * handled by structure pointer depend on the device.
      */
-
     switch (addr) {
     case 0: /* MagicValue (R) */
         *value = 0x74726976;
@@ -275,12 +270,10 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
                                  uint32_t addr,
                                  uint32_t value)
 {
-    /*
-     * TODO: replace the register address with enum.
+    /* TODO: replace the register address with enum.
      * For the address after the configuration space, it should be
      * handled by structure pointer depend on the device.
      */
-
     switch (addr) {
     case 5: /* DeviceFeaturesSel (W) */
         vblk->DeviceFeaturesSel = value;
