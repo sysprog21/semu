@@ -13,6 +13,7 @@ OBJS_EXTRA += virtio-net.o
 OBJS_EXTRA += virtio-blk.o
 MINIMAL_DTS = minimal-virtio.dts
 else
+CFLAGS += -D ENABLE_VIRTIOBLK
 MINIMAL_DTS = minimal.dts
 endif
 

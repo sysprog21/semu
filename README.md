@@ -24,6 +24,19 @@ For macOS, use the following command:
 $ brew install dtc
 ```
 
+For demonstration purposes, ext4 is used for file system mounting.
+`ext4` is a native Linux filesystem, offering stability, high capacity, reliability,
+and performance while requiring minimal maintenance. The `mkfs.ext4` command can
+create an ext4 file system from disk partitions. This command is a symbolic link of
+the [mke2fs](https://man7.org/linux/man-pages/man8/mke2fs.8.html) command, and its
+usage is the same as the mke2fs command.
+
+For most GNU/Linux distributions, `mkfs.ext4` command should be installed in advance.
+For macOS, use the following command:
+```
+$ brew install e2fsprogs
+```
+
 ## Build and Run
 
 Build the emulator:
