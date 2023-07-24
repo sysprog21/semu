@@ -9,7 +9,7 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- VirtIO: virtio-net, mapped as TAP interface
+- VirtIO: virtio-blk acquires disk image from the host, and virtio-net is mapped as TAP interface
 
 ## Prerequisites
 
@@ -61,6 +61,16 @@ Please note that it only supports the Linux host environment.
 ```shell
 $ make build-image
 ```
+
+## Usage
+
+```
+./semu -k linux-image [-b dtb-file] [-d disk-image]
+```
+
+* `linux-image` is the path to the Linux kernel `Image`.
+* `dtb-file` is optional, as it specifies the user-specified device tree blob.
+* `disk-image` is optional, as it specifies the path of a disk image in ext4 file system for the virtio-blk device.
 
 ## License
 

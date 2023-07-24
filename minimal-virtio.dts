@@ -68,5 +68,11 @@
             reg = <0x4100000 0x100000>;
             interrupts = <2>;
         };
+
+        blk0: virtio@4200000 {
+            compatible = "virtio,mmio";
+            reg = <0x4200000 0x200>;
+            interrupts = <3>;
+        };
     };
 };

@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +58,18 @@ static void emu_update_vnet_interrupts(vm_t *vm)
 }
 #endif
 
+#if defined(ENABLE_VIRTIOBLK)
+static void emu_update_vblk_interrupts(vm_t *vm)
+{
+    emu_state_t *data = (emu_state_t *) vm->priv;
+    if (data->vblk.InterruptStatus)
+        data->plic.active |= IRQ_VBLK_BIT;
+    else
+        data->plic.active &= ~IRQ_VBLK_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
@@ -85,8 +98,14 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* virtio-blk */
+            virtio_blk_read(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
     }
+#endif
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
 }
 
@@ -118,7 +137,13 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_vnet_interrupts(vm);
             return;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+        case 0x42: /* virtio-blk */
+            virtio_blk_write(vm, &data->vblk, addr & 0xFFFFF, width, value);
+            emu_update_vblk_interrupts(vm);
+            return;
         }
+#endif
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
 }
@@ -264,8 +289,67 @@ static void map_file(char **ram_loc, const char *name)
     close(fd);
 }
 
+static void usage(const char *execpath)
+{
+    fprintf(stderr, "Usage: %s -k linux-image [-b dtb] [-d disk-image]\n",
+            execpath);
+}
+
+static void handle_options(int argc,
+                           char **argv,
+                           char **kernel_file,
+                           char **dtb_file,
+                           char **disk_file)
+{
+    *kernel_file = *dtb_file = *disk_file = NULL;
+
+    int optidx = 0;
+    struct option opts[] = {
+        {"kernel", 1, NULL, 'k'},
+        {"dtb", 1, NULL, 'b'},
+        {"disk", 1, NULL, 'd'},
+        {"help", 0, NULL, 'h'},
+    };
+
+    int c;
+    while ((c = getopt_long(argc, argv, "k:b:d:h", opts, &optidx)) != -1) {
+        switch (c) {
+        case 'k':
+            *kernel_file = optarg;
+            break;
+        case 'b':
+            *dtb_file = optarg;
+            break;
+        case 'd':
+            *disk_file = optarg;
+            break;
+        case 'h':
+            usage(argv[0]);
+            exit(0);
+        default:
+            break;
+        }
+    }
+
+    if (!*kernel_file) {
+        fprintf(stderr,
+                "Linux kernel image file must "
+                "be provided via -k option.\n");
+        usage(argv[0]);
+        exit(2);
+    }
+
+    if (!*dtb_file)
+        *dtb_file = "minimal.dtb";
+}
+
 static int semu_start(int argc, char **argv)
 {
+    char *kernel_file;
+    char *dtb_file;
+    char *disk_file;
+    handle_options(argc, argv, &kernel_file, &dtb_file, &disk_file);
+
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
@@ -289,11 +373,11 @@ static int semu_start(int argc, char **argv)
 
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
-    map_file(&ram_loc, argv[1]);
+    map_file(&ram_loc, kernel_file);
     /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
-    map_file(&ram_loc, (argc == 3) ? argv[2] : "minimal.dtb");
+    map_file(&ram_loc, dtb_file);
     /* TODO: load disk image via virtio_blk */
     /* Hook for unmapping files */
     atexit(unmap_files);
@@ -312,6 +396,10 @@ static int semu_start(int argc, char **argv)
         fprintf(stderr, "No virtio-net functioned\n");
     emu.vnet.ram = emu.ram;
 #endif
+#if defined(ENABLE_VIRTIOBLK)
+    emu.vblk.ram = emu.ram;
+    emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -327,6 +415,11 @@ static int semu_start(int argc, char **argv)
             virtio_net_refresh_queue(&emu.vnet);
             if (emu.vnet.InterruptStatus)
                 emu_update_vnet_interrupts(&vm);
+#endif
+
+#if defined(ENABLE_VIRTIOBLK)
+            if (emu.vblk.InterruptStatus)
+                emu_update_vblk_interrupts(&vm);
 #endif
         }
 
@@ -360,9 +453,5 @@ static int semu_start(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("Usage: %s <linux-image> [<dtb>]\n", argv[0]);
-        return 2;
-    }
     return semu_start(argc, argv);
 }

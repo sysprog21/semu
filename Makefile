@@ -8,7 +8,9 @@ OBJS_EXTRA :=
 
 ifeq ($(UNAME_S),Linux)
 CFLAGS += -D ENABLE_VIRTIONET
+CFLAGS += -D ENABLE_VIRTIOBLK
 OBJS_EXTRA += virtio-net.o
+OBJS_EXTRA += virtio-blk.o
 MINIMAL_DTS = minimal-virtio.dts
 else
 MINIMAL_DTS = minimal.dts
@@ -44,9 +46,13 @@ minimal.dtb: $(MINIMAL_DTS)
 # Rules for downloading prebuilt Linux kernel image
 include mk/external.mk
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA)
+ext4.img:
+	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
+	$(Q)mkfs.ext4 -F $@
+
+check: $(BIN) minimal.dtb $(KERNEL_DATA) ext4.img
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) $(KERNEL_DATA)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -d ext4.img
 
 build-image:
 	scripts/build-image.sh
@@ -57,5 +63,6 @@ clean:
 distclean: clean
 	$(Q)$(RM) minimal.dtb
 	$(Q)$(RM) Image
+	$(Q)$(RM) ext4.img 
 
 -include $(deps)
