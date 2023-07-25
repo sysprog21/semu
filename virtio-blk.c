@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "device.h"
 #include "riscv.h"
@@ -413,6 +414,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
         return NULL;
     }
     assert(!(((uintptr_t) disk_mem) & 0b11));
+    close(disk_fd);
 
     vblk->disk = disk_mem;
     vblk->capacity = (disk_size - 1) / DISK_BLK_SIZE + 1;
