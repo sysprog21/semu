@@ -12,20 +12,28 @@ OPTS :=
 ENABLE_VIRTIOBLK ?= 1
 $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
+MKFS_EXT4 ?= mkfs.ext4
 ifeq ($(call has, VIRTIOBLK), 1)
-OBJS_EXTRA += virtio-blk.o
-DISKIMG_FILE := ext4.img
-OPTS += -d $(DISKIMG_FILE)
+    OBJS_EXTRA += virtio-blk.o
+    DISKIMG_FILE := ext4.img
+    OPTS += -d $(DISKIMG_FILE)
+    MKFS_EXT4 := $(shell which $(MKFS_EXT4))
+    ifndef MKFS_EXT4
+	MKFS_EXT4 := $(shell which $$(brew --prefix e2fsprogs)/sbin/mkfs.ext4)
+    endif
+    ifndef MKFS_EXT4
+        $(error "No mkfs.ext4 found.")
+    endif
 endif
 
 # virtio-net
 ENABLE_VIRTIONET ?= 1
 ifneq ($(UNAME_S),Linux)
-ENABLE_VIRTIONET := 0
+    ENABLE_VIRTIONET := 0
 endif
 $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
-OBJS_EXTRA += virtio-net.o
+    OBJS_EXTRA += virtio-net.o
 endif
 
 BIN = semu
@@ -70,7 +78,7 @@ include mk/external.mk
 
 ext4.img:
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
-	$(Q)mkfs.ext4 -F $@
+	$(Q)$(MKFS_EXT4) -F $@
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
