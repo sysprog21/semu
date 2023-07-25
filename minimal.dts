@@ -62,5 +62,21 @@
             no-loopback-test;
             clock-frequency = <5000000>; /* the baudrate divisor is ignored */
         };
+
+#if SEMU_FEATURE_VIRTIONET
+        net0: virtio@4100000 {
+            compatible = "virtio,mmio";
+            reg = <0x4100000 0x100000>;
+            interrupts = <2>;
+        };
+#endif
+
+#if SEMU_FEATURE_VIRTIOBLK
+        blk0: virtio@4200000 {
+            compatible = "virtio,mmio";
+            reg = <0x4200000 0x200>;
+            interrupts = <3>;
+        };
+#endif
     };
 };

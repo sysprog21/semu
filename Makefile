@@ -20,14 +20,6 @@ ENABLE_VIRTIONET := 0
 endif
 $(call set-feature, VIRTIONET)
 
-# device tree
-# TODO: generate device tree source upon configurations
-ifeq ($(UNAME_S),Linux)
-MINIMAL_DTS = minimal-virtio.dts
-else
-MINIMAL_DTS = minimal.dts
-endif
-
 BIN = semu
 all: $(BIN) minimal.dtb
 
@@ -51,9 +43,19 @@ $(BIN): $(OBJS)
 
 DTC ?= dtc
 
-minimal.dtb: $(MINIMAL_DTS)
+# GNU Make treats the space character as a separator. The only way to handle
+# filtering a pattern with space characters in a Makefile is by replacing spaces
+# with another character that is guaranteed not to appear in the variable value.
+# For instance, one can choose a character like '^' that is known not to be
+# present in the variable value.
+# Reference: https://stackoverflow.com/questions/40886386
+E :=
+S := $E $E
+minimal.dtb: minimal.dts
 	$(VECHO) " DTC\t$@\n"
-	$(Q)$(DTC) $< > $@
+	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
+	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
+	    | $(DTC) - > $@
 
 # Rules for downloading prebuilt Linux kernel image
 include mk/external.mk
