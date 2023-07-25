@@ -378,7 +378,7 @@ static int semu_start(int argc, char **argv)
     uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
     map_file(&ram_loc, dtb_file);
-    /* TODO: load disk image via virtio_blk */
+
     /* Hook for unmapping files */
     atexit(unmap_files);
 
