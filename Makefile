@@ -5,20 +5,28 @@ CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
 
 OBJS_EXTRA :=
+# command line option
+OPTS :=
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
-OBJS_EXTRA += virtio-blk.o
 $(call set-feature, VIRTIOBLK)
+DISKIMG_FILE :=
+ifeq ($(call has, VIRTIOBLK), 1)
+OBJS_EXTRA += virtio-blk.o
+DISKIMG_FILE := ext4.img
+OPTS += -d $(DISKIMG_FILE)
+endif
 
 # virtio-net
 ENABLE_VIRTIONET ?= 1
-ifeq ($(UNAME_S),Linux)
-OBJS_EXTRA += virtio-net.o
-else
+ifneq ($(UNAME_S),Linux)
 ENABLE_VIRTIONET := 0
 endif
 $(call set-feature, VIRTIONET)
+ifeq ($(call has, VIRTIONET), 1)
+OBJS_EXTRA += virtio-net.o
+endif
 
 BIN = semu
 all: $(BIN) minimal.dtb
@@ -64,9 +72,9 @@ ext4.img:
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
 	$(Q)mkfs.ext4 -F $@
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA) ext4.img
+check: $(BIN) minimal.dtb $(KERNEL_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -d ext4.img
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb $(OPTS)
 
 build-image:
 	scripts/build-image.sh
