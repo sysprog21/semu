@@ -64,8 +64,8 @@ struct vblk_req_header {
     uint8_t status;
 } __attribute__((packed));
 
-struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
-int vblk_dev_cnt = 0;
+static struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
+static int vblk_dev_cnt = 0;
 
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {

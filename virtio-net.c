@@ -41,8 +41,8 @@ struct virtio_net_config {
     uint16_t mtu;
 } __attribute__((packed));
 
-struct virtio_net_config vnet_configs[VNET_DEV_CNT_MAX];
-int vnet_dev_cnt = 0;
+static struct virtio_net_config vnet_configs[VNET_DEV_CNT_MAX];
+static int vnet_dev_cnt = 0;
 
 static void virtio_net_set_fail(virtio_net_state_t *vnet)
 {
