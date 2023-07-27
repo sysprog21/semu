@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -16,10 +17,45 @@
 
 #define DISK_BLK_SIZE 512
 
+#define VBLK_DEV_CNT_MAX 1
+
 #define VBLK_FEATURES_0 0
 #define VBLK_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
 #define VBLK_QUEUE_NUM_MAX 1024
 #define VBLK_QUEUE (vblk->queues[vblk->QueueSel])
+
+#define PRIV(x) ((struct virtio_blk_config *) x->priv)
+
+struct virtio_blk_config {
+    uint64_t capacity;
+    uint32_t size_max;
+    uint32_t seg_max;
+
+    struct virtio_blk_geometry {
+        uint16_t cylinders;
+        uint8_t heads;
+        uint8_t sectors;
+    } geometry;
+
+    uint32_t blk_size;
+
+    struct virtio_blk_topology {
+        uint8_t physical_block_exp;
+        uint8_t alignment_offset;
+        uint16_t min_io_size;
+        uint32_t opt_io_size;
+    } topology;
+
+    uint8_t writeback;
+    uint8_t unused0[3];
+    uint32_t max_discard_sectors;
+    uint32_t max_discard_seg;
+    uint32_t discard_sector_alignment;
+    uint32_t max_write_zeroes_sectors;
+    uint32_t max_write_zeroes_seg;
+    uint8_t write_zeroes_may_unmap;
+    uint8_t unused1[3];
+} __attribute__((packed));
 
 struct vblk_req_header {
     uint32_t type;
@@ -27,6 +63,9 @@ struct vblk_req_header {
     uint64_t sector;
     uint8_t status;
 } __attribute__((packed));
+
+struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
+int vblk_dev_cnt = 0;
 
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {
@@ -52,11 +91,13 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     /* Reset */
     uint32_t *ram = vblk->ram;
     uint32_t *disk = vblk->disk;
-    uint32_t capacity = vblk->capacity;
+    void *priv = vblk->priv;
+    uint32_t capacity = PRIV(vblk)->capacity;
     memset(vblk, 0, sizeof(*vblk));
     vblk->ram = ram;
     vblk->disk = disk;
-    vblk->capacity = capacity;
+    vblk->priv = priv;
+    PRIV(vblk)->capacity = capacity;
 }
 
 static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
@@ -128,7 +169,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
 
     /* Check sector index is valid */
-    if (sector > (vblk->capacity - 1)) {
+    if (sector > (PRIV(vblk)->capacity - 1)) {
         *status = VIRTIO_BLK_S_IOERR;
         return -1;
     }
@@ -219,125 +260,129 @@ static bool virtio_blk_reg_read(virtio_blk_state_t *vblk,
                                 uint32_t addr,
                                 uint32_t *value)
 {
-    /* TODO: replace the register address with enum.
-     * For the address after the configuration space, it should be
-     * handled by structure pointer depend on the device.
-     */
+#define _(reg) VIRTIO_##reg
     switch (addr) {
-    case 0: /* MagicValue (R) */
+    case _(MagicValue):
         *value = 0x74726976;
         return true;
-    case 1: /* Version (R) */
+    case _(Version):
         *value = 2;
         return true;
-    case 2: /* DeviceID (R) */
+    case _(DeviceID):
         *value = 2;
         return true;
-    case 3: /* VendorID (R) */
+    case _(VendorID):
         *value = VIRTIO_VENDOR_ID;
         return true;
-    case 4: /* DeviceFeatures (R) */
+    case _(DeviceFeatures):
         *value = vblk->DeviceFeaturesSel == 0
                      ? VBLK_FEATURES_0
                      : (vblk->DeviceFeaturesSel == 1 ? VBLK_FEATURES_1 : 0);
         return true;
-    case 13: /* QueueNumMax (R) */
+    case _(QueueNumMax):
         *value = VBLK_QUEUE_NUM_MAX;
         return true;
-    case 17: /* QueueReady (RW) */
+    case _(QueueReady):
         *value = VBLK_QUEUE.ready ? 1 : 0;
         return true;
-    case 24: /* InterruptStatus (R) */
+    case _(InterruptStatus):
         *value = vblk->InterruptStatus;
         return true;
-    case 28: /* Status (RW) */
+    case _(Status):
         *value = vblk->Status;
         return true;
-    case 63: /* ConfigGeneration (R) */
+    case _(ConfigGeneration):
         *value = 0;
         return true;
-    case 64: /* CapacityLow (R) */
-        *value = 0x00000000ffffffff & vblk->capacity;
-        return true;
-    case 65: /* CapacityHigh (R) */
-        *value = vblk->capacity >> 32;
-        return true;
     default:
-        return false;
+        /* Invalid address which exceeded the range */
+        if (!RANGE_CHECK(addr, _(Config), sizeof(struct virtio_blk_config)))
+            return false;
+
+        /* Read configuration from the corresponding register */
+        *value = ((uint32_t *) PRIV(vblk))[addr - _(Config)];
+
+        return true;
     }
+#undef _
 }
 
 static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
                                  uint32_t addr,
                                  uint32_t value)
 {
-    /* TODO: replace the register address with enum.
-     * For the address after the configuration space, it should be
-     * handled by structure pointer depend on the device.
-     */
+#define _(reg) VIRTIO_##reg
     switch (addr) {
-    case 5: /* DeviceFeaturesSel (W) */
+    case _(DeviceFeaturesSel):
         vblk->DeviceFeaturesSel = value;
         return true;
-    case 8: /* DriverFeatures (W) */
+    case _(DriverFeatures):
         vblk->DriverFeaturesSel == 0 ? (vblk->DriverFeatures = value) : 0;
         return true;
-    case 9: /* DriverFeaturesSel (W) */
+    case _(DriverFeaturesSel):
         vblk->DriverFeaturesSel = value;
         return true;
-    case 12: /* QueueSel (W) */
+    case _(QueueSel):
         if (value < ARRAY_SIZE(vblk->queues))
             vblk->QueueSel = value;
         else
             virtio_blk_set_fail(vblk);
         return true;
-    case 14: /* QueueNum (W) */
+    case _(QueueNum):
         if (value > 0 && value <= VBLK_QUEUE_NUM_MAX)
             VBLK_QUEUE.QueueNum = value;
         else
             virtio_blk_set_fail(vblk);
         return true;
-    case 17: /* QueueReady (RW) */
+    case _(QueueReady):
         VBLK_QUEUE.ready = value & 1;
         if (value & 1)
             VBLK_QUEUE.last_avail = vblk->ram[VBLK_QUEUE.QueueAvail] >> 16;
         return true;
-    case 32: /* QueueDescLow (W) */
+    case _(QueueDescLow):
         VBLK_QUEUE.QueueDesc = vblk_preprocess(vblk, value);
         return true;
-    case 33: /* QueueDescHigh (W) */
+    case _(QueueDescHigh):
         if (value)
             virtio_blk_set_fail(vblk);
         return true;
-    case 36: /* QueueAvailLow (W) */
+    case _(QueueDriverLow):
         VBLK_QUEUE.QueueAvail = vblk_preprocess(vblk, value);
         return true;
-    case 37: /* QueueAvailHigh (W) */
+    case _(QueueDriverHigh):
         if (value)
             virtio_blk_set_fail(vblk);
         return true;
-    case 40: /* QueueUsedLow (W) */
+    case _(QueueDeviceLow):
         VBLK_QUEUE.QueueUsed = vblk_preprocess(vblk, value);
         return true;
-    case 41: /* QueueUsedHigh (W) */
+    case _(QueueDeviceHigh):
         if (value)
             virtio_blk_set_fail(vblk);
         return true;
-    case 20: /* QueueNotify (W) */
+    case _(QueueNotify):
         if (value < ARRAY_SIZE(vblk->queues))
             virtio_queue_notify_handler(vblk, value);
         else
             virtio_blk_set_fail(vblk);
         return true;
-    case 25: /* InterruptACK (W) */
+    case _(InterruptACK):
         vblk->InterruptStatus &= ~value;
         return true;
-    case 28: /* Status (RW) */
+    case _(Status):
         virtio_blk_update_status(vblk, value);
         return true;
     default:
-        return false;
+        /* Invalid address which exceeded the range */
+        if (!RANGE_CHECK(addr, _(Config), sizeof(struct virtio_blk_config)))
+            return false;
+
+        /* Write configuration to the corresponding register */
+        ((uint32_t *) PRIV(vblk))[addr - _(Config)] = value;
+
+        return true;
     }
+#undef _
 }
 
 void virtio_blk_read(vm_t *vm,
@@ -386,11 +431,20 @@ void virtio_blk_write(vm_t *vm,
 
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 {
+    if (vblk_dev_cnt >= VBLK_DEV_CNT_MAX) {
+        fprintf(stderr,
+                "Excedded the number of virtio-blk device can be allocated.\n");
+        exit(2);
+    }
+
+    /* Allocate memory for the private member */
+    vblk->priv = &vblk_configs[vblk_dev_cnt++];
+
     /* No disk image is provided */
     if (!disk_file) {
         /* By setting the block capacity to zero, the kernel will
          * then not to touch the device after booting */
-        vblk->capacity = 0;
+        PRIV(vblk)->capacity = 0;
         return NULL;
     }
 
@@ -417,7 +471,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     close(disk_fd);
 
     vblk->disk = disk_mem;
-    vblk->capacity = (disk_size - 1) / DISK_BLK_SIZE + 1;
+    PRIV(vblk)->capacity = (disk_size - 1) / DISK_BLK_SIZE + 1;
 
     return disk_mem;
 }
