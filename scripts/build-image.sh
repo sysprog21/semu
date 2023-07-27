@@ -32,6 +32,7 @@ function do_buildroot
     ASSERT make olddefconfig
     ASSERT make $PARALLEL
     popd
+    cp -f buildroot/output/images/rootfs.cpio ./
 }
 
 function do_linux
