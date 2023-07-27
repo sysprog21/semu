@@ -48,11 +48,8 @@ void u8250_update_interrupts(u8250_state_t *uart)
     uart->pending_ints &= uart->ier;
 
     /* Update current interrupt (higher bits -> more priority) */
-    if (uart->pending_ints) {
-        uart->current_int = 8;
-        while (!(uart->pending_ints & (1 << --uart->current_int)))
-            ; /* TODO: Rewrite with faster lookup table. */
-    }
+    if (uart->pending_ints)
+        uart->current_int = ilog2(uart->pending_ints);
 }
 
 void u8250_check_ready(u8250_state_t *uart)

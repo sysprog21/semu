@@ -763,9 +763,7 @@ void vm_step(vm_t *vm)
 
     if ((vm->sstatus_sie || !vm->s_mode) && (vm->sip & vm->sie)) {
         uint32_t applicable = (vm->sip & vm->sie);
-        uint8_t idx = 32;
-        while (!(applicable & (1 << --idx)))
-            ; /* TODO: Rewrite with faster a lookup table. */
+        uint8_t idx = ilog2(applicable);
         vm->exc_cause = (1U << 31) | idx;
         vm->stval = 0;
         vm_trap(vm);
