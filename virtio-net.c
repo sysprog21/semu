@@ -26,10 +26,6 @@
 #define VNET_QUEUE_NUM_MAX 1024
 #define VNET_QUEUE (vnet->queues[vnet->QueueSel])
 
-#define VNET_PREPROCESS_ADDR(addr)                        \
-    ((addr) < RAM_SIZE && !((addr) &0b11) ? ((addr) >> 2) \
-                                          : (virtio_net_set_fail(vnet), 0))
-
 #define PRIV(x) ((struct virtio_net_config *) x->priv)
 
 enum { VNET_QUEUE_RX = 0, VNET_QUEUE_TX = 1 };
@@ -49,6 +45,14 @@ static void virtio_net_set_fail(virtio_net_state_t *vnet)
     vnet->Status |= VIRTIO_STATUS__DEVICE_NEEDS_RESET;
     if (vnet->Status & VIRTIO_STATUS__DRIVER_OK)
         vnet->InterruptStatus |= VIRTIO_INT__CONF_CHANGE;
+}
+
+static inline uint32_t vnet_preprocess(virtio_net_state_t *vnet, uint32_t addr)
+{
+    if ((addr >= RAM_SIZE) || (addr & 0b11))
+        return virtio_net_set_fail(vnet), 0;
+
+    return addr >> 2;
 }
 
 static void virtio_net_update_status(virtio_net_state_t *vnet, uint32_t status)
@@ -327,21 +331,21 @@ static bool virtio_net_reg_write(virtio_net_state_t *vnet,
                 1; /* set VIRTQ_AVAIL_F_NO_INTERRUPT */
         return true;
     case _(QueueDescLow):
-        VNET_QUEUE.QueueDesc = VNET_PREPROCESS_ADDR(value);
+        VNET_QUEUE.QueueDesc = vnet_preprocess(vnet, value);
         return true;
     case _(QueueDescHigh):
         if (value)
             virtio_net_set_fail(vnet);
         return true;
     case _(QueueDriverLow):
-        VNET_QUEUE.QueueAvail = VNET_PREPROCESS_ADDR(value);
+        VNET_QUEUE.QueueAvail = vnet_preprocess(vnet, value);
         return true;
     case _(QueueDriverHigh):
         if (value)
             virtio_net_set_fail(vnet);
         return true;
     case _(QueueDeviceLow):
-        VNET_QUEUE.QueueUsed = VNET_PREPROCESS_ADDR(value);
+        VNET_QUEUE.QueueUsed = vnet_preprocess(vnet, value);
         return true;
     case _(QueueDeviceHigh):
         if (value)
