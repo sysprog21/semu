@@ -16,3 +16,12 @@ static inline int ilog2(int x)
 {
     return 31 - __builtin_clz(x | 1);
 }
+
+/* Range check
+ * For any variable range checking:
+ *     if (x >= minx && x <= maxx) ...
+ * it is faster to use bit operation:
+ *     if ((signed)((x - minx) | (maxx - x)) >= 0) ...
+ */
+#define RANGE_CHECK(x, minx, size) \
+    ((int32_t) ((x - minx) | (minx + size - 1 - x)) >= 0)

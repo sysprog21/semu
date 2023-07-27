@@ -1,6 +1,7 @@
 #pragma once
 
 #include "riscv.h"
+#include "virtio.h"
 
 /* RAM */
 
@@ -100,6 +101,8 @@ typedef struct {
     /* supplied by environment */
     int tap_fd;
     uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
 } virtio_net_state_t;
 
 void virtio_net_read(vm_t *core,
@@ -147,7 +150,8 @@ typedef struct {
     /* supplied by environment */
     uint32_t *ram;
     uint32_t *disk;
-    uint64_t capacity;
+    /* implementation-specific */
+    void *priv;
 } virtio_blk_state_t;
 
 void virtio_blk_read(vm_t *vm,

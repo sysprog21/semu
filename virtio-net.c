@@ -11,12 +11,15 @@
 #include <sys/ioctl.h>
 #include <sys/uio.h>
 
+#include "common.h"
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
 #include "virtio.h"
 
 #define TAP_INTERFACE "tap%d"
+
+#define VNET_DEV_CNT_MAX 1
 
 #define VNET_FEATURES_0 0
 #define VNET_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
@@ -27,7 +30,19 @@
     ((addr) < RAM_SIZE && !((addr) &0b11) ? ((addr) >> 2) \
                                           : (virtio_net_set_fail(vnet), 0))
 
+#define PRIV(x) ((struct virtio_net_config *) x->priv)
+
 enum { VNET_QUEUE_RX = 0, VNET_QUEUE_TX = 1 };
+
+struct virtio_net_config {
+    uint8_t mac[6];
+    uint16_t status;
+    uint16_t max_virtqueue_pairs;
+    uint16_t mtu;
+} __attribute__((packed));
+
+struct virtio_net_config vnet_configs[VNET_DEV_CNT_MAX];
+int vnet_dev_cnt = 0;
 
 static void virtio_net_set_fail(virtio_net_state_t *vnet)
 {
@@ -45,8 +60,10 @@ static void virtio_net_update_status(virtio_net_state_t *vnet, uint32_t status)
     /* Reset */
     int tap_fd = vnet->tap_fd;
     uint32_t *ram = vnet->ram;
+    void *priv = vnet->priv;
     memset(vnet, 0, sizeof(*vnet));
     vnet->tap_fd = tap_fd, vnet->ram = ram;
+    vnet->priv = priv;
 }
 
 static bool vnet_iovec_write(struct iovec **vecs,
@@ -218,79 +235,90 @@ static bool virtio_net_reg_read(virtio_net_state_t *vnet,
                                 uint32_t addr,
                                 uint32_t *value)
 {
+#define _(reg) VIRTIO_##reg
     switch (addr) {
-    case 0: /* MagicValue (R) */
+    case _(MagicValue):
         *value = 0x74726976;
         return true;
-    case 1: /* Version (R) */
+    case _(Version):
         *value = 2;
         return true;
-    case 2: /* DeviceID (R) */
+    case _(DeviceID):
         *value = 1;
         return true;
-    case 3: /* VendorID (R) */
+    case _(VendorID):
         *value = VIRTIO_VENDOR_ID;
         return true;
 
-    case 4: /* DeviceFeatures (R) */
+    case _(DeviceFeatures):
         *value = vnet->DeviceFeaturesSel == 0
                      ? VNET_FEATURES_0
                      : (vnet->DeviceFeaturesSel == 1 ? VNET_FEATURES_1 : 0);
         return true;
 
-    case 13: /* QueueNumMax (R) */
+    case _(QueueNumMax):
         *value = VNET_QUEUE_NUM_MAX;
         return true;
-    case 17: /* QueueReady (RW) */
+    case _(QueueReady):
         *value = VNET_QUEUE.ready ? 1 : 0;
         return true;
 
-    case 24: /* InterruptStatus (R) */
+    case _(InterruptStatus):
         *value = vnet->InterruptStatus;
         return true;
-    case 28: /* Status (RW) */
+    case _(Status):
         *value = vnet->Status;
         return true;
 
-    case 63: /* ConfigGeneration (R) */
+    case _(ConfigGeneration):
         *value = 0;
         return true;
-    /* TODO: We should also expose MAC address (even if with invalid value)
-     * under 8-bit accesses.
+
+    /* TODO: May want to check the occasion that the Linux kernel
+     * touches the MAC address of the virtio-net under 8-bit accesses
      */
     default:
-        return false;
+        /* Invalid address which exceeded the range */
+        if (!RANGE_CHECK(addr, _(Config), sizeof(struct virtio_net_config)))
+            return false;
+
+        /* Read configuration from the corresponding register */
+        *value = ((uint32_t *) PRIV(vnet))[addr - _(Config)];
+
+        return true;
     }
+#undef _
 }
 
 static bool virtio_net_reg_write(virtio_net_state_t *vnet,
                                  uint32_t addr,
                                  uint32_t value)
 {
+#define _(reg) VIRTIO_##reg
     switch (addr) {
-    case 5: /* DeviceFeaturesSel (W) */
+    case _(DeviceFeaturesSel):
         vnet->DeviceFeaturesSel = value;
         return true;
-    case 8: /* DriverFeatures (W) */
+    case _(DriverFeatures):
         vnet->DriverFeaturesSel == 0 ? (vnet->DriverFeatures = value) : 0;
         return true;
-    case 9: /* DriverFeaturesSel (W) */
+    case _(DriverFeaturesSel):
         vnet->DriverFeaturesSel = value;
         return true;
 
-    case 12: /* QueueSel (W) */
+    case _(QueueSel):
         if (value < ARRAY_SIZE(vnet->queues))
             vnet->QueueSel = value;
         else
             virtio_net_set_fail(vnet);
         return true;
-    case 14: /* QueueNum (W) */
+    case _(QueueNum):
         if (value > 0 && value <= VNET_QUEUE_NUM_MAX)
             VNET_QUEUE.QueueNum = value;
         else
             virtio_net_set_fail(vnet);
         return true;
-    case 17: /* QueueReady (RW) */
+    case _(QueueReady):
         VNET_QUEUE.ready = value & 1;
         if (value & 1)
             VNET_QUEUE.last_avail = vnet->ram[VNET_QUEUE.QueueAvail] >> 16;
@@ -298,29 +326,29 @@ static bool virtio_net_reg_write(virtio_net_state_t *vnet,
             vnet->ram[VNET_QUEUE.QueueAvail] |=
                 1; /* set VIRTQ_AVAIL_F_NO_INTERRUPT */
         return true;
-    case 32: /* QueueDescLow (W) */
+    case _(QueueDescLow):
         VNET_QUEUE.QueueDesc = VNET_PREPROCESS_ADDR(value);
         return true;
-    case 33: /* QueueDescHigh (W) */
+    case _(QueueDescHigh):
         if (value)
             virtio_net_set_fail(vnet);
         return true;
-    case 36: /* QueueAvailLow (W) */
+    case _(QueueDriverLow):
         VNET_QUEUE.QueueAvail = VNET_PREPROCESS_ADDR(value);
         return true;
-    case 37: /* QueueAvailHigh (W) */
+    case _(QueueDriverHigh):
         if (value)
             virtio_net_set_fail(vnet);
         return true;
-    case 40: /* QueueUsedLow (W) */
+    case _(QueueDeviceLow):
         VNET_QUEUE.QueueUsed = VNET_PREPROCESS_ADDR(value);
         return true;
-    case 41: /* QueueUsedHigh (W) */
+    case _(QueueDeviceHigh):
         if (value)
             virtio_net_set_fail(vnet);
         return true;
 
-    case 20: /* QueueNotify (W) */
+    case _(QueueNotify):
         if (value < ARRAY_SIZE(vnet->queues)) {
             switch (value) {
             case VNET_QUEUE_RX:
@@ -334,19 +362,27 @@ static bool virtio_net_reg_write(virtio_net_state_t *vnet,
             virtio_net_set_fail(vnet);
         }
         return true;
-    case 25: /* InterruptACK (W) */
+    case _(InterruptACK):
         vnet->InterruptStatus &= ~value;
         return true;
-    case 28: /* Status (RW) */
+    case _(Status):
         virtio_net_update_status(vnet, value);
         return true;
 
-    /* TODO: We should also expose MAC address (even if with invalid value)
-     * under 8-bit accesses.
+    /* TODO: May want to check the occasion that the Linux kernel
+     * touches the MAC address of the virtio-net under 8-bit accesses
      */
     default:
-        return false;
+        /* Invalid address which exceeded the range */
+        if (!RANGE_CHECK(addr, _(Config), sizeof(struct virtio_net_config)))
+            return false;
+
+        /* Write configuration to the corresponding register */
+        ((uint32_t *) PRIV(vnet))[addr - _(Config)] = value;
+
+        return true;
     }
+#undef _
 }
 
 void virtio_net_read(vm_t *vm,
@@ -395,6 +431,15 @@ void virtio_net_write(vm_t *vm,
 
 bool virtio_net_init(virtio_net_state_t *vnet)
 {
+    if (vnet_dev_cnt >= VNET_DEV_CNT_MAX) {
+        fprintf(stderr,
+                "Excedded the number of virtio-net device can be allocated.\n");
+        exit(2);
+    }
+
+    /* Allocate memory for the private member */
+    vnet->priv = &vnet_configs[vnet_dev_cnt++];
+
     vnet->tap_fd = open("/dev/net/tun", O_RDWR);
     if (vnet->tap_fd < 0) {
         fprintf(stderr, "failed to open TAP device: %s\n", strerror(errno));
