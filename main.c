@@ -93,7 +93,7 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_uart_interrupts(vm);
             return;
 #if SEMU_HAS(VIRTIONET)
-        case 0x41: /* VirtIO-Net */
+        case 0x41: /* virtio-net */
             virtio_net_read(vm, &data->vnet, addr & 0xFFFFF, width, value);
             emu_update_vnet_interrupts(vm);
             return;
@@ -132,7 +132,7 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_uart_interrupts(vm);
             return;
 #if SEMU_HAS(VIRTIONET)
-        case 0x41: /* VirtIO-Net */
+        case 0x41: /* virtio-net */
             virtio_net_write(vm, &data->vnet, addr & 0xFFFFF, width, value);
             emu_update_vnet_interrupts(vm);
             return;
