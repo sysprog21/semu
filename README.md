@@ -78,11 +78,12 @@ $ make build-image
 ## Usage
 
 ```
-./semu -k linux-image [-b dtb-file] [-d disk-image]
+./semu -k linux-image [-b dtb-file] [-i initrd-image] [-d disk-image]
 ```
 
 * `linux-image` is the path to the Linux kernel `Image`.
 * `dtb-file` is optional, as it specifies the user-specified device tree blob.
+* `initrd-image` is optional, as it specifies the user-specified init RAM disk image.
 * `disk-image` is optional, as it specifies the path of a disk image in ext4 file system for the virtio-blk device.
 
 ## License
