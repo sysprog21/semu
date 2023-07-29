@@ -3,13 +3,15 @@
 #   _DATA : the file to be read by specific executable.
 #   _DATA_SHA1 : the checksum of the content in _DATA
 
+COMMON_URL = https://github.com/sysprog21/semu/raw/blob
+
 # kernel
-KERNEL_DATA_URL = https://github.com/jserv/semu/raw/blob/Image.bz2
+KERNEL_DATA_URL = $(COMMON_URL)/Image.bz2
 KERNEL_DATA = Image
 KERNEL_DATA_SHA1 = 36d770efe97beac85204f1f50f8de81e3e529d84
 
 # initrd
-INITRD_DATA_URL = https://github.com/jserv/semu/raw/blob/rootfs.cpio.bz2
+INITRD_DATA_URL = $(COMMON_URL)/rootfs.cpio.bz2
 INITRD_DATA = rootfs.cpio
 INITRD_DATA_SHA1 = fad749d0a9eb33178525f961d6b82e7c0ce917a7
 
