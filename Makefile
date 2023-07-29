@@ -80,9 +80,9 @@ ext4.img:
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
 	$(Q)$(MKFS_EXT4) -F $@
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA) $(DISKIMG_FILE)
+check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -i rootfs.cpio $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
 
 build-image:
 	scripts/build-image.sh
@@ -92,7 +92,7 @@ clean:
 
 distclean: clean
 	$(Q)$(RM) minimal.dtb
-	$(Q)$(RM) Image
+	$(Q)$(RM) Image rootfs.cpio
 	$(Q)$(RM) ext4.img 
 
 -include $(deps)
