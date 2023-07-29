@@ -82,7 +82,7 @@ ext4.img:
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -i rootfs.cpio $(OPTS)
 
 build-image:
 	scripts/build-image.sh

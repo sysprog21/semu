@@ -291,34 +291,39 @@ static void map_file(char **ram_loc, const char *name)
 
 static void usage(const char *execpath)
 {
-    fprintf(stderr, "Usage: %s -k linux-image [-b dtb] [-d disk-image]\n",
-            execpath);
+    fprintf(
+        stderr,
+        "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d disk-image]\n",
+        execpath);
 }
 
 static void handle_options(int argc,
                            char **argv,
                            char **kernel_file,
                            char **dtb_file,
+                           char **initrd_file,
                            char **disk_file)
 {
-    *kernel_file = *dtb_file = *disk_file = NULL;
+    *kernel_file = *dtb_file = *initrd_file = *disk_file = NULL;
 
     int optidx = 0;
     struct option opts[] = {
-        {"kernel", 1, NULL, 'k'},
-        {"dtb", 1, NULL, 'b'},
-        {"disk", 1, NULL, 'd'},
+        {"kernel", 1, NULL, 'k'}, {"dtb", 1, NULL, 'b'},
+        {"initrd", 1, NULL, 'i'}, {"disk", 1, NULL, 'd'},
         {"help", 0, NULL, 'h'},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:d:h", opts, &optidx)) != -1) {
+    while ((c = getopt_long(argc, argv, "k:b:i:d:h", opts, &optidx)) != -1) {
         switch (c) {
         case 'k':
             *kernel_file = optarg;
             break;
         case 'b':
             *dtb_file = optarg;
+            break;
+        case 'i':
+            *initrd_file = optarg;
             break;
         case 'd':
             *disk_file = optarg;
@@ -347,8 +352,10 @@ static int semu_start(int argc, char **argv)
 {
     char *kernel_file;
     char *dtb_file;
+    char *initrd_file;
     char *disk_file;
-    handle_options(argc, argv, &kernel_file, &dtb_file, &disk_file);
+    handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
+                   &disk_file);
 
     /* Initialize the emulator */
     emu_state_t emu;
@@ -371,13 +378,27 @@ static int semu_start(int argc, char **argv)
     }
     assert(!(((uintptr_t) emu.ram) & 0b11));
 
+    /* *-----------------------------------------*
+     * |              Memory layout              |
+     * *----------------*----------------*-------*
+     * |  kernel image  |  initrd image  |  dtb  |
+     * *----------------*----------------*-------*
+     */
     char *ram_loc = (char *) emu.ram;
     /* Load Linux kernel image */
     map_file(&ram_loc, kernel_file);
-    /* Load at last 1 MiB to prevent kernel / initrd from overwriting it */
-    uint32_t dtb_addr = RAM_SIZE - 1024 * 1024; /* Device tree */
+    /* Load at last 1 MiB to prevent kernel from overwriting it */
+    uint32_t dtb_addr = RAM_SIZE - DTB_SIZE; /* Device tree */
     ram_loc = ((char *) emu.ram) + dtb_addr;
     map_file(&ram_loc, dtb_file);
+    /* Load optional initrd image at last 8 MiB before the dtb region to
+     * prevent kernel from overwritting it
+     */
+    if (initrd_file) {
+        uint32_t initrd_addr = dtb_addr - INITRD_SIZE; /* Init RAM disk */
+        ram_loc = ((char *) emu.ram) + initrd_addr;
+        map_file(&ram_loc, initrd_file);
+    }
 
     /* Hook for unmapping files */
     atexit(unmap_files);
