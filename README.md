@@ -69,13 +69,14 @@ You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwar
 ## Usage
 
 ```shell
-./semu -k linux-image [-b dtb-file] [-i initrd-image] [-d disk-image]
+./semu -k linux-image [-b dtb-file] [-i initrd-image] [-d disk-image] [-c max_cycles]
 ```
 
 * `linux-image` is the path to the Linux kernel `Image`.
 * `dtb-file` is optional, as it specifies the user-specified device tree blob.
 * `initrd-image` is optional, as it specifies the user-specified initial RAM disk image.
 * `disk-image` is optional, as it specifies the path of a disk image in ext4 file system for the virtio-blk device.
+* `max_cycles` allows to set a limit of cycles the emulator should run for - for testing performance
 
 ## Build Linux kernel image and root file system
 
