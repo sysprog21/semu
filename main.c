@@ -454,7 +454,18 @@ static int semu_start(int argc, char **argv)
             if (emu.vblk.InterruptStatus)
                 emu_update_vblk_interrupts(&vm);
 #endif
-            if (cycle_limit && vm.insn_count >= cycle_limit) exit(0);
+            if (cycle_limit && vm.insn_count >= cycle_limit) {
+#if MMU_CACHE_STATS
+                printf("\n");
+                printf("fetch hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_fetch_ctx.hits, vm.mmu_cache_fetch_ctx.misses);
+                printf(" load hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_load_ctx.hits, vm.mmu_cache_load_ctx.misses);
+                printf("store hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_store_ctx.hits, vm.mmu_cache_store_ctx.misses);
+#endif
+                exit(0);
+            }
         }
 
         if (vm.insn_count_hi > emu.timer_hi ||
