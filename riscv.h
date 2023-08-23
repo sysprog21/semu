@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "mmu_cache.h"
 
 /* ERR_EXCEPTION indicates that the instruction has raised one of the
  * exceptions defined in the specification. If this flag is set, the
@@ -95,6 +96,8 @@ struct __vm_internal {
     uint32_t scounteren;
     uint32_t satp; /**< MMU */
     uint32_t *page_table;
+
+    struct _mmu_cache_ctx mmu_cache_fetch_ctx, mmu_cache_load_ctx, mmu_cache_store_ctx;
 
     void *priv; /**< environment supplied */
 
