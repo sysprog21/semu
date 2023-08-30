@@ -609,11 +609,17 @@ static uint32_t op_mul(uint32_t insn, uint32_t a, uint32_t b)
     case 0b011: /* MULHU */
         return (uint32_t) ((((uint64_t) a) * ((uint64_t) b)) >> 32);
     case 0b100: /* DIV */
-        return b ? (uint32_t) (((int32_t) a) / ((int32_t) b)) : 0xFFFFFFFF;
+        return b ? (a == 0x80000000 && (int32_t) b == -1)
+                       ? 0x80000000
+                       : (uint32_t) (((int32_t) a) / ((int32_t) b))
+                 : 0xFFFFFFFF;
     case 0b101: /* DIVU */
         return b ? (a / b) : 0xFFFFFFFF;
     case 0b110: /* REM */
-        return b ? (uint32_t) (((int32_t) a) % ((int32_t) b)) : a;
+        return b ? (a == 0x80000000 && (int32_t) b == -1)
+                       ? 0
+                       : (uint32_t) (((int32_t) a) % ((int32_t) b))
+                 : a;
     case 0b111: /* REMU */
         return b ? (a % b) : a;
     }
