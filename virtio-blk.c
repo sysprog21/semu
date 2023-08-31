@@ -433,7 +433,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 {
     if (vblk_dev_cnt >= VBLK_DEV_CNT_MAX) {
         fprintf(stderr,
-                "Excedded the number of virtio-blk device can be allocated.\n");
+                "Exceeded the number of virtio-blk devices that can be allocated.\n");
         exit(2);
     }
 
