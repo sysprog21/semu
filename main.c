@@ -239,13 +239,14 @@ static void handle_sbi_ecall(vm_t *vm)
     vm->error = ERR_NONE;
 }
 
+#define MAPPER_SIZE 4
+
 struct mapper {
     char *addr;
     uint32_t size;
 };
 
-/* FIXME: Avoid hardcoding the capacity */
-static struct mapper mapper[4] = {0};
+static struct mapper mapper[MAPPER_SIZE] = {0};
 static int map_index = 0;
 static void unmap_files(void)
 {
