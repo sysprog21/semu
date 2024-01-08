@@ -185,7 +185,7 @@ static inline sbi_ret_t handle_sbi_ecall_RST(vm_t *vm, int32_t fid)
 }
 
 #define RV_MVENDORID 0x12345678
-#define RV_MARCHID ((1 << 31) | 1)
+#define RV_MARCHID ((1ULL << 31) | 1)
 #define RV_MIMPID 1
 
 static inline sbi_ret_t handle_sbi_ecall_BASE(vm_t *vm, int32_t fid)
