@@ -594,8 +594,11 @@ static uint32_t op_mul(uint32_t insn, uint32_t a, uint32_t b)
 {
     /* TODO: Test ifunc7 zeros */
     switch (decode_func3(insn)) {
-    case 0b000: /* MUL */
-        return a * b;
+    case 0b000: { /* MUL */
+        const int64_t _a = (int32_t) a;
+        const int64_t _b = (int32_t) b;
+        return ((uint64_t) (_a * _b)) & ((1ULL << 32) - 1);
+    }
     case 0b001: { /* MULH */
         const int64_t _a = (int32_t) a;
         const int64_t _b = (int32_t) b;
