@@ -6,7 +6,7 @@
     model = "semu";
 
     aliases {
-        serial0 = "/soc/serial@4000000";
+        serial0 = "/soc@F0000000/serial@4000000";
     };
 
     chosen {
@@ -28,6 +28,7 @@
             mmu-type = "riscv,rv32";
             cpu0_intc: interrupt-controller {
                 #interrupt-cells = <1>;
+                #address-cells = <0>;
                 interrupt-controller;
                 compatible = "riscv,cpu-intc";
             };
@@ -40,7 +41,7 @@
         reg-names = "sram0";
     };
 
-    soc {
+    soc: soc@F0000000 {
         #address-cells = <1>;
         #size-cells = <1>;
         compatible = "simple-bus";
