@@ -294,7 +294,8 @@ static void usage(const char *execpath)
 {
     fprintf(
         stderr,
-        "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d disk-image]\n",
+        "Usage: %s -k linux-image [-b dtb] [-i initrd-image] "
+        "[-d disk-image] [-c max_cycles]\n",
         execpath);
 }
 
@@ -303,7 +304,8 @@ static void handle_options(int argc,
                            char **kernel_file,
                            char **dtb_file,
                            char **initrd_file,
-                           char **disk_file)
+                           char **disk_file,
+                           uint32_t *cycle_limit)
 {
     *kernel_file = *dtb_file = *initrd_file = *disk_file = NULL;
 
@@ -311,11 +313,12 @@ static void handle_options(int argc,
     struct option opts[] = {
         {"kernel", 1, NULL, 'k'}, {"dtb", 1, NULL, 'b'},
         {"initrd", 1, NULL, 'i'}, {"disk", 1, NULL, 'd'},
+        {"max_cycles", 1, NULL, 'c'},
         {"help", 0, NULL, 'h'},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:h", opts, &optidx)) != -1) {
+    while ((c = getopt_long(argc, argv, "k:b:i:d:c:h", opts, &optidx)) != -1) {
         switch (c) {
         case 'k':
             *kernel_file = optarg;
@@ -328,6 +331,14 @@ static void handle_options(int argc,
             break;
         case 'd':
             *disk_file = optarg;
+            break;
+        case 'c':
+            if (sscanf(optarg, "%u", cycle_limit) != 1) {
+                fprintf(stderr, "Cannot parse -c max_cycles argument '%s'.\n",
+                        optarg);
+                usage(argv[0]);
+                exit(2);
+            }
             break;
         case 'h':
             usage(argv[0]);
@@ -355,8 +366,9 @@ static int semu_start(int argc, char **argv)
     char *dtb_file;
     char *initrd_file;
     char *disk_file;
+    uint32_t cycle_limit = 0;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file);
+                   &disk_file, &cycle_limit);
 
     /* Initialize the emulator */
     emu_state_t emu;
@@ -443,6 +455,18 @@ static int semu_start(int argc, char **argv)
             if (emu.vblk.InterruptStatus)
                 emu_update_vblk_interrupts(&vm);
 #endif
+            if (cycle_limit && vm.insn_count >= cycle_limit) {
+#if MMU_CACHE_STATS
+                printf("\n");
+                printf("fetch hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_fetch_ctx.hits, vm.mmu_cache_fetch_ctx.misses);
+                printf(" load hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_load_ctx.hits, vm.mmu_cache_load_ctx.misses);
+                printf("store hits: %12ld, misses: %12ld\n",
+                       vm.mmu_cache_store_ctx.hits, vm.mmu_cache_store_ctx.misses);
+#endif
+                exit(0);
+            }
         }
 
         if (vm.insn_count_hi > emu.timer_hi ||

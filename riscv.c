@@ -167,11 +167,19 @@ static inline uint32_t read_rs2(const vm_t *vm, uint32_t insn)
 
 /* virtual addressing */
 
+static void mmu_invalidate_caches(vm_t *vm) {
+    mmu_cache_reset_ctx(&vm->mmu_cache_fetch_ctx);
+    mmu_cache_reset_ctx(&vm->mmu_cache_load_ctx);
+    mmu_cache_reset_ctx(&vm->mmu_cache_store_ctx);
+}
+
+
 /* Pre-verify the root page table to minimize page table access during
  * translation time.
  */
 static void mmu_set(vm_t *vm, uint32_t satp)
 {
+    mmu_invalidate_caches(vm);
     if (satp >> 31) {
         uint32_t *page_table = vm->mem_page_table(vm, satp & MASK(22));
         if (!page_table)
@@ -228,16 +236,25 @@ static bool mmu_lookup(const vm_t *vm,
     return true;
 }
 
-static void mmu_translate(vm_t *vm,
-                          uint32_t *addr,
-                          const uint32_t access_bits,
-                          const uint32_t set_bits,
-                          const bool skip_privilege_test,
-                          const uint8_t fault,
-                          const uint8_t pfault)
+static inline void mmu_translate(vm_t *vm,
+                                 struct _mmu_cache_ctx *cctx,
+                                 uint32_t *addr,
+                                 const uint32_t access_bits,
+                                 const uint32_t set_bits,
+                                 const bool skip_privilege_test,
+                                 const uint8_t fault,
+                                 const uint8_t pfault)
 {
+    const uint32_t high_part = *addr & ~MASK(RV_PAGE_SHIFT);
+    uint32_t caddr=mmu_cache_lookup(cctx, high_part);
+
     /* NOTE: save virtual address, for physical accesses, to set exception. */
     vm->exc_val = *addr;
+
+    if (caddr) {
+        *addr= caddr | (*addr & MASK(RV_PAGE_SHIFT));
+        return;
+    }
     if (!vm->page_table)
         return;
 
@@ -265,16 +282,18 @@ static void mmu_translate(vm_t *vm,
         *pte_ref = new_pte;
 
     *addr = ((*addr) & MASK(RV_PAGE_SHIFT)) | (ppn << RV_PAGE_SHIFT);
+    mmu_cache_insert(cctx, high_part, ppn << RV_PAGE_SHIFT);
 }
 
 static void mmu_fence(vm_t *vm UNUSED, uint32_t insn UNUSED)
 {
-    /* no-op for now */
+    mmu_invalidate_caches(vm);
 }
 
 static void mmu_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
 {
-    mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
+    mmu_translate(vm, &vm->mmu_cache_fetch_ctx,
+                  &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
                   RV_EXC_FETCH_PFAULT);
     if (vm->error)
         return;
@@ -287,7 +306,8 @@ static void mmu_load(vm_t *vm,
                      uint32_t *value,
                      bool reserved)
 {
-    mmu_translate(vm, &addr, (1 << 1) | (vm->sstatus_mxr ? (1 << 3) : 0),
+    mmu_translate(vm, &vm->mmu_cache_load_ctx,
+                  &addr, (1 << 1) | (vm->sstatus_mxr ? (1 << 3) : 0),
                   (1 << 6), vm->sstatus_sum && vm->s_mode, RV_EXC_LOAD_FAULT,
                   RV_EXC_LOAD_PFAULT);
     if (vm->error)
@@ -306,7 +326,8 @@ static bool mmu_store(vm_t *vm,
                       uint32_t value,
                       bool cond)
 {
-    mmu_translate(vm, &addr, (1 << 2), (1 << 6) | (1 << 7),
+    mmu_translate(vm, &vm->mmu_cache_store_ctx,
+                  &addr, (1 << 2), (1 << 6) | (1 << 7),
                   vm->sstatus_sum && vm->s_mode, RV_EXC_STORE_FAULT,
                   RV_EXC_STORE_PFAULT);
     if (vm->error)
@@ -336,6 +357,8 @@ void vm_set_exception(vm_t *vm, uint32_t cause, uint32_t val)
 
 void vm_trap(vm_t *vm)
 {
+    mmu_invalidate_caches(vm);
+
     /* Fill exception fields */
     vm->scause = vm->exc_cause;
     vm->stval = vm->exc_val;
@@ -357,6 +380,8 @@ void vm_trap(vm_t *vm)
 
 static void op_sret(vm_t *vm)
 {
+    mmu_invalidate_caches(vm);
+
     /* Restore from stack */
     vm->pc = vm->sepc;
     vm->s_mode = vm->sstatus_spp;
