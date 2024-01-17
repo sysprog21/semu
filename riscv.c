@@ -167,11 +167,17 @@ static inline uint32_t read_rs2(const vm_t *vm, uint32_t insn)
 
 /* virtual addressing */
 
+static void mmu_invalidate(vm_t *vm)
+{
+    vm->cache_fetch.n_pages = 0xFFFFFFFF;
+}
+
 /* Pre-verify the root page table to minimize page table access during
  * translation time.
  */
 static void mmu_set(vm_t *vm, uint32_t satp)
 {
+    mmu_invalidate(vm);
     if (satp >> 31) {
         uint32_t *page_table = vm->mem_page_table(vm, satp & MASK(22));
         if (!page_table)
@@ -267,18 +273,27 @@ static void mmu_translate(vm_t *vm,
     *addr = ((*addr) & MASK(RV_PAGE_SHIFT)) | (ppn << RV_PAGE_SHIFT);
 }
 
-static void mmu_fence(vm_t *vm UNUSED, uint32_t insn UNUSED)
+static void mmu_fence(vm_t *vm, uint32_t insn UNUSED)
 {
-    /* no-op for now */
+    mmu_invalidate(vm);
 }
 
 static void mmu_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
 {
-    mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
-                  RV_EXC_FETCH_PFAULT);
-    if (vm->error)
-        return;
-    vm->mem_fetch(vm, addr, value);
+    uint32_t vpn = addr >> RV_PAGE_SHIFT;
+    if (unlikely(vpn != vm->cache_fetch.n_pages)) {
+        mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
+                      RV_EXC_FETCH_PFAULT);
+        if (vm->error)
+            return;
+        uint32_t *page_addr;
+        vm->mem_fetch(vm, addr >> RV_PAGE_SHIFT, &page_addr);
+        if (vm->error)
+            return;
+        vm->cache_fetch.n_pages = vpn;
+        vm->cache_fetch.page_addr = page_addr;
+    }
+    *value = vm->cache_fetch.page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
 }
 
 static void mmu_load(vm_t *vm,
@@ -347,6 +362,7 @@ void vm_trap(vm_t *vm)
 
     /* Set */
     vm->sstatus_sie = false;
+    mmu_invalidate(vm);
     vm->s_mode = true;
     vm->pc = vm->stvec_addr;
     if (vm->stvec_vectored)
@@ -359,6 +375,7 @@ static void op_sret(vm_t *vm)
 {
     /* Restore from stack */
     vm->pc = vm->sepc;
+    mmu_invalidate(vm);
     vm->s_mode = vm->sstatus_spp;
     vm->sstatus_sie = vm->sstatus_spie;
 
@@ -761,6 +778,11 @@ static void op_amo(vm_t *vm, uint32_t insn)
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
         return;
     }
+}
+
+void vm_init(vm_t *vm)
+{
+    mmu_invalidate(vm);
 }
 
 void vm_step(vm_t *vm)

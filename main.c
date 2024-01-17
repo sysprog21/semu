@@ -15,15 +15,15 @@
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
  */
-static void mem_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
+static void mem_fetch(vm_t *vm, uint32_t n_pages, uint32_t **page_addr)
 {
     emu_state_t *data = (emu_state_t *) vm->priv;
-    if (unlikely(addr >= RAM_SIZE)) {
+    if (unlikely(n_pages >= RAM_SIZE / RV_PAGE_SIZE)) {
         /* TODO: check for other regions */
         vm_set_exception(vm, RV_EXC_FETCH_FAULT, vm->exc_val);
         return;
     }
-    *value = data->ram[addr >> 2];
+    *page_addr = &data->ram[n_pages << (RV_PAGE_SHIFT - 2)];
 }
 
 /* Similarly, only main memory pages can be used as page tables. */
@@ -369,6 +369,7 @@ static int semu_start(int argc, char **argv)
         .mem_store = mem_store,
         .mem_page_table = mem_page_table,
     };
+    vm_init(&vm);
 
     /* Set up RAM */
     emu.ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,

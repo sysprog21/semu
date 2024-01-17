@@ -29,10 +29,15 @@ typedef enum {
     ERR_USER,      /**< user-specific error */
 } vm_error_t;
 
-/* To use the emulator, start by initializing a "vm_t" struct with zero values
- * and set the required environment-supplied callbacks. You may also set other
- * necessary fields such as argument registers and s_mode, ensuring that all
- * field restrictions are met to avoid undefined behavior.
+typedef struct {
+    uint32_t n_pages;
+    uint32_t *page_addr;
+} mmu_cache_t;
+
+/* To use the emulator, start by initializing a vm_t object with zero values,
+ * invoke vm_init(), and set the required environment-supplied callbacks. You
+ * may also set other necessary fields such as argument registers and s_mode,
+ * ensuring that all field restrictions are met to avoid undefined behavior.
  *
  * Once the emulator is set up, execute the emulation loop by calling
  * "vm_step()" repeatedly. Each call attempts to execute a single instruction.
@@ -77,6 +82,8 @@ struct __vm_internal {
      */
     uint32_t exc_cause, exc_val;
 
+    mmu_cache_t cache_fetch;
+
     /* Supervisor state */
     bool s_mode;
     bool sstatus_spp; /**< state saved at trap */
@@ -101,7 +108,7 @@ struct __vm_internal {
     /* Memory access sets the vm->error to indicate failure. On successful
      * access, it reads or writes the specified "value".
      */
-    void (*mem_fetch)(vm_t *vm, uint32_t addr, uint32_t *value);
+    void (*mem_fetch)(vm_t *vm, uint32_t n_pages, uint32_t **page_addr);
     void (*mem_load)(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value);
     void (*mem_store)(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value);
 
@@ -111,6 +118,8 @@ struct __vm_internal {
      */
     uint32_t *(*mem_page_table)(const vm_t *vm, uint32_t ppn);
 };
+
+void vm_init(vm_t *vm);
 
 /* Emulate the next instruction. This is a no-op if the error is already set. */
 void vm_step(vm_t *vm);
