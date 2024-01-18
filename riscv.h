@@ -68,7 +68,7 @@ struct __vm_internal {
      * utilized in these capacities and should not be modified between logical
      * resets.
      */
-    uint32_t insn_count, insn_count_hi;
+    uint64_t insn_count;
 
     /* Instruction execution state must be set to "NONE" for instruction
      * execution to continue. If the state is not "NONE," the vm_step()

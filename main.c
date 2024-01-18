@@ -162,8 +162,8 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(vm_t *vm, int32_t fid)
     emu_state_t *data = (emu_state_t *) vm->priv;
     switch (fid) {
     case SBI_TIMER__SET_TIMER:
-        data->timer_lo = vm->x_regs[RV_R_A0];
-        data->timer_hi = vm->x_regs[RV_R_A1];
+        data->timer = (((uint64_t) vm->x_regs[RV_R_A1]) << 32) |
+                      (uint64_t) (vm->x_regs[RV_R_A0]);
         return (sbi_ret_t){SBI_SUCCESS, 0};
     default:
         return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
@@ -406,7 +406,7 @@ static int semu_start(int argc, char **argv)
     atexit(unmap_files);
 
     /* Set up RISC-V hart */
-    emu.timer_hi = emu.timer_lo = 0xFFFFFFFF;
+    emu.timer = 0xFFFFFFFFFFFFFFFF;
     vm.s_mode = true;
     vm.x_regs[RV_R_A0] = 0; /* hart ID. i.e., cpuid */
     vm.x_regs[RV_R_A1] = dtb_addr;
@@ -446,8 +446,7 @@ static int semu_start(int argc, char **argv)
 #endif
         }
 
-        if (vm.insn_count_hi > emu.timer_hi ||
-            (vm.insn_count_hi == emu.timer_hi && vm.insn_count > emu.timer_lo))
+        if (vm.insn_count > emu.timer)
             vm.sip |= RV_INT_STI_BIT;
         else
             vm.sip &= ~RV_INT_STI_BIT;

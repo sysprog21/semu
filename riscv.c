@@ -439,7 +439,7 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
              * and writes should set the value after the increment. However,
              * we do not expose any way to write the counters.
              */
-            *value = (addr & (1 << 7)) ? vm->insn_count_hi : vm->insn_count;
+            *value = vm->insn_count >> ((addr & (1 << 7)) ? 32 : 0);
         }
         return;
     }
@@ -806,9 +806,8 @@ void vm_step(vm_t *vm)
         return;
 
     vm->pc += 4;
+    /* Assume no integer overflow */
     vm->insn_count++;
-    if (!vm->insn_count)
-        vm->insn_count_hi++;
 
     uint32_t insn_opcode = insn & MASK(7), value;
     switch (insn_opcode) {

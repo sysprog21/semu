@@ -185,5 +185,5 @@ typedef struct {
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
 #endif
-    uint32_t timer_lo, timer_hi;
+    uint64_t timer;
 } emu_state_t;
