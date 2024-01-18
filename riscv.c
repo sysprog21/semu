@@ -391,7 +391,7 @@ static void op_privileged(vm_t *vm, uint32_t insn)
         return;
     }
     if (insn & ((MASK(5) << 7) | (MASK(5) << 15))) {
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
     switch (decode_i_unsigned(insn)) {
@@ -408,7 +408,7 @@ static void op_privileged(vm_t *vm, uint32_t insn)
                          /* TODO: Implement this */
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         break;
     }
 }
@@ -432,7 +432,7 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
     if ((addr >> 8) == 0xC) {
         uint16_t idx = addr & MASK(7);
         if (idx >= 0x20 || !(vm->s_mode || ((vm->scounteren >> idx) & 1)))
-            vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+            vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         else {
             /* Use the instruction counter for all of the counters.
              * Ideally, reads should return the value before the increment,
@@ -445,7 +445,7 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
     }
 
     if (!vm->s_mode) {
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 
@@ -488,14 +488,14 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
         *value = vm->stval;
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
     }
 }
 
 static void csr_write(vm_t *vm, uint16_t addr, uint32_t value)
 {
     if (!vm->s_mode) {
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 
@@ -540,7 +540,7 @@ static void csr_write(vm_t *vm, uint16_t addr, uint32_t value)
         vm->stval = value;
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
     }
 }
 
@@ -600,7 +600,7 @@ static void op_system(vm_t *vm, uint32_t insn)
         break;
 
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }
@@ -689,7 +689,7 @@ static bool op_jmp(vm_t *vm, uint32_t insn, uint32_t a, uint32_t b)
     case 0b101: /* BFUNC_BGE */
         return ((int32_t) a) >= ((int32_t) b);
     }
-    vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+    vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
     return false;
 }
 
@@ -724,7 +724,7 @@ static void op_jump_link(vm_t *vm, uint32_t insn, uint32_t addr)
 static void op_amo(vm_t *vm, uint32_t insn)
 {
     if (unlikely(decode_func3(insn) != 0b010 /* amo.w */))
-        return vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        return vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
     uint32_t addr = read_rs1(vm, insn);
     uint32_t value, value2;
     switch (decode_func5(insn)) {
@@ -732,7 +732,7 @@ static void op_amo(vm_t *vm, uint32_t insn)
         if (addr & 0b11)
             return vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, addr);
         if (decode_rs2(insn))
-            return vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+            return vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         mmu_load(vm, addr, RV_MEM_LW, &value, true);
         if (vm->error)
             return;
@@ -775,7 +775,7 @@ static void op_amo(vm_t *vm, uint32_t insn)
         AMO_OP(value > value2 ? value : value2);
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }
@@ -860,7 +860,7 @@ void vm_step(vm_t *vm)
                     /* TODO: implement for multi-threading */
             break;
         default:
-            vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+            vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
             break;
         }
         break;
@@ -871,7 +871,7 @@ void vm_step(vm_t *vm)
         op_system(vm, insn);
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         break;
     }
 }

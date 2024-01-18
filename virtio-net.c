@@ -407,7 +407,7 @@ void virtio_net_read(vm_t *vm,
         vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
         return;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }
@@ -428,7 +428,7 @@ void virtio_net_write(vm_t *vm,
         vm_set_exception(vm, RV_EXC_STORE_MISALIGN, vm->exc_val);
         return;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }

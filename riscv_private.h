@@ -62,7 +62,7 @@ enum {
 enum {
     RV_EXC_PC_MISALIGN = 0,    /**< Instruction address misaligned */
     RV_EXC_FETCH_FAULT = 1,    /**< Instruction access fault */
-    RV_EXC_ILLEGAL_INSTR = 2,  /**< Illegal instruction */
+    RV_EXC_ILLEGAL_INSN = 2,   /**< Illegal instruction */
     RV_EXC_BREAKPOINT = 3,     /**< Breakpoint */
     RV_EXC_LOAD_MISALIGN = 4,  /**< Load address misaligned */
     RV_EXC_LOAD_FAULT = 5,     /**< Load access fault */

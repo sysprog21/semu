@@ -38,7 +38,7 @@ void ram_read(vm_t *vm,
         RAM_FUNC(1, *value = (uint32_t) (int32_t) (int8_t) ((*cell) >> offset));
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }
@@ -63,7 +63,7 @@ void ram_write(vm_t *vm,
                                                                    << offset);
         break;
     default:
-        vm_set_exception(vm, RV_EXC_ILLEGAL_INSTR, 0);
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         return;
     }
 }
