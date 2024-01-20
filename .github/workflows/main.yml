@@ -10,8 +10,12 @@ jobs:
     - name: install-dependencies
       run: | 
             sudo apt-get install build-essential device-tree-compiler
+            sudo apt-get install expect
     - name: default build
       run: make
+      shell: bash
+    - name: automated test
+      run: .ci/autorun.sh
       shell: bash
 
   coding_style:
@@ -21,5 +25,5 @@ jobs:
     - name: coding convention
       run: |
             sudo apt-get install -q -y clang-format-12
-            sh .ci/check-format.sh
+            .ci/check-format.sh
       shell: bash
