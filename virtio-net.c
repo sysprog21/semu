@@ -116,15 +116,15 @@ static bool vnet_iovec_read(struct iovec **vecs,
 /* Require existing 'desc_idx' to use as iteration variable, and input
  * 'buffer_idx'.
  */
-#define VNET_ITERATE_BUFFER(checked, body)                      \
-    desc_idx = buffer_idx;                                      \
-    while (1) {                                                 \
-        if (checked && desc_idx >= queue->QueueNum)             \
-            return virtio_net_set_fail(vnet);                   \
-        uint32_t *desc = &ram[queue->QueueDesc + desc_idx * 4]; \
-        uint16_t desc_flags = desc[3];                          \
-        body if (!(desc_flags & VIRTIO_DESC_F_NEXT)) break;     \
-        desc_idx = desc[3] >> 16;                               \
+#define VNET_ITERATE_BUFFER(checked, body)                            \
+    desc_idx = buffer_idx;                                            \
+    while (1) {                                                       \
+        if (checked && desc_idx >= queue->QueueNum)                   \
+            return virtio_net_set_fail(vnet);                         \
+        const uint32_t *desc = &ram[queue->QueueDesc + desc_idx * 4]; \
+        uint16_t desc_flags = desc[3];                                \
+        body if (!(desc_flags & VIRTIO_DESC_F_NEXT)) break;           \
+        desc_idx = desc[3] >> 16;                                     \
     }
 
 /* Input: 'buffer_idx'.

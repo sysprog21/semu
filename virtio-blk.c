@@ -106,7 +106,7 @@ static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
                                      uint32_t len)
 {
     void *dest = (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
-    void *src = (void *) ((uintptr_t) vblk->ram + desc_addr);
+    const void *src = (void *) ((uintptr_t) vblk->ram + desc_addr);
     memcpy(dest, src, len);
 }
 
@@ -116,7 +116,8 @@ static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
                                     uint32_t len)
 {
     void *dest = (void *) ((uintptr_t) vblk->ram + desc_addr);
-    void *src = (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
+    const void *src =
+        (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
     memcpy(dest, src, len);
 }
 
@@ -140,7 +141,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     /* Collect the descriptors */
     for (int i = 0; i < 3; i++) {
         /* The size of the `struct virtq_desc` is 4 words */
-        uint32_t *desc = &vblk->ram[queue->QueueDesc + desc_idx * 4];
+        const uint32_t *desc = &vblk->ram[queue->QueueDesc + desc_idx * 4];
 
         /* Retrieve the fields of current descriptor */
         vq_desc[i].addr = desc[0];
@@ -162,7 +163,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     }
 
     /* Process the header */
-    struct vblk_req_header *header =
+    const struct vblk_req_header *header =
         (struct vblk_req_header *) ((uintptr_t) vblk->ram + vq_desc[0].addr);
     uint32_t type = header->type;
     uint64_t sector = header->sector;
