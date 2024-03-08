@@ -38,13 +38,16 @@ function do_buildroot
 function do_linux
 {
     ASSERT git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git -b linux-6.1.y --depth=1
+    mkdir -p linux/out
     cp -f configs/linux.config linux/.config
     export PATH="$PWD/buildroot/output/host/bin:$PATH"
     export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
     export ARCH=riscv
+    export INSTALL_MOD_PATH="out"
     pushd linux
     ASSERT make olddefconfig
     ASSERT make $PARALLEL
+    ASSERT make modules_install
     cp -f arch/riscv/boot/Image ../Image
     popd
 }

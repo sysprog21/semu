@@ -9,7 +9,10 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- VirtIO: virtio-blk acquires disk image from the host, and virtio-net is mapped as TAP interface
+- VirtIO:
+    - virtio-net: Mapped with TAP interface to the host
+    - virtio-blk: Acquires disk image from the host to the guest
+    - virtio-gpu: Currently supports 2D rendering mode with SDL as front-end
 
 ## Prerequisites
 
@@ -22,6 +25,13 @@ $ sudo apt install device-tree-compiler
 For macOS, use the following command:
 ```shell
 $ brew install dtc
+```
+
+[SDL2](https://www.libsdl.org/) is required for enabling virtio-gpu.
+To install it on Debian/Ubuntu Linux, enter the following command:
+
+```shell
+$ sudo apt install libsdl2-dev libsdl2-2.0-0 libsdl2-image-dev libsdl2-image-2.0-0
 ```
 
 For demonstration purposes, ext4 is used for file system mounting.
