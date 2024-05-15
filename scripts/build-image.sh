@@ -21,7 +21,7 @@ PARALLEL="-j$(nproc)"
 
 function do_buildroot
 {
-    ASSERT git clone https://github.com/buildroot/buildroot -b 2023.11.x --depth=1
+    ASSERT git clone https://github.com/buildroot/buildroot -b 2024.02.x --depth=1
     cp -f configs/buildroot.config buildroot/.config
     cp -f configs/busybox.config buildroot/busybox.config
     # Otherwise, the error below raises:
