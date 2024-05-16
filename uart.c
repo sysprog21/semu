@@ -49,7 +49,7 @@ void u8250_update_interrupts(u8250_state_t *uart)
 
     /* Update current interrupt (higher bits -> more priority) */
     if (uart->pending_ints)
-        uart->current_int = ilog2(uart->pending_ints);
+        uart->current_int = GET_INTR_IDX(uart->pending_ints);
 }
 
 void u8250_check_ready(u8250_state_t *uart)

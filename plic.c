@@ -38,7 +38,7 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
         *value = 0;
         uint32_t candidates = plic->ip & plic->ie;
         if (candidates) {
-            *value = ilog2(candidates);
+            *value = GET_INTR_IDX(candidates);
             plic->ip &= ~(1 << (*value));
         }
         return true;

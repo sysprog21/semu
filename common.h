@@ -14,8 +14,19 @@
 /* Ensure that __builtin_clz is never called with 0 argument */
 static inline int ilog2(int x)
 {
-    return 31 - __builtin_clz(x | 1);
+    return __builtin_clz(x | 1);
 }
+
+/*
+ * Note: only applicable to 32-bit number
+ *
+ * Example output:
+ * GET_INTR_IDX(1) = 0
+ * GET_INTR_IDX(2) = 1
+ * GET_INTR_IDX(4) = 2
+ * GET_INTR_IDX(8) = 3
+ */
+#define GET_INTR_IDX(x) (31 - ilog2(x))
 
 /* Range check
  * For any variable range checking:
