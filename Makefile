@@ -42,6 +42,8 @@ all: $(BIN) minimal.dtb
 OBJS := \
 	riscv.o \
 	ram.o \
+	timer.o \
+	aclint.o \
 	plic.o \
 	uart.o \
 	main.o \

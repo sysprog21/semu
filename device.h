@@ -21,7 +21,54 @@ void ram_write(vm_t *core,
                const uint8_t width,
                const uint32_t value);
 
+/* ACLINT */
+#define ACLINT_REG_LIST    \
+    _(SSWI, 0x0000)        \
+    _(MTIMECMP_LO, 0x4000) \
+    _(MTIMECMP_HI, 0x4004) \
+    _(MTIME_LO, 0x7FF8)    \
+    _(MTIME_HI, 0x7FFC)
+
+enum {
+#define _(reg, addr) ACLINT_##reg = addr >> 2,
+    ACLINT_REG_LIST
+#undef _
+};
+
+typedef struct {
+    vm_t *vm;
+    vm_timer_t mtimer;
+    uint64_t mtimecmp;
+    uint32_t setssip;
+} aclint_state_t;
+
+void aclint_update_interrupts(vm_t *core, aclint_state_t *aclint);
+void aclint_timer_interrupts(vm_t *core, aclint_state_t *aclint);
+void aclint_read(vm_t *core,
+                 aclint_state_t *aclint,
+                 uint32_t addr,
+                 uint8_t width,
+                 uint32_t *value);
+void aclint_write(vm_t *core,
+                  aclint_state_t *aclint,
+                  uint32_t addr,
+                  uint8_t width,
+                  uint32_t value);
+void aclint_send_ipi(vm_t *vm, aclint_state_t *aclint, uint32_t target_hart);
+
 /* PLIC */
+#define PLIC_REG_LIST               \
+    _(InterruptPending, 0x1000)     \
+    _(InterruptEnable, 0x2000)      \
+    _(PriorityThresholds, 0x200000) \
+    _(InterruptClaim, 0x200004)     \
+    _(InterruptCompletion, 0x200004)
+
+enum {
+#define _(reg, addr) PLIC_##reg = addr >> 2,
+    PLIC_REG_LIST
+#undef _
+};
 
 typedef struct {
     uint32_t masked;
@@ -177,6 +224,7 @@ typedef struct {
     bool stopped;
     uint32_t *ram;
     uint32_t *disk;
+    aclint_state_t aclint;
     plic_state_t plic;
     u8250_state_t uart;
 #if SEMU_HAS(VIRTIONET)
@@ -185,5 +233,4 @@ typedef struct {
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
 #endif
-    uint64_t timer;
 } emu_state_t;

@@ -81,5 +81,11 @@
             interrupts = <3>;
         };
 #endif
+        clint0: clint@4400000 {
+            #interrupt-cells = <1>;
+            compatible = "sifive,clint0";
+            reg = <0x4400000 0x000C000>;
+            interrupts-extended = <&cpu0_intc 1 &cpu0_intc 5>;
+        };
     };
 };

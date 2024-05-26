@@ -21,19 +21,19 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
     /* no priority support: source priority hardwired to 1 */
     if (1 <= addr && addr <= 31)
         return true;
-
+#define _(reg) PLIC_##reg
     switch (addr) {
-    case 0x400:
+    case _(InterruptPending):
         *value = plic->ip;
         return true;
-    case 0x800:
+    case _(InterruptEnable):
         *value = plic->ie;
         return true;
-    case 0x80000:
+    case _(PriorityThresholds):
         *value = 0;
         /* no priority support: target priority threshold hardwired to 0 */
         return true;
-    case 0x80001:
+    case _(InterruptClaim):
         /* claim */
         *value = 0;
         uint32_t candidates = plic->ip & plic->ie;
@@ -45,6 +45,7 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
     default:
         return false;
     }
+#undef _
 }
 
 static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
@@ -52,16 +53,16 @@ static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
     /* no priority support: source priority hardwired to 1 */
     if (1 <= addr && addr <= 31)
         return true;
-
+#define _(reg) PLIC_##reg
     switch (addr) {
-    case 0x800:
+    case _(InterruptEnable):
         value &= ~1;
         plic->ie = value;
         return true;
-    case 0x80000:
+    case _(PriorityThresholds):
         /* no priority support: target priority threshold hardwired to 0 */
         return true;
-    case 0x80001:
+    case _(InterruptCompletion):
         /* completion */
         if (plic->ie & (1 << value))
             plic->masked &= ~(1 << value);
@@ -69,6 +70,7 @@ static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
     default:
         return false;
     }
+#undef _
 }
 
 void plic_read(vm_t *vm,

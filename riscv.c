@@ -434,12 +434,22 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
         if (idx >= 0x20 || !(vm->s_mode || ((vm->scounteren >> idx) & 1)))
             vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
         else {
-            /* Use the instruction counter for all of the counters.
-             * Ideally, reads should return the value before the increment,
-             * and writes should set the value after the increment. However,
-             * we do not expose any way to write the counters.
+            /*
+             * We do not expose any way to write the counters.
              */
-            *value = vm->insn_count >> ((addr & (1 << 7)) ? 32 : 0);
+            switch (addr) {
+            case RV_CSR_INSTRET:
+            case RV_CSR_INSTRETH:
+                *value = vm->insn_count >> ((addr & (1 << 7)) ? 32 : 0);
+                break;
+            case RV_CSR_TIME:
+            case RV_CSR_TIMEH:
+                *value =
+                    vm_timer_gettime(&vm->timer) >> ((addr & 1 << 7) ? 32 : 0);
+                break;
+            default:
+                break;
+            }
         }
         return;
     }

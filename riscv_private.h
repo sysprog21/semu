@@ -56,6 +56,13 @@ enum {
 
     /* S-mode (Supervisor Protection and Translation) */
     RV_CSR_SATP = 0x180, /**< Supervisor address translation and protection */
+
+    /* Unprivileged Timers */
+    RV_CSR_TIME = 0xC01, /**< Timer for RDTIME instruction */
+    RV_CSR_INSTRET =
+        0xC02, /**< Instructions-retired counter for RDINSTRET instruction */
+    RV_CSR_TIMEH = 0xC81,    /**< Upper 32 bits of time, RV32 only.*/
+    RV_CSR_INSTRETH = 0xC82, /**< Upper 32 bits of instret, RV32 only */
 };
 
 /* privileged ISA: exception causes */

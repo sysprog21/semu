@@ -105,6 +105,10 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_vblk_interrupts(vm);
             return;
 #endif
+        case 0x44: /* CLINT */
+            aclint_read(vm, &data->aclint, addr & 0xFFFF, width, value);
+            aclint_update_interrupts(vm, &data->aclint);
+            return;
         }
     }
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
@@ -143,6 +147,10 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_vblk_interrupts(vm);
             return;
 #endif
+        case 0x44: /* CLINT */
+            aclint_write(vm, &data->aclint, addr & 0xFFFF, width, value);
+            aclint_update_interrupts(vm, &data->aclint);
+            return;
         }
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
@@ -162,8 +170,8 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(vm_t *vm, int32_t fid)
     emu_state_t *data = PRIV(vm);
     switch (fid) {
     case SBI_TIMER__SET_TIMER:
-        data->timer = (((uint64_t) vm->x_regs[RV_R_A1]) << 32) |
-                      (uint64_t) (vm->x_regs[RV_R_A0]);
+        data->aclint.mtimecmp = (((uint64_t) vm->x_regs[RV_R_A1])) << 32 |
+                                (uint64_t) vm->x_regs[RV_R_A0];
         return (sbi_ret_t){SBI_SUCCESS, 0};
     default:
         return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
@@ -361,6 +369,8 @@ static int semu_start(int argc, char **argv)
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
+    emu.aclint.mtimer.freq = 65000000;
+    emu.aclint.mtimecmp = 0xFFFFFFFFFFFFFFFF;
 
     vm_t vm = {
         .priv = &emu,
@@ -406,8 +416,8 @@ static int semu_start(int argc, char **argv)
     atexit(unmap_files);
 
     /* Set up RISC-V hart */
-    emu.timer = 0xFFFFFFFFFFFFFFFF;
     vm.s_mode = true;
+    vm.timer = emu.aclint.mtimer;
     vm.x_regs[RV_R_A0] = 0; /* hart ID. i.e., cpuid */
     vm.x_regs[RV_R_A1] = dtb_addr;
 
@@ -446,10 +456,9 @@ static int semu_start(int argc, char **argv)
 #endif
         }
 
-        if (vm.insn_count > emu.timer)
-            vm.sip |= RV_INT_STI_BIT;
-        else
-            vm.sip &= ~RV_INT_STI_BIT;
+        aclint_timer_interrupts(&vm, &emu.aclint);
+        aclint_update_interrupts(&vm, &emu.aclint);
+
 
         vm_step(&vm);
         if (likely(!vm.error))

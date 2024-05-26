@@ -34,6 +34,16 @@ typedef struct {
     uint32_t *page_addr;
 } mmu_cache_t;
 
+/* TIMER */
+typedef struct {
+    uint64_t begin;
+    uint64_t freq;
+} vm_timer_t;
+
+uint64_t vm_timer_clocksource(uint64_t freq);
+uint64_t vm_timer_gettime(vm_timer_t *timer);
+void vm_timer_rebase(vm_timer_t *timer, uint64_t time);
+
 /* To use the emulator, start by initializing a vm_t object with zero values,
  * invoke vm_init(), and set the required environment-supplied callbacks. You
  * may also set other necessary fields such as argument registers and s_mode,
@@ -102,6 +112,9 @@ struct __vm_internal {
     uint32_t scounteren;
     uint32_t satp; /**< MMU */
     uint32_t *page_table;
+
+    /* Timer */
+    vm_timer_t timer;
 
     void *priv; /**< environment supplied */
 
