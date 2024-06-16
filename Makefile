@@ -3,6 +3,7 @@ include mk/common.mk
 CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
+LDFLAGS :=
 
 # clock frequency
 CLOCK_FREQ ?= 65000000
@@ -12,6 +13,8 @@ CFLAGS += $(DT_CFLAGS)
 OBJS_EXTRA :=
 # command line option
 OPTS :=
+
+LDFLAGS += -lpthread
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -49,6 +52,33 @@ ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
     OBJS_EXTRA += netdev.o
 endif
+
+# virtio-gpu
+ENABLE_VIRTIOGPU ?= 1
+ifneq ($(UNAME_S),Linux)
+    ENABLE_VIRTIOGPU := 0
+endif
+
+# SDL2
+ENABLE_SDL ?= 1
+ifeq (, $(shell which sdl2-config))
+    $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
+    override ENABLE_SDL := 0
+endif
+
+ifeq ($(ENABLE_SDL),1)
+    CFLAGS += $(shell sdl2-config --cflags)
+    LDFLAGS += $(shell sdl2-config --libs)
+else
+    override ENABLE_VIRTIOGPU := 0
+endif
+
+ifeq ($(ENABLE_VIRTIOGPU),1)
+    OBJS_EXTRA += window.o
+    OBJS_EXTRA += virtio-gpu.o
+endif
+
+$(call set-feature, VIRTIOGPU)
 
 BIN = semu
 all: $(BIN) minimal.dtb
