@@ -30,7 +30,7 @@ jobs:
       run: |
             brew install make dtc expect e2fsprogs
     - name: default build
-      run: make
+      run: make ENABLE_SDL=0
       shell: bash
     - name: automated test
       run: .ci/autorun.sh
