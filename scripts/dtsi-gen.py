@@ -6,7 +6,7 @@ def cpu_template (id):
             compatible = "riscv";
             reg = <{id}>;
             riscv,isa = "rv32ima";
-            mmu-type = "riscv,rv32";
+            mmu-type = "riscv,sv32";
             cpu{id}_intc: interrupt-controller {{
                 #interrupt-cells = <1>;
                 #address-cells = <0>;
