@@ -69,6 +69,7 @@ struct __vm_internal {
      * resets.
      */
     uint64_t insn_count;
+    uint64_t time;
 
     /* Instruction execution state must be set to "NONE" for instruction
      * execution to continue. If the state is not "NONE," the vm_step()

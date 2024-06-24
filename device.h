@@ -171,6 +171,26 @@ void virtio_blk_write(vm_t *vm,
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 #endif /* SEMU_HAS(VIRTIOBLK) */
 
+/* clint */
+typedef struct {
+    uint32_t msip[4096];
+    uint64_t mtimecmp[4095];
+    uint64_t mtime;
+} clint_state_t;
+
+void clint_update_interrupts(vm_t *vm, clint_state_t *clint);
+void clint_read(vm_t *vm,
+                clint_state_t *clint,
+                uint32_t addr,
+                uint8_t width,
+                uint32_t *value);
+
+void clint_write(vm_t *vm,
+                 clint_state_t *clint,
+                 uint32_t addr,
+                 uint8_t width,
+                 uint32_t value);
+
 /* memory mapping */
 
 typedef struct {
@@ -185,5 +205,5 @@ typedef struct {
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
 #endif
-    uint64_t timer;
+    clint_state_t clint;
 } emu_state_t;

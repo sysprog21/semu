@@ -72,6 +72,21 @@ static void emu_update_vblk_interrupts(vm_t *vm)
 }
 #endif
 
+static void emu_update_timer_interrupt(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm);
+    vm->time = data->clint.mtime;
+    clint_update_interrupts(vm, &data->clint);
+}
+
+static void emu_update_global_timer(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm);
+    data->clint.mtime++;
+    return;
+}
+
+
 static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
 {
     emu_state_t *data = PRIV(vm);
@@ -105,6 +120,9 @@ static void mem_load(vm_t *vm, uint32_t addr, uint8_t width, uint32_t *value)
             emu_update_vblk_interrupts(vm);
             return;
 #endif
+        case 0x43: /* clint */
+            clint_read(vm, &data->clint, addr & 0xFFFFF, width, value);
+            clint_update_interrupts(vm, &data->clint);
         }
     }
     vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
@@ -143,6 +161,10 @@ static void mem_store(vm_t *vm, uint32_t addr, uint8_t width, uint32_t value)
             emu_update_vblk_interrupts(vm);
             return;
 #endif
+        case 0x43: /* clint */
+            clint_write(vm, &data->clint, addr & 0xFFFFF, width, value);
+            clint_update_interrupts(vm, &data->clint);
+            return;
         }
     }
     vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
@@ -162,8 +184,9 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(vm_t *vm, int32_t fid)
     emu_state_t *data = PRIV(vm);
     switch (fid) {
     case SBI_TIMER__SET_TIMER:
-        data->timer = (((uint64_t) vm->x_regs[RV_R_A1]) << 32) |
-                      (uint64_t) (vm->x_regs[RV_R_A0]);
+        data->clint.mtimecmp[0] = (((uint64_t) vm->x_regs[RV_R_A1]) << 32) |
+                                  (uint64_t) (vm->x_regs[RV_R_A0]);
+        vm->sip &= ~RV_INT_STI_BIT;
         return (sbi_ret_t){SBI_SUCCESS, 0};
     default:
         return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
@@ -369,6 +392,7 @@ static int semu_start(int argc, char **argv)
         .mem_store = mem_store,
         .mem_page_table = mem_page_table,
     };
+
     vm_init(&vm);
 
     /* Set up RAM */
@@ -406,7 +430,6 @@ static int semu_start(int argc, char **argv)
     atexit(unmap_files);
 
     /* Set up RISC-V hart */
-    emu.timer = 0xFFFFFFFFFFFFFFFF;
     vm.s_mode = true;
     vm.x_regs[RV_R_A0] = 0; /* hart ID. i.e., cpuid */
     vm.x_regs[RV_R_A1] = dtb_addr;
@@ -428,6 +451,7 @@ static int semu_start(int argc, char **argv)
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
     while (!emu.stopped) {
+        emu_update_global_timer(&vm);
         if (peripheral_update_ctr-- == 0) {
             peripheral_update_ctr = 64;
 
@@ -447,10 +471,7 @@ static int semu_start(int argc, char **argv)
 #endif
         }
 
-        if (vm.insn_count > emu.timer)
-            vm.sip |= RV_INT_STI_BIT;
-        else
-            vm.sip &= ~RV_INT_STI_BIT;
+        emu_update_timer_interrupt(&vm);
 
         vm_step(&vm);
         if (likely(!vm.error))
