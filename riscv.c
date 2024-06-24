@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include "common.h"
+#include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
 
@@ -39,7 +41,7 @@ static const char *vm_exc_cause_str(uint32_t err)
     return "[Unknown]";
 }
 
-void vm_error_report(const vm_t *vm)
+void vm_error_report(const hart_t *vm)
 {
     fprintf(stderr, "vm error %s: %s. val=%#x\n", vm_error_str(vm->error),
             vm_exc_cause_str(vm->exc_cause), vm->exc_val);
@@ -155,19 +157,19 @@ static inline uint8_t decode_func5(uint32_t insn)
     return insn >> 27;
 }
 
-static inline uint32_t read_rs1(const vm_t *vm, uint32_t insn)
+static inline uint32_t read_rs1(const hart_t *vm, uint32_t insn)
 {
     return vm->x_regs[decode_rs1(insn)];
 }
 
-static inline uint32_t read_rs2(const vm_t *vm, uint32_t insn)
+static inline uint32_t read_rs2(const hart_t *vm, uint32_t insn)
 {
     return vm->x_regs[decode_rs2(insn)];
 }
 
 /* virtual addressing */
 
-static void mmu_invalidate(vm_t *vm)
+static void mmu_invalidate(hart_t *vm)
 {
     vm->cache_fetch.n_pages = 0xFFFFFFFF;
 }
@@ -175,7 +177,7 @@ static void mmu_invalidate(vm_t *vm)
 /* Pre-verify the root page table to minimize page table access during
  * translation time.
  */
-static void mmu_set(vm_t *vm, uint32_t satp)
+static void mmu_set(hart_t *vm, uint32_t satp)
 {
     mmu_invalidate(vm);
     if (satp >> 31) {
@@ -217,7 +219,7 @@ static void mmu_set(vm_t *vm, uint32_t satp)
  *   - in case of valid leaf: set *pte and *ppn
  *   - none found (page fault): set *pte to NULL
  */
-static bool mmu_lookup(const vm_t *vm,
+static bool mmu_lookup(const hart_t *vm,
                        uint32_t vpn,
                        uint32_t **pte,
                        uint32_t *ppn)
@@ -234,7 +236,7 @@ static bool mmu_lookup(const vm_t *vm,
     return true;
 }
 
-static void mmu_translate(vm_t *vm,
+static void mmu_translate(hart_t *vm,
                           uint32_t *addr,
                           const uint32_t access_bits,
                           const uint32_t set_bits,
@@ -273,12 +275,12 @@ static void mmu_translate(vm_t *vm,
     *addr = ((*addr) & MASK(RV_PAGE_SHIFT)) | (ppn << RV_PAGE_SHIFT);
 }
 
-static void mmu_fence(vm_t *vm, uint32_t insn UNUSED)
+static void mmu_fence(hart_t *vm, uint32_t insn UNUSED)
 {
     mmu_invalidate(vm);
 }
 
-static void mmu_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
+static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
 {
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     if (unlikely(vpn != vm->cache_fetch.n_pages)) {
@@ -296,7 +298,7 @@ static void mmu_fetch(vm_t *vm, uint32_t addr, uint32_t *value)
     *value = vm->cache_fetch.page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
 }
 
-static void mmu_load(vm_t *vm,
+static void mmu_load(hart_t *vm,
                      uint32_t addr,
                      uint8_t width,
                      uint32_t *value,
@@ -315,7 +317,7 @@ static void mmu_load(vm_t *vm,
         vm->lr_reservation = addr | 1;
 }
 
-static bool mmu_store(vm_t *vm,
+static bool mmu_store(hart_t *vm,
                       uint32_t addr,
                       uint8_t width,
                       uint32_t value,
@@ -328,13 +330,14 @@ static bool mmu_store(vm_t *vm,
         return false;
 
     if (unlikely(cond)) {
-        if (vm->lr_reservation != (addr | 1))
+        if ((vm->lr_reservation != (addr | 1)))
             return false;
-        vm->lr_reservation = 0;
-    } else {
-        if (unlikely(vm->lr_reservation & 1) &&
-            (vm->lr_reservation & ~3) == (addr & ~3))
-            vm->lr_reservation = 0;
+    }
+
+    for (uint32_t i = 0; i < vm->vm->n_hart; i++) {
+        if (unlikely(vm->vm->hart[i]->lr_reservation & 1) &&
+            (vm->vm->hart[i]->lr_reservation & ~3) == (addr & ~3))
+            vm->vm->hart[i]->lr_reservation = 0;
     }
     vm->mem_store(vm, addr, width, value);
     return true;
@@ -342,14 +345,14 @@ static bool mmu_store(vm_t *vm,
 
 /* exceptions, traps, interrupts */
 
-void vm_set_exception(vm_t *vm, uint32_t cause, uint32_t val)
+void vm_set_exception(hart_t *vm, uint32_t cause, uint32_t val)
 {
     vm->error = ERR_EXCEPTION;
     vm->exc_cause = cause;
     vm->exc_val = val;
 }
 
-void vm_trap(vm_t *vm)
+void hart_trap(hart_t *vm)
 {
     /* Fill exception fields */
     vm->scause = vm->exc_cause;
@@ -371,7 +374,7 @@ void vm_trap(vm_t *vm)
     vm->error = ERR_NONE;
 }
 
-static void op_sret(vm_t *vm)
+static void op_sret(hart_t *vm)
 {
     /* Restore from stack */
     vm->pc = vm->sepc;
@@ -384,7 +387,7 @@ static void op_sret(vm_t *vm)
     vm->sstatus_spie = true;
 }
 
-static void op_privileged(vm_t *vm, uint32_t insn)
+static void op_privileged(hart_t *vm, uint32_t insn)
 {
     if ((insn >> 25) == 0b0001001 /* PRIV: SFENCE_VMA */) {
         mmu_fence(vm, insn);
@@ -415,7 +418,7 @@ static void op_privileged(vm_t *vm, uint32_t insn)
 
 /* CSR instructions */
 
-static inline void set_dest(vm_t *vm, uint32_t insn, uint32_t x)
+static inline void set_dest(hart_t *vm, uint32_t insn, uint32_t x)
 {
     uint8_t rd = decode_rd(insn);
     if (rd)
@@ -427,21 +430,23 @@ static inline void set_dest(vm_t *vm, uint32_t insn, uint32_t x)
 #define SIP_MASK (0              | 0              | RV_INT_SSI_BIT)
 /* clang-format on */
 
-static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
+static void csr_read(hart_t *vm, uint16_t addr, uint32_t *value)
 {
-    if ((addr >> 8) == 0xC) {
-        uint16_t idx = addr & MASK(7);
-        if (idx >= 0x20 || !(vm->s_mode || ((vm->scounteren >> idx) & 1)))
-            vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
-        else {
-            /* Use the instruction counter for all of the counters.
-             * Ideally, reads should return the value before the increment,
-             * and writes should set the value after the increment. However,
-             * we do not expose any way to write the counters.
-             */
-            *value = vm->insn_count >> ((addr & (1 << 7)) ? 32 : 0);
-        }
+    switch (addr) {
+    case RV_CSR_TIME:
+        *value = vm->time;
         return;
+    case RV_CSR_TIMEH:
+        *value = vm->time >> 32;
+        return;
+    case RV_CSR_INSTRET:
+        *value = vm->instret;
+        return;
+    case RV_CSR_INSTRETH:
+        *value = vm->instret >> 32;
+        return;
+    default:
+        break;
     }
 
     if (!vm->s_mode) {
@@ -492,7 +497,7 @@ static void csr_read(vm_t *vm, uint16_t addr, uint32_t *value)
     }
 }
 
-static void csr_write(vm_t *vm, uint16_t addr, uint32_t value)
+static void csr_write(hart_t *vm, uint16_t addr, uint32_t value)
 {
     if (!vm->s_mode) {
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
@@ -544,7 +549,7 @@ static void csr_write(vm_t *vm, uint16_t addr, uint32_t value)
     }
 }
 
-static void op_csr_rw(vm_t *vm, uint32_t insn, uint16_t csr, uint32_t wvalue)
+static void op_csr_rw(hart_t *vm, uint32_t insn, uint16_t csr, uint32_t wvalue)
 {
     if (decode_rd(insn)) {
         uint32_t value;
@@ -556,7 +561,7 @@ static void op_csr_rw(vm_t *vm, uint32_t insn, uint16_t csr, uint32_t wvalue)
     csr_write(vm, csr, wvalue);
 }
 
-static void op_csr_cs(vm_t *vm,
+static void op_csr_cs(hart_t *vm,
                       uint32_t insn,
                       uint16_t csr,
                       uint32_t setmask,
@@ -571,7 +576,7 @@ static void op_csr_cs(vm_t *vm,
         csr_write(vm, csr, (value & ~clearmask) | setmask);
 }
 
-static void op_system(vm_t *vm, uint32_t insn)
+static void op_system(hart_t *vm, uint32_t insn)
 {
     switch (decode_func3(insn)) {
     /* CSR */
@@ -673,7 +678,7 @@ static uint32_t op_rv32i(uint32_t insn, bool is_reg, uint32_t a, uint32_t b)
 }
 #undef NEG_BIT
 
-static bool op_jmp(vm_t *vm, uint32_t insn, uint32_t a, uint32_t b)
+static bool op_jmp(hart_t *vm, uint32_t insn, uint32_t a, uint32_t b)
 {
     switch (decode_func3(insn)) {
     case 0b000: /* BFUNC_BEQ */
@@ -693,7 +698,7 @@ static bool op_jmp(vm_t *vm, uint32_t insn, uint32_t a, uint32_t b)
     return false;
 }
 
-static void do_jump(vm_t *vm, uint32_t addr)
+static void do_jump(hart_t *vm, uint32_t addr)
 {
     if (unlikely(addr & 0b11))
         vm_set_exception(vm, RV_EXC_PC_MISALIGN, addr);
@@ -701,7 +706,7 @@ static void do_jump(vm_t *vm, uint32_t addr)
         vm->pc = addr;
 }
 
-static void op_jump_link(vm_t *vm, uint32_t insn, uint32_t addr)
+static void op_jump_link(hart_t *vm, uint32_t insn, uint32_t addr)
 {
     if (unlikely(addr & 0b11)) {
         vm_set_exception(vm, RV_EXC_PC_MISALIGN, addr);
@@ -721,7 +726,7 @@ static void op_jump_link(vm_t *vm, uint32_t insn, uint32_t addr)
         mmu_store(vm, addr, RV_MEM_SW, (STORED_EXPR), false); \
     } while (0)
 
-static void op_amo(vm_t *vm, uint32_t insn)
+static void op_amo(hart_t *vm, uint32_t insn)
 {
     if (unlikely(decode_func3(insn) != 0b010 /* amo.w */))
         return vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
@@ -780,24 +785,31 @@ static void op_amo(vm_t *vm, uint32_t insn)
     }
 }
 
-void vm_init(vm_t *vm)
+void vm_init(hart_t *vm)
 {
     mmu_invalidate(vm);
 }
 
-void vm_step(vm_t *vm)
+#define PRIV(x) ((emu_state_t *) x->priv)
+void vm_step(hart_t *vm)
 {
+    if (vm->hsm_status != SBI_HSM_STATE_STARTED)
+        return;
+
     if (unlikely(vm->error))
         return;
 
     vm->current_pc = vm->pc;
-
     if ((vm->sstatus_sie || !vm->s_mode) && (vm->sip & vm->sie)) {
         uint32_t applicable = (vm->sip & vm->sie);
         uint8_t idx = ilog2(applicable);
+        if (idx == 1) {
+            emu_state_t *data = PRIV(vm);
+            data->clint.msip[vm->mhartid] = 0;
+        }
         vm->exc_cause = (1U << 31) | idx;
         vm->stval = 0;
-        vm_trap(vm);
+        hart_trap(vm);
     }
 
     uint32_t insn;
@@ -807,7 +819,7 @@ void vm_step(vm_t *vm)
 
     vm->pc += 4;
     /* Assume no integer overflow */
-    vm->insn_count++;
+    vm->instret++;
 
     uint32_t insn_opcode = insn & MASK(7), value;
     switch (insn_opcode) {

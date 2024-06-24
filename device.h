@@ -9,13 +9,13 @@
 #define DTB_SIZE (1 * 1024 * 1024)
 #define INITRD_SIZE (8 * 1024 * 1024)
 
-void ram_read(vm_t *core,
+void ram_read(hart_t *core,
               uint32_t *mem,
               const uint32_t addr,
               const uint8_t width,
               uint32_t *value);
 
-void ram_write(vm_t *core,
+void ram_write(hart_t *core,
                uint32_t *mem,
                const uint32_t addr,
                const uint8_t width,
@@ -31,13 +31,13 @@ typedef struct {
     uint32_t active;
 } plic_state_t;
 
-void plic_update_interrupts(vm_t *core, plic_state_t *plic);
-void plic_read(vm_t *core,
+void plic_update_interrupts(vm_t *vm, plic_state_t *plic);
+void plic_read(hart_t *core,
                plic_state_t *plic,
                uint32_t addr,
                uint8_t width,
                uint32_t *value);
-void plic_write(vm_t *core,
+void plic_write(hart_t *core,
                 plic_state_t *plic,
                 uint32_t addr,
                 uint8_t width,
@@ -60,12 +60,12 @@ typedef struct {
 } u8250_state_t;
 
 void u8250_update_interrupts(u8250_state_t *uart);
-void u8250_read(vm_t *core,
+void u8250_read(hart_t *core,
                 u8250_state_t *uart,
                 uint32_t addr,
                 uint8_t width,
                 uint32_t *value);
-void u8250_write(vm_t *core,
+void u8250_write(hart_t *core,
                  u8250_state_t *uart,
                  uint32_t addr,
                  uint8_t width,
@@ -107,12 +107,12 @@ typedef struct {
     void *priv;
 } virtio_net_state_t;
 
-void virtio_net_read(vm_t *core,
+void virtio_net_read(hart_t *core,
                      virtio_net_state_t *vnet,
                      uint32_t addr,
                      uint8_t width,
                      uint32_t *value);
-void virtio_net_write(vm_t *core,
+void virtio_net_write(hart_t *core,
                       virtio_net_state_t *vnet,
                       uint32_t addr,
                       uint8_t width,
@@ -156,13 +156,13 @@ typedef struct {
     void *priv;
 } virtio_blk_state_t;
 
-void virtio_blk_read(vm_t *vm,
+void virtio_blk_read(hart_t *vm,
                      virtio_blk_state_t *vblk,
                      uint32_t addr,
                      uint8_t width,
                      uint32_t *value);
 
-void virtio_blk_write(vm_t *vm,
+void virtio_blk_write(hart_t *vm,
                       virtio_blk_state_t *vblk,
                       uint32_t addr,
                       uint8_t width,
@@ -178,14 +178,13 @@ typedef struct {
     uint64_t mtime;
 } clint_state_t;
 
-void clint_update_interrupts(vm_t *vm, clint_state_t *clint);
-void clint_read(vm_t *vm,
+void clint_update_interrupts(hart_t *vm, clint_state_t *clint);
+void clint_read(hart_t *vm,
                 clint_state_t *clint,
                 uint32_t addr,
                 uint8_t width,
                 uint32_t *value);
-
-void clint_write(vm_t *vm,
+void clint_write(hart_t *vm,
                  clint_state_t *clint,
                  uint32_t addr,
                  uint8_t width,

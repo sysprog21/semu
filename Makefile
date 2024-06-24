@@ -68,7 +68,13 @@ DTC ?= dtc
 # Reference: https://stackoverflow.com/questions/40886386
 E :=
 S := $E $E
-minimal.dtb: minimal.dts
+
+SMP ?= 1
+.PHONY: minimal.dtsi
+minimal.dtsi:
+	$(Q)python3 scripts/dtsi-gen.py $@ $(SMP)
+
+minimal.dtb: minimal.dts minimal.dtsi
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
@@ -83,7 +89,7 @@ ext4.img:
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) --smp $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
 
 build-image:
 	scripts/build-image.sh

@@ -10,10 +10,12 @@ void plic_update_interrupts(vm_t *vm, plic_state_t *plic)
     plic->ip |= plic->active & ~plic->masked;
     plic->masked |= plic->active;
     /* Send interrupt to target */
-    if (plic->ip & plic->ie[vm->mhartid])
-        vm->sip |= RV_INT_SEI_BIT;
-    else
-        vm->sip &= ~RV_INT_SEI_BIT;
+    for (uint32_t i = 0; i < vm->n_hart; i++) {
+        if (plic->ip & plic->ie[i])
+            vm->hart[i]->sip |= RV_INT_SEI_BIT;
+        else
+            vm->hart[i]->sip &= ~RV_INT_SEI_BIT;
+    }
 }
 
 static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
@@ -79,7 +81,7 @@ static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
     }
 }
 
-void plic_read(vm_t *vm,
+void plic_read(hart_t *vm,
                plic_state_t *plic,
                uint32_t addr,
                uint8_t width,
@@ -102,7 +104,7 @@ void plic_read(vm_t *vm,
     }
 }
 
-void plic_write(vm_t *vm,
+void plic_write(hart_t *vm,
                 plic_state_t *plic,
                 uint32_t addr,
                 uint8_t width,
