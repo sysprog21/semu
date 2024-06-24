@@ -25,8 +25,8 @@ void ram_write(vm_t *core,
 
 typedef struct {
     uint32_t masked;
-    uint32_t ip;
-    uint32_t ie;
+    uint32_t ip;     /* support 32 interrupt sources only */
+    uint32_t ie[32]; /* support 32 sources to 32 contexts only */
     /* state of input interrupt lines (level-triggered), set by environment */
     uint32_t active;
 } plic_state_t;

@@ -10,7 +10,7 @@ void plic_update_interrupts(vm_t *vm, plic_state_t *plic)
     plic->ip |= plic->active & ~plic->masked;
     plic->masked |= plic->active;
     /* Send interrupt to target */
-    if (plic->ip & plic->ie)
+    if (plic->ip & plic->ie[vm->mhartid])
         vm->sip |= RV_INT_SEI_BIT;
     else
         vm->sip &= ~RV_INT_SEI_BIT;
@@ -22,12 +22,17 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
     if (1 <= addr && addr <= 31)
         return true;
 
-    switch (addr) {
-    case 0x400:
+    if (addr == 0x400) {
         *value = plic->ip;
         return true;
+    }
+
+    int addr_mask = MASK(ilog2(addr)) ^ (1 & addr);
+    int context = (addr_mask & addr);
+    context >>= __builtin_ffs(context) - (__builtin_ffs(context) & 1);
+    switch (addr & ~addr_mask) {
     case 0x800:
-        *value = plic->ie;
+        *value = plic->ie[context];
         return true;
     case 0x80000:
         *value = 0;
@@ -36,7 +41,7 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
     case 0x80001:
         /* claim */
         *value = 0;
-        uint32_t candidates = plic->ip & plic->ie;
+        uint32_t candidates = plic->ip & plic->ie[context];
         if (candidates) {
             *value = ilog2(candidates);
             plic->ip &= ~(1 << (*value));
@@ -53,17 +58,20 @@ static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
     if (1 <= addr && addr <= 31)
         return true;
 
-    switch (addr) {
+    int addr_mask = MASK(ilog2(addr)) ^ (1 & addr);
+    int context = (addr_mask & addr);
+    context >>= __builtin_ffs(context) - (__builtin_ffs(context) & 1);
+    switch (addr & ~addr_mask) {
     case 0x800:
         value &= ~1;
-        plic->ie = value;
+        plic->ie[context] = value;
         return true;
     case 0x80000:
         /* no priority support: target priority threshold hardwired to 0 */
         return true;
     case 0x80001:
         /* completion */
-        if (plic->ie & (1 << value))
+        if (plic->ie[context] & (1 << value))
             plic->masked &= ~(1 << value);
         return true;
     default:

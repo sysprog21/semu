@@ -103,6 +103,9 @@ struct __vm_internal {
     uint32_t satp; /**< MMU */
     uint32_t *page_table;
 
+    /* Machine state */
+    uint32_t mhartid;
+
     void *priv; /**< environment supplied */
 
     /* Memory access sets the vm->error to indicate failure. On successful

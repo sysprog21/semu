@@ -410,6 +410,7 @@ static int semu_start(int argc, char **argv)
     vm.s_mode = true;
     vm.x_regs[RV_R_A0] = 0; /* hart ID. i.e., cpuid */
     vm.x_regs[RV_R_A1] = dtb_addr;
+    vm.mhartid = 0;
 
     /* Set up peripherals */
     emu.uart.in_fd = 0, emu.uart.out_fd = 1;
