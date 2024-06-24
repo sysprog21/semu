@@ -455,11 +455,11 @@ static void handle_options(int argc,
     struct option opts[] = {
         {"kernel", 1, NULL, 'k'}, {"dtb", 1, NULL, 'b'},
         {"initrd", 1, NULL, 'i'}, {"disk", 1, NULL, 'd'},
-        {"smp", 1, NULL, 's'},    {"help", 0, NULL, 'h'},
+        {"smp", 1, NULL, 'c'},    {"help", 0, NULL, 'h'},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:h", opts, &optidx)) != -1) {
+    while ((c = getopt_long(argc, argv, "k:b:i:d:c:h", opts, &optidx)) != -1) {
         switch (c) {
         case 'k':
             *kernel_file = optarg;
@@ -473,7 +473,7 @@ static void handle_options(int argc,
         case 'd':
             *disk_file = optarg;
             break;
-        case 's':
+        case 'c':
             *hart_number = atoi(optarg);
             break;
         case 'h':

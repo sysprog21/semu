@@ -89,7 +89,7 @@ ext4.img:
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) --smp $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
 
 build-image:
 	scripts/build-image.sh
