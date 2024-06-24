@@ -34,6 +34,26 @@ typedef struct {
     uint32_t *page_addr;
 } mmu_cache_t;
 
+#define TLB_SIZE 16
+typedef struct {
+    uint32_t vpn;
+    uint32_t *pte;
+    bool valid;
+    bool dirty;
+} tlb_entry_t;
+
+struct node_t{
+    tlb_entry_t entry;
+    struct node_t *prev;
+    struct node_t *next;
+};
+
+typedef struct {
+    struct node_t *head;
+    struct node_t *tail;
+    uint32_t size;
+} tlb_list_t;
+
 /* To use the emulator, start by initializing a vm_t object with zero values,
  * invoke vm_init(), and set the required environment-supplied callbacks. You
  * may also set other necessary fields such as argument registers and s_mode,
@@ -83,6 +103,7 @@ struct __vm_internal {
     uint32_t exc_cause, exc_val;
 
     mmu_cache_t cache_fetch;
+    tlb_list_t tlb_list;
 
     /* Supervisor state */
     bool s_mode;

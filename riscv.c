@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "riscv.h"
 #include "riscv_private.h"
@@ -170,6 +171,21 @@ static inline uint32_t read_rs2(const vm_t *vm, uint32_t insn)
 static void mmu_invalidate(vm_t *vm)
 {
     vm->cache_fetch.n_pages = 0xFFFFFFFF;
+
+    struct node_t *current = vm->tlb_list.head;
+    while (current != NULL) {
+        struct node_t *next = current->next;
+        free(current);
+        current = next;
+    }
+
+    vm->tlb_list.head = malloc(sizeof(struct node_t));
+    vm->tlb_list.tail = malloc(sizeof(struct node_t));
+    vm->tlb_list.head->next = vm->tlb_list.tail;
+    vm->tlb_list.head->prev = NULL;
+    vm->tlb_list.tail->next = NULL;
+    vm->tlb_list.tail->prev = vm->tlb_list.head;
+    vm->tlb_list.size = 0;
 }
 
 /* Pre-verify the root page table to minimize page table access during
@@ -234,6 +250,76 @@ static bool mmu_lookup(const vm_t *vm,
     return true;
 }
 
+/* remove node. */
+void tlb_remove(struct node_t *node)
+{
+    if (node == NULL || node->prev == NULL || node->next == NULL) {
+        return;
+    }
+
+    struct node_t *tmp_prev = node->prev;
+    struct node_t *tmp_next = node->next;
+    tmp_prev->next = tmp_next;
+    tmp_next->prev = tmp_prev;
+}
+
+/* insert new node to head. */
+void tlb_insert(struct node_t *node, tlb_list_t *tlb_list)
+{
+    if (node == NULL || tlb_list == NULL || tlb_list->head == NULL) {
+        return;
+    }
+
+    struct node_t *tmp_next = tlb_list->head->next;
+    tlb_list->head->next = node;
+    node->prev = tlb_list->head;
+    node->next = tmp_next;
+    tmp_next->prev = node;
+}
+
+/* search TLB */
+static uint32_t *tlb_lookup(vm_t *vm, uint32_t vpn, bool write)
+{
+    struct node_t *current = vm->tlb_list.head->next;
+
+    while (current != vm->tlb_list.tail) {
+        if (current->entry.valid && current->entry.vpn == vpn) {
+            if (write) {
+                current->entry.dirty = true;
+                *current->entry.pte |= (1 << 7);
+            }
+
+            /* hit then remove and insert to head->next. */
+            tlb_remove(current);
+            tlb_insert(current, &vm->tlb_list);
+            return current->entry.pte;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+/* miss in TLB then insert new entry to tlb. */
+static void tlb_insert_entry(vm_t *vm, uint32_t vpn, uint32_t *pte)
+{
+    struct node_t *new_node = malloc(sizeof(struct node_t));
+
+    new_node->entry.vpn = vpn;
+    new_node->entry.pte = pte;
+    new_node->entry.valid = true;
+    new_node->entry.dirty = false;
+
+    tlb_insert(new_node, &vm->tlb_list);
+    vm->tlb_list.size++;
+
+    if (vm->tlb_list.size > TLB_SIZE) {
+        struct node_t *victim = vm->tlb_list.tail->prev;
+        tlb_remove(vm->tlb_list.tail->prev);
+        free(victim);
+        vm->tlb_list.size--;
+    }
+}
+
 static void mmu_translate(vm_t *vm,
                           uint32_t *addr,
                           const uint32_t access_bits,
@@ -249,6 +335,17 @@ static void mmu_translate(vm_t *vm,
 
     uint32_t *pte_ref;
     uint32_t ppn;
+
+    /* load and store fecth cache lookup. */
+    if (skip_privilege_test) {
+        pte_ref = tlb_lookup(vm, (*addr) >> RV_PAGE_SHIFT, set_bits & (1 << 7));
+        if (pte_ref && (*pte_ref & access_bits)) {
+            *addr = ((*addr) & MASK(RV_PAGE_SHIFT)) |
+                    ((*pte_ref >> 10) << RV_PAGE_SHIFT);
+            return;
+        }
+    }
+
     bool ok = mmu_lookup(vm, (*addr) >> RV_PAGE_SHIFT, &pte_ref, &ppn);
     if (unlikely(!ok)) {
         vm_set_exception(vm, fault, *addr);
@@ -269,6 +366,9 @@ static void mmu_translate(vm_t *vm,
     uint32_t new_pte = pte | set_bits;
     if (new_pte != pte)
         *pte_ref = new_pte;
+
+    /* update tlb. */
+    tlb_insert_entry(vm, (*addr) >> RV_PAGE_SHIFT, pte_ref);
 
     *addr = ((*addr) & MASK(RV_PAGE_SHIFT)) | (ppn << RV_PAGE_SHIFT);
 }
