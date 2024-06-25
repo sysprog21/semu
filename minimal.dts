@@ -1,6 +1,6 @@
 /dts-v1/;
 
-#include "minimal.dtsi"
+#include "riscv-harts.dtsi"
 
 / {
     #address-cells = <1>;

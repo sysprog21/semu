@@ -70,11 +70,11 @@ E :=
 S := $E $E
 
 SMP ?= 1
-.PHONY: minimal.dtsi
-minimal.dtsi:
-	$(Q)python3 scripts/dtsi-gen.py $@ $(SMP)
+.PHONY: riscv-harts.dtsi
+riscv-harts.dtsi:
+	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP)
 
-minimal.dtb: minimal.dts minimal.dtsi
+minimal.dtb: minimal.dts riscv-harts.dtsi
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
