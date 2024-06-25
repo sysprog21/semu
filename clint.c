@@ -21,12 +21,16 @@ static bool clint_reg_read(clint_state_t *clint, uint32_t addr, uint32_t *value)
     if (addr < 0x4000) {
         *value = clint->msip[addr >> 2];
         return true;
-    } else if (addr < 0xBFF8) {
+    }
+
+    if (addr < 0xBFF8) {
         addr -= 0x4000;
         *value =
             (uint32_t) (clint->mtimecmp[addr >> 3] >> (32 & -!!(addr & 0b100)));
         return true;
-    } else if (addr < 0xBFFF) {
+    }
+
+    if (addr < 0xBFFF) {
         *value = clint->mtime >> (32 & -!!(addr & 0b100));
         return true;
     }
@@ -38,7 +42,9 @@ static bool clint_reg_write(clint_state_t *clint, uint32_t addr, uint32_t value)
     if (addr < 0x4000) {
         clint->msip[addr >> 2] = value;
         return true;
-    } else if (addr < 0xBFF8) {
+    }
+
+    if (addr < 0xBFF8) {
         addr -= 0x4000;
         int32_t upper = clint->mtimecmp[addr >> 3] >> 32;
         int32_t lowwer = clint->mtimecmp[addr >> 3];
@@ -49,7 +55,9 @@ static bool clint_reg_write(clint_state_t *clint, uint32_t addr, uint32_t value)
 
         clint->mtimecmp[addr >> 3] = (uint64_t) upper << 32 | lowwer;
         return true;
-    } else if (addr < 0xBFFF) {
+    }
+
+    if (addr < 0xBFFF) {
         int32_t upper = clint->mtime >> 32;
         int32_t lowwer = clint->mtime;
         if (addr & 0b100)
