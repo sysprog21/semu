@@ -389,7 +389,7 @@ static bool virtio_net_reg_write(virtio_net_state_t *vnet,
 #undef _
 }
 
-void virtio_net_read(vm_t *vm,
+void virtio_net_read(hart_t *vm,
                      virtio_net_state_t *vnet,
                      uint32_t addr,
                      uint8_t width,
@@ -412,7 +412,7 @@ void virtio_net_read(vm_t *vm,
     }
 }
 
-void virtio_net_write(vm_t *vm,
+void virtio_net_write(hart_t *vm,
                       virtio_net_state_t *vnet,
                       uint32_t addr,
                       uint8_t width,

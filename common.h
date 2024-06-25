@@ -17,6 +17,11 @@ static inline int ilog2(int x)
     return 31 - __builtin_clz(x | 1);
 }
 
+static inline int ffs(int x)
+{
+    return __builtin_ffs(x);
+}
+
 /* Range check
  * For any variable range checking:
  *     if (x >= minx && x <= maxx) ...

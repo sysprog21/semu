@@ -13,7 +13,7 @@
         code;                                             \
     } while (0)
 
-void ram_read(vm_t *vm,
+void ram_read(hart_t *vm,
               uint32_t *mem,
               const uint32_t addr,
               const uint8_t width,
@@ -43,7 +43,7 @@ void ram_read(vm_t *vm,
     }
 }
 
-void ram_write(vm_t *vm,
+void ram_write(hart_t *vm,
                uint32_t *mem,
                const uint32_t addr,
                const uint8_t width,

@@ -31,8 +31,20 @@ enum {
 enum {
     RV_R_A0 = 10,
     RV_R_A1 = 11,
+    RV_R_A2 = 12,
+    RV_R_A3 = 13,
+    RV_R_A4 = 14,
+    RV_R_A5 = 15,
     RV_R_A6 = 16,
     RV_R_A7 = 17,
+};
+
+/* unprivileged ISA: CSRs */
+enum {
+    RV_CSR_TIME = 0xC01,
+    RV_CSR_INSTRET = 0xC02,
+    RV_CSR_TIMEH = 0xC81,
+    RV_CSR_INSTRETH = 0xC82,
 };
 
 /* privileged ISA: CSRs */
@@ -92,7 +104,15 @@ enum {
 /* SBI 0.2 */
 
 #define SBI_SUCCESS 0
+#define SBI_ERR_FAILED -1
 #define SBI_ERR_NOT_SUPPORTED -2
+#define SBI_ERR_INVALID_PARAM -3
+#define SBI_ERR_DENIED -4
+#define SBI_ERR_INVALID_ADDRESS -5
+#define SBI_ERR_ALREADY_AVAILABLE -6
+#define SBI_ERR_ALREADY_STARTED -7
+#define SBI_ERR_ALREADY_STOPPED -8
+#define SBI_ERR_NO_SHMEM -9
 
 #define SBI_EID_BASE 0x10
 #define SBI_BASE__GET_SBI_SPEC_VERSION 0
@@ -108,3 +128,30 @@ enum {
 
 #define SBI_EID_RST 0x53525354
 #define SBI_RST__SYSTEM_RESET 0
+
+#define SBI_EID_HSM 0x48534D
+#define SBI_HSM__HART_START 0
+#define SBI_HSM__HART_STOP 1
+#define SBI_HSM__HART_GET_STATUS 2
+#define SBI_HSM__HART_SUSPEND 3
+enum {
+    SBI_HSM_STATE_STARTED = 0,
+    SBI_HSM_STATE_STOPPED = 1,
+    SBI_HSM_STATE_START_PENDING = 2,
+    SBI_HSM_STATE_STOP_PENDING = 3,
+    SBI_HSM_STATE_SUSPENDED = 4,
+    SBI_HSM_STATE_SUSPEND_PENDING = 5,
+    SBI_HSM_STATE_RESUME_PENDING = 6
+};
+
+#define SBI_EID_IPI 0x735049
+#define SBI_IPI__SEND_IPI 0
+
+#define SBI_EID_RFENCE 0x52464E43
+#define SBI_RFENCE__I 0
+#define SBI_RFENCE__VMA 1
+#define SBI_RFENCE__VMA_ASID 2
+#define SBI_RFENCE__GVMA_VMID 3
+#define SBI_RFENCE__GVMA 4
+#define SBI_RFENCE__VVMA_ASID 5
+#define SBI_RFENCE__VVMA 6

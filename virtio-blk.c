@@ -386,7 +386,7 @@ static bool virtio_blk_reg_write(virtio_blk_state_t *vblk,
 #undef _
 }
 
-void virtio_blk_read(vm_t *vm,
+void virtio_blk_read(hart_t *vm,
                      virtio_blk_state_t *vblk,
                      uint32_t addr,
                      uint8_t width,
@@ -409,7 +409,7 @@ void virtio_blk_read(vm_t *vm,
     }
 }
 
-void virtio_blk_write(vm_t *vm,
+void virtio_blk_write(hart_t *vm,
                       virtio_blk_state_t *vblk,
                       uint32_t addr,
                       uint8_t width,
