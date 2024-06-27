@@ -12,5 +12,10 @@
 #define SEMU_FEATUREVIRTIONET 1
 #endif
 
+/* virtio-gpu */
+#ifndef SEMU_FEATUREVIRTIOGPU
+#define SEMU_FEATUREVIRTIOGPU 1
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x

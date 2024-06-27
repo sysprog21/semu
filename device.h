@@ -7,7 +7,7 @@
 
 #define RAM_SIZE (512 * 1024 * 1024)
 #define DTB_SIZE (1 * 1024 * 1024)
-#define INITRD_SIZE (8 * 1024 * 1024)
+#define INITRD_SIZE (65 * 1024 * 1024)
 
 void ram_read(vm_t *core,
               uint32_t *mem,
@@ -171,6 +171,57 @@ void virtio_blk_write(vm_t *vm,
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 #endif /* SEMU_HAS(VIRTIOBLK) */
 
+/* VirtIO-GPU */
+
+#if SEMU_HAS(VIRTIOGPU)
+
+#define IRQ_VGPU 4
+#define IRQ_VGPU_BIT (1 << IRQ_VGPU)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_gpu_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_gpu_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_gpu_state_t;
+
+void virtio_gpu_read(vm_t *vm,
+                     virtio_gpu_state_t *vgpu,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_gpu_write(vm_t *vm,
+                      virtio_gpu_state_t *vgpu,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+void virtio_gpu_init(virtio_gpu_state_t *vgpu);
+void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
+                            uint32_t width,
+                            uint32_t height);
+#endif /* SEMU_HAS(VIRTIOGPU) */
+
 /* memory mapping */
 
 typedef struct {
@@ -184,6 +235,9 @@ typedef struct {
 #endif
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
+#endif
+#if SEMU_HAS(VIRTIOGPU)
+    virtio_gpu_state_t vgpu;
 #endif
     uint64_t timer;
 } emu_state_t;
