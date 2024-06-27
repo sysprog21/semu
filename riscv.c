@@ -172,13 +172,13 @@ static void mmu_invalidate(vm_t *vm)
 {
     vm->cache_fetch.n_pages = 0xFFFFFFFF;
 
-    struct node_t *current = vm->tlb_list.head;
-    while (current != NULL) {
-        struct node_t *next = current->next;
+    /* free all nodes. */
+    for (struct node_t *current = vm->tlb_list.head, *next; current;
+         current = next) {
+        next = current->next;
         free(current);
-        current = next;
     }
-
+    /* reset head and tail. */
     vm->tlb_list.head = malloc(sizeof(struct node_t));
     vm->tlb_list.tail = malloc(sizeof(struct node_t));
     vm->tlb_list.head->next = vm->tlb_list.tail;
@@ -280,9 +280,8 @@ void tlb_insert(struct node_t *node, tlb_list_t *tlb_list)
 /* search TLB */
 static uint32_t *tlb_lookup(vm_t *vm, uint32_t vpn, bool write)
 {
-    struct node_t *current = vm->tlb_list.head->next;
-
-    while (current != vm->tlb_list.tail) {
+    for (struct node_t *current = vm->tlb_list.head->next;
+         current != vm->tlb_list.tail; current = current->next) {
         if (current->entry.valid && current->entry.vpn == vpn) {
             if (write) {
                 current->entry.dirty = true;
@@ -294,7 +293,6 @@ static uint32_t *tlb_lookup(vm_t *vm, uint32_t vpn, bool write)
             tlb_insert(current, &vm->tlb_list);
             return current->entry.pte;
         }
-        current = current->next;
     }
     return NULL;
 }

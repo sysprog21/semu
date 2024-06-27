@@ -42,7 +42,7 @@ typedef struct {
     bool dirty;
 } tlb_entry_t;
 
-struct node_t{
+struct node_t {
     tlb_entry_t entry;
     struct node_t *prev;
     struct node_t *next;
