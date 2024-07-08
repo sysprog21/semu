@@ -447,7 +447,7 @@ static void handle_options(int argc,
                            char **dtb_file,
                            char **initrd_file,
                            char **disk_file,
-                           int *hart_number)
+                           int *hart_count)
 {
     *kernel_file = *dtb_file = *initrd_file = *disk_file = NULL;
 
@@ -474,7 +474,7 @@ static void handle_options(int argc,
             *disk_file = optarg;
             break;
         case 'c':
-            *hart_number = atoi(optarg);
+            *hart_count = atoi(optarg);
             break;
         case 'h':
             usage(argv[0]);
@@ -516,9 +516,9 @@ static int semu_start(int argc, char **argv)
     char *dtb_file;
     char *initrd_file;
     char *disk_file;
-    int hart_number = 1;
+    int hart_count = 1;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file, &hart_number);
+                   &disk_file, &hart_count);
 
     /* Initialize the emulator */
     emu_state_t emu;
@@ -560,7 +560,7 @@ static int semu_start(int argc, char **argv)
 
     /* Set up RISC-V hart */
     vm_t vm;
-    vm.n_hart = hart_number;
+    vm.n_hart = hart_count;
     vm.hart = malloc(sizeof(hart_t *) * vm.n_hart);
     for (uint32_t i = 0; i < vm.n_hart; i++) {
         hart_t *newhart = malloc(sizeof(hart_t));
