@@ -123,7 +123,10 @@ struct __hart_internal {
      */
     uint32_t *(*mem_page_table)(const hart_t *vm, uint32_t ppn);
 
-    /* Point to the belonged vm_t */
+    /* Point to the associated vm_t for better access to other harts. For
+     * example, if hart 0 needs to send an IPI to hart 1, the IPI signal can be
+     * sent to hart 1 through the *vm pointer.
+     */
     vm_t *vm;
     int32_t hsm_status;
     bool hsm_resume_is_ret;

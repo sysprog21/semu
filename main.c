@@ -286,7 +286,7 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
 
 static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
 {
-    /* TODO */
+    /* TODO: RFENCE SBI extension */
     uint64_t hart_mask, hart_mask_base;
     switch (fid) {
     case 0:

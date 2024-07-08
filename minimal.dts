@@ -1,5 +1,8 @@
 /dts-v1/;
 
+/*
+ * RISC-V harts descriptions
+ */ 
 #include "riscv-harts.dtsi"
 
 / {
