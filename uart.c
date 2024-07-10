@@ -160,7 +160,7 @@ static void u8250_reg_write(u8250_state_t *uart, uint32_t addr, uint8_t value)
     }
 }
 
-void u8250_read(vm_t *vm,
+void u8250_read(hart_t *vm,
                 u8250_state_t *uart,
                 uint32_t addr,
                 uint8_t width,
@@ -187,7 +187,7 @@ void u8250_read(vm_t *vm,
     }
 }
 
-void u8250_write(vm_t *vm,
+void u8250_write(hart_t *vm,
                  u8250_state_t *uart,
                  uint32_t addr,
                  uint8_t width,
