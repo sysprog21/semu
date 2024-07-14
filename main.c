@@ -81,13 +81,6 @@ static void emu_update_timer_interrupt(hart_t *hart)
     clint_update_interrupts(hart, &data->clint);
 }
 
-static void emu_update_global_timer(vm_t *vm)
-{
-    emu_state_t *data = PRIV(vm->hart[0]);
-    data->clint.mtime++;
-    return;
-}
-
 static void mem_load(hart_t *hart,
                      uint32_t addr,
                      uint8_t width,
@@ -523,6 +516,7 @@ static int semu_start(int argc, char **argv)
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
+    semu_timer_init(&emu.clint.mtime, CLOCK_FREQ);
 
     /* Set up RAM */
     emu.ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,
@@ -591,8 +585,6 @@ static int semu_start(int argc, char **argv)
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
     while (!emu.stopped) {
-        emu_update_global_timer(&vm);
-
         for (uint32_t i = 0; i < vm.n_hart; i++) {
             if (peripheral_update_ctr-- == 0) {
                 peripheral_update_ctr = 64;

@@ -434,10 +434,10 @@ static void csr_read(hart_t *vm, uint16_t addr, uint32_t *value)
 {
     switch (addr) {
     case RV_CSR_TIME:
-        *value = vm->time;
+        *value = semu_timer_get(&vm->time);
         return;
     case RV_CSR_TIMEH:
-        *value = vm->time >> 32;
+        *value = semu_timer_get(&vm->time) >> 32;
         return;
     case RV_CSR_INSTRET:
         *value = vm->instret;

@@ -5,7 +5,9 @@
 
 void clint_update_interrupts(hart_t *hart, clint_state_t *clint)
 {
-    if (clint->mtime > clint->mtimecmp[hart->mhartid])
+    uint64_t time_delta =
+        clint->mtimecmp[hart->mhartid] - semu_timer_get(&hart->time);
+    if ((int64_t) time_delta <= 0)
         hart->sip |= RV_INT_STI_BIT;
     else
         hart->sip &= ~RV_INT_STI_BIT;
@@ -31,7 +33,8 @@ static bool clint_reg_read(clint_state_t *clint, uint32_t addr, uint32_t *value)
     }
 
     if (addr < 0xBFFF) {
-        *value = clint->mtime >> (32 & -!!(addr & 0b100));
+        *value = (uint32_t) (semu_timer_get(&clint->mtime) >>
+                             (32 & -!!(addr & 0b100)));
         return true;
     }
     return false;
@@ -58,14 +61,14 @@ static bool clint_reg_write(clint_state_t *clint, uint32_t addr, uint32_t value)
     }
 
     if (addr < 0xBFFF) {
-        int32_t upper = clint->mtime >> 32;
-        int32_t lowwer = clint->mtime;
+        int32_t upper = clint->mtime.begin >> 32;
+        int32_t lower = clint->mtime.begin;
         if (addr & 0b100)
             upper = value;
         else
-            lowwer = value;
+            lower = value;
 
-        clint->mtime = (uint64_t) upper << 32 | lowwer;
+        semu_timer_rebase(&clint->mtime, (uint64_t) upper << 32 | lower);
         return true;
     }
     return false;

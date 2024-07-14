@@ -175,7 +175,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 typedef struct {
     uint32_t msip[4096];
     uint64_t mtimecmp[4095];
-    uint64_t mtime;
+    semu_timer_t mtime;
 } clint_state_t;
 
 void clint_update_interrupts(hart_t *vm, clint_state_t *clint);

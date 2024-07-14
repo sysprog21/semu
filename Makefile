@@ -4,6 +4,11 @@ CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
 
+# clock frequency
+CLOCK_FREQ ?= 65000000
+DT_CFLAGS := -D CLOCK_FREQ=$(CLOCK_FREQ)
+CFLAGS += $(DT_CFLAGS)
+
 OBJS_EXTRA :=
 # command line option
 OPTS :=
@@ -42,6 +47,7 @@ all: $(BIN) minimal.dtb
 OBJS := \
 	riscv.o \
 	ram.o \
+	utils.o \
 	plic.o \
 	uart.o \
 	main.o \
@@ -72,11 +78,12 @@ S := $E $E
 SMP ?= 1
 .PHONY: riscv-harts.dtsi
 riscv-harts.dtsi:
-	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP)
+	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP) $(CLOCK_FREQ)
 
 minimal.dtb: minimal.dts riscv-harts.dtsi
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
+	    $(DT_CFLAGS) \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
 	    | $(DTC) - > $@
 
