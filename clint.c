@@ -80,7 +80,6 @@ void clint_read(hart_t *vm,
     if (!clint_reg_read(clint, addr, value))
         vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
     *value = (*value) >> (RV_MEM_SW - width);
-    return;
 }
 
 void clint_write(hart_t *vm,
@@ -91,5 +90,4 @@ void clint_write(hart_t *vm,
 {
     if (!clint_reg_write(clint, addr, value >> (RV_MEM_SW - width)))
         vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
-    return;
 }
