@@ -382,14 +382,14 @@ static void handle_sbi_ecall(hart_t *hart)
     hart->error = ERR_NONE;
 }
 
-#define MAPPER_SIZE 4
+#define N_MAPPERS 4
 
 struct mapper {
     char *addr;
     uint32_t size;
 };
 
-static struct mapper mapper[MAPPER_SIZE] = {0};
+static struct mapper mapper[N_MAPPERS] = {0};
 static int map_index = 0;
 static void unmap_files(void)
 {
@@ -498,7 +498,7 @@ static void handle_options(int argc,
 
 
 #define INIT_HART(hart, emu, id)                  \
-    ({                                            \
+    do {                                          \
         hart->priv = emu;                         \
         hart->mhartid = id;                       \
         hart->mem_fetch = mem_fetch;              \
@@ -508,7 +508,7 @@ static void handle_options(int argc,
         hart->s_mode = true;                      \
         hart->hsm_status = SBI_HSM_STATE_STOPPED; \
         vm_init(hart);                            \
-    })
+    } while (0)
 
 static int semu_start(int argc, char **argv)
 {
@@ -558,10 +558,11 @@ static int semu_start(int argc, char **argv)
     /* Hook for unmapping files */
     atexit(unmap_files);
 
-    /* Set up RISC-V hart */
-    vm_t vm;
-    vm.n_hart = hart_count;
-    vm.hart = malloc(sizeof(hart_t *) * vm.n_hart);
+    /* Set up RISC-V harts */
+    vm_t vm = {
+        .n_hart = hart_count,
+        .hart = malloc(sizeof(hart_t *) * vm.n_hart),
+    };
     for (uint32_t i = 0; i < vm.n_hart; i++) {
         hart_t *newhart = malloc(sizeof(hart_t));
         INIT_HART(newhart, &emu, i);
