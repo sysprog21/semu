@@ -98,6 +98,7 @@ clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 
 distclean: clean
+	$(Q)$(RM) riscv-harts.dtsi
 	$(Q)$(RM) minimal.dtb
 	$(Q)$(RM) Image rootfs.cpio
 	$(Q)$(RM) ext4.img 
