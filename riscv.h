@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "utils.h"
+
 /* ERR_EXCEPTION indicates that the instruction has raised one of the
  * exceptions defined in the specification. If this flag is set, the
  * additional fields "exc_cause" and "exc_val" must also be set to values
@@ -70,8 +72,7 @@ struct __hart_internal {
      * resets.
      */
     uint64_t instret;
-    uint64_t time;
-
+    semu_timer_t time;
     /* Instruction execution state must be set to "NONE" for instruction
      * execution to continue. If the state is not "NONE," the vm_step()
      * function will exit.

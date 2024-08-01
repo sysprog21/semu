@@ -24,7 +24,7 @@
     cpus {
         #address-cells = <1>;
         #size-cells = <0>;
-        timebase-frequency = <65000000>;
+        timebase-frequency = <CLOCK_FREQ>;
     };
 
     sram: memory@0 {

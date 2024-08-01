@@ -34,12 +34,12 @@ def clint_irq_format(nums):
         s += f"<&cpu{i}_intc 3 &cpu{i}_intc 7>, "
     return s[:-2]
 
-def dtsi_template (cpu_list: str, plic_list, clint_list):
+def dtsi_template (cpu_list: str, plic_list, clint_list, clock_freq):
     return f"""/{{
     cpus {{
         #address-cells = <1>;
         #size-cells = <0>;
-        timebase-frequency = <65000000>;
+        timebase-frequency = <{clock_freq}>;
         {cpu_list}
     }};
 
@@ -67,6 +67,7 @@ def dtsi_template (cpu_list: str, plic_list, clint_list):
 
 dtsi = sys.argv[1]
 harts = int(sys.argv[2])
+clock_freq = int(sys.argv[3])
 
 with open(dtsi, "w") as dts:
-    dts.write(dtsi_template(cpu_format(harts), plic_irq_format(harts), clint_irq_format(harts)))
+    dts.write(dtsi_template(cpu_format(harts), plic_irq_format(harts), clint_irq_format(harts), clock_freq))
