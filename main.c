@@ -100,6 +100,18 @@ static void emu_update_swi_interrupt(hart_t *hart)
     aclint_sswi_update_interrupts(hart, &data->sswi);
 }
 
+#if SEMU_HAS(VIRTIOSND)
+static void emu_update_vsnd_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vsnd.InterruptStatus)
+        data->plic.active |= IRQ_VSND_BIT;
+    else
+        data->plic.active &= ~IRQ_VSND_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(hart_t *hart,
                      uint32_t addr,
                      uint8_t width,
@@ -153,6 +165,13 @@ static void mem_load(hart_t *hart,
         case 0x46: /* virtio-rng */
             virtio_rng_read(hart, &data->vrng, addr & 0xFFFFF, width, value);
             emu_update_vrng_interrupts(hart->vm);
+            return;
+#endif
+
+#if SEMU_HAS(VIRTIOSND)
+        case 0x47: /* virtio-snd */
+            virtio_snd_read(hart, &data->vsnd, addr & 0xFFFFF, width, value);
+            emu_update_vsnd_interrupts(hart->vm);
             return;
 #endif
         }
@@ -209,10 +228,18 @@ static void mem_store(hart_t *hart,
             aclint_sswi_write(hart, &data->sswi, addr & 0xFFFFF, width, value);
             aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
+
 #if SEMU_HAS(VIRTIORNG)
         case 0x46: /* virtio-rng */
             virtio_rng_write(hart, &data->vrng, addr & 0xFFFFF, width, value);
             emu_update_vrng_interrupts(hart->vm);
+            return;
+#endif
+
+#if SEMU_HAS(VIRTIOSND)
+        case 0x47: /* virtio-snd */
+            virtio_snd_write(hart, &data->vsnd, addr & 0xFFFFF, width, value);
+            emu_update_vsnd_interrupts(hart->vm);
             return;
 #endif
         }
@@ -651,6 +678,11 @@ static int semu_start(int argc, char **argv)
     emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
+#if SEMU_HAS(VIRTIOSND)
+    if (!virtio_snd_init(&(emu.vsnd)))
+        fprintf(stderr, "No virtio-snd functioned\n");
+    emu.vsnd.ram = emu.ram;
+#endif
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
@@ -675,6 +707,11 @@ static int semu_start(int argc, char **argv)
 #if SEMU_HAS(VIRTIOBLK)
                 if (emu.vblk.InterruptStatus)
                     emu_update_vblk_interrupts(&vm);
+#endif
+
+#if SEMU_HAS(VIRTIOSND)
+                if (emu.vsnd.InterruptStatus)
+                    emu_update_vsnd_interrupts(&vm);
 #endif
             }
 

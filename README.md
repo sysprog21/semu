@@ -9,7 +9,12 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- VirtIO: virtio-blk acquires disk image from the host, and virtio-net is mapped as TAP interface
+- Three types of I/O support using VirtIO standard:
+    - virtio-blk acquires disk image from the host.
+    - virtio-net is mapped as TAP interface.
+    - virtio-snd uses ALSA for sound operation with the following limitations:
+        - The emulator will hang if PulseAudio is enabled on host.
+        - The playback may plays with repeating artifact.
 
 ## Prerequisites
 
