@@ -1,0 +1,4 @@
+[submodule "cnfa"]
+    path = cnfa
+    url = https://github.com/cntools/cnfa
+    shallow = true
