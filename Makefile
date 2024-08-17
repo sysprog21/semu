@@ -44,6 +44,16 @@ ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
 endif
 
+# virtio-input
+ENABLE_VIRTIOINPUT ?= 1
+ifneq ($(UNAME_S),Linux)
+    ENABLE_VIRTIOINPUT := 0
+endif
+$(call set-feature, VIRTIOINPUT)
+ifeq ($(call has, VIRTIOINPUT), 1)
+    OBJS_EXTRA += virtio-input.o
+endif
+
 # virtio-gpu
 ENABLE_VIRTIOGPU ?= 1
 ifneq ($(UNAME_S),Linux)
