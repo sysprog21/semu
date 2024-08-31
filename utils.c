@@ -19,6 +19,19 @@
 #endif
 #endif
 
+/* Calculate "x * n / d" without unnecessary overflow or loss of precision.
+ *
+ * Reference:
+ * https://elixir.bootlin.com/linux/v6.10.7/source/include/linux/math.h#L121
+ */
+static inline uint64_t mult_frac(uint64_t x, uint64_t n, uint64_t d)
+{
+    const uint64_t q = x / d;
+    const uint64_t r = x % d;
+
+    return q * n + r * n / d;
+}
+
 void semu_timer_init(semu_timer_t *timer, uint64_t freq)
 {
     timer->freq = freq;
