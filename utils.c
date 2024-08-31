@@ -43,12 +43,12 @@ static uint64_t semu_timer_clocksource(uint64_t freq)
 #if defined(HAVE_POSIX_TIMER)
     struct timespec t;
     clock_gettime(CLOCKID, &t);
-    return (t.tv_sec * freq) + (t.tv_nsec * freq / 1e9);
+    return t.tv_sec * freq + mult_frac(t.tv_nsec, freq, 1e9);
 #elif defined(HAVE_MACH_TIMER)
     static mach_timebase_info_data_t t;
     if (mach_clk.denom == 0)
         (void) mach_timebase_info(&t);
-    return mach_absolute_time() * freq / t.denom * t.numer;
+    return mult_frac(mach_absolute_time() * freq, t.numer, t.denom);
 #else
     return time(0) * freq;
 #endif
