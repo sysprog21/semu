@@ -56,7 +56,6 @@ def dtsi_template (cpu_list: str, plic_list, clint_list, clock_freq):
 
         clint0: clint@4300000 {{
             compatible = "riscv,clint0";
-            interrupt-controller;
             interrupts-extended =
             {clint_list};
             reg = <0x4300000 0x10000>;
