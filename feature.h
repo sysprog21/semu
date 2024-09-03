@@ -3,13 +3,13 @@
 /* enable/disable (compile time) features in this header */
 
 /* virtio-blk */
-#ifndef SEMU_FEATUREVIRTIOBLK
-#define SEMU_FEATUREVIRTIOBLK 1
+#ifndef SEMU_FEATURE_VIRTIOBLK
+#define SEMU_FEATURE_VIRTIOBLK 1
 #endif
 
 /* virtio-net */
-#ifndef SEMU_FEATUREVIRTIONET
-#define SEMU_FEATUREVIRTIONET 1
+#ifndef SEMU_FEATURE_VIRTIONET
+#define SEMU_FEATURE_VIRTIONET 1
 #endif
 
 /* Feature test macro */
