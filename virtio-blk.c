@@ -26,7 +26,7 @@
 
 #define PRIV(x) ((struct virtio_blk_config *) x->priv)
 
-struct virtio_blk_config {
+PACKED(struct virtio_blk_config {
     uint64_t capacity;
     uint32_t size_max;
     uint32_t seg_max;
@@ -55,14 +55,14 @@ struct virtio_blk_config {
     uint32_t max_write_zeroes_seg;
     uint8_t write_zeroes_may_unmap;
     uint8_t unused1[3];
-} __attribute__((packed));
+});
 
-struct vblk_req_header {
+PACKED(struct vblk_req_header {
     uint32_t type;
     uint32_t reserved;
     uint64_t sector;
     uint8_t status;
-} __attribute__((packed));
+});
 
 static struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
 static int vblk_dev_cnt = 0;
