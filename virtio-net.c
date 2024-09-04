@@ -30,12 +30,12 @@
 
 enum { VNET_QUEUE_RX = 0, VNET_QUEUE_TX = 1 };
 
-struct virtio_net_config {
+PACKED(struct virtio_net_config {
     uint8_t mac[6];
     uint16_t status;
     uint16_t max_virtqueue_pairs;
     uint16_t mtu;
-} __attribute__((packed));
+});
 
 static struct virtio_net_config vnet_configs[VNET_DEV_CNT_MAX];
 static int vnet_dev_cnt = 0;

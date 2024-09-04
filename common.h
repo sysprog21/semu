@@ -25,3 +25,12 @@ static inline int ilog2(int x)
  */
 #define RANGE_CHECK(x, minx, size) \
     ((int32_t) ((x - minx) | (minx + size - 1 - x)) >= 0)
+
+/* Packed macro */
+#if defined(__GNUC__) || defined(__clang__)
+#define PACKED(name) name __attribute__((packed))
+#elif defined(_MSC_VER)
+#define PACKED(name) __pragma(pack(push, 1)) name __pragma(pack(pop))
+#else /* unsupported compilers */
+#define PACKED(name)
+#endif
