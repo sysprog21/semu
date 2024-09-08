@@ -660,6 +660,8 @@ static int semu_start(int argc, char **argv)
     virtio_input_init(&(emu.vmouse));
 #endif
 #if SEMU_HAS(VIRTIOGPU)
+    semu_virgl_init();
+
     emu.vgpu.ram = emu.ram;
     virtio_gpu_init(&(emu.vgpu));
     virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
