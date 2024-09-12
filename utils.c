@@ -48,8 +48,8 @@ static uint64_t semu_timer_clocksource(uint64_t freq)
     static mach_timebase_info_data_t t;
     if (t.denom == 0)
         (void) mach_timebase_info(&t);
-    return mult_frac(mult_frac(mach_absolute_time(), freq, 1e9), t.numer,
-                     t.denom);
+    return mult_frac(mult_frac(mach_absolute_time(), t.numer, t.denom), freq,
+                     1e9);
 #else
     return time(0) * freq;
 #endif
