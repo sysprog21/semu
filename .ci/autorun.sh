@@ -16,8 +16,18 @@ function ASSERT {
 
 cleanup
 
+# macOS needs more time to boot compared to Linux, so the timeout is set to
+# 600 seconds for macOS to handle the longer startup. For Linux, 90 seconds
+# is sufficient due to its faster boot process.
+UNAME_S=$(uname -s)
+if [[ ${UNAME_S} == "Darwin" ]]; then
+    TIMEOUT=600
+else # Linux
+    TIMEOUT=90
+fi
+
 ASSERT expect <<DONE
-set timeout 90
+set timeout ${TIMEOUT}
 spawn make check
 expect "buildroot login:" { send "root\n" } timeout { exit 1 }
 expect "# " { send "uname -a\n" } timeout { exit 2 }
