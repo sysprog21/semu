@@ -3,14 +3,27 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  rv32emu:
+  semu-linux:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
     - name: install-dependencies
-      run: | 
-            sudo apt-get install build-essential device-tree-compiler
-            sudo apt-get install expect
+      run: |
+            sudo apt-get install build-essential device-tree-compiler expect
+    - name: default build
+      run: make
+      shell: bash
+    - name: automated test
+      run: .ci/autorun.sh
+      shell: bash
+
+  semu-macOS:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: install-dependencies
+      run: |
+            brew install make dtc expect e2fsprogs
     - name: default build
       run: make
       shell: bash
