@@ -78,6 +78,44 @@ function do_directfb
     popd
 }
 
+function do_directfb_gl
+{
+    export BUILDROOT_OUT=$PWD/buildroot/output/
+
+    ASSERT git clone https://github.com/directfb2/DirectFBGL-EGL.git
+    pushd DirectFBGL-EGL
+    ASSERT wget https://gist.githubusercontent.com/shengwen-tw/098da8c41ba7fbb9162ddaa4ff62b29e/raw/6bcd3adef7d4932fa4f56a18aee9ebc1e1bd0665/riscv-cross-file
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=$BUILDROOT_OUT/host/riscv32-buildroot-linux-gnu/sysroot meson install -C build/riscv
+    popd
+}
+
+function do_gles2_driver
+{
+    ASSERT git clone https://github.com/directfb2/DirectFB2-gles2.git
+    pushd DirectFB2-gles2
+    ASSERT wget https://gist.githubusercontent.com/shengwen-tw/098da8c41ba7fbb9162ddaa4ff62b29e/raw/6bcd3adef7d4932fa4f56a18aee9ebc1e1bd0665/riscv-cross-file
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    popd
+}
+
+function do_yagears
+{
+    ASSERT git clone https://github.com/caramelli/yagears.git 
+    pushd yagears
+    ASSERT wget https://gist.githubusercontent.com/shengwen-tw/098da8c41ba7fbb9162ddaa4ff62b29e/raw/6bcd3adef7d4932fa4f56a18aee9ebc1e1bd0665/riscv-cross-file
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    popd    
+}
+
 do_buildroot && OK
 do_linux && OK
 do_directfb && OK
+
+# Subject to change
+do_directfb_gl && OK
+do_gles2_driver & OK
+do_yagears && OK
