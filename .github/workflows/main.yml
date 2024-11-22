@@ -16,6 +16,10 @@ jobs:
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+    - name: netdev test
+      run: .ci/test-netdev.sh
+      shell: bash
+      if: ${{ success() }}
 
   semu-macOS:
     runs-on: macos-latest
