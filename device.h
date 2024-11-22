@@ -1,5 +1,6 @@
 #pragma once
 
+#include "netdev.h"
 #include "riscv.h"
 #include "virtio.h"
 
@@ -101,7 +102,7 @@ typedef struct {
     uint32_t Status;
     uint32_t InterruptStatus;
     /* supplied by environment */
-    int tap_fd;
+    netdev_t peer;
     uint32_t *ram;
     /* implementation-specific */
     void *priv;
@@ -119,7 +120,7 @@ void virtio_net_write(hart_t *core,
                       uint32_t value);
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 
-bool virtio_net_init(virtio_net_state_t *vnet);
+bool virtio_net_init(virtio_net_state_t *vnet, const char *name);
 #endif /* SEMU_HAS(VIRTIONET) */
 
 /* VirtIO-Block */

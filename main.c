@@ -440,19 +440,22 @@ static void handle_options(int argc,
                            char **dtb_file,
                            char **initrd_file,
                            char **disk_file,
+                           char **net_dev,
                            int *hart_count)
 {
-    *kernel_file = *dtb_file = *initrd_file = *disk_file = NULL;
+    *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev = NULL;
 
     int optidx = 0;
     struct option opts[] = {
         {"kernel", 1, NULL, 'k'}, {"dtb", 1, NULL, 'b'},
         {"initrd", 1, NULL, 'i'}, {"disk", 1, NULL, 'd'},
-        {"smp", 1, NULL, 'c'},    {"help", 0, NULL, 'h'},
+        {"netdev", 1, NULL, 'n'}, {"smp", 1, NULL, 'c'},
+        {"help", 0, NULL, 'h'},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:c:h", opts, &optidx)) != -1) {
+    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:h", opts, &optidx)) !=
+           -1) {
         switch (c) {
         case 'k':
             *kernel_file = optarg;
@@ -465,6 +468,9 @@ static void handle_options(int argc,
             break;
         case 'd':
             *disk_file = optarg;
+            break;
+        case 'n':
+            *net_dev = optarg;
             break;
         case 'c':
             *hart_count = atoi(optarg);
@@ -487,6 +493,9 @@ static void handle_options(int argc,
 
     if (!*dtb_file)
         *dtb_file = "minimal.dtb";
+
+    if (!*net_dev)
+        *net_dev = "tap";
 }
 
 
@@ -509,9 +518,10 @@ static int semu_start(int argc, char **argv)
     char *dtb_file;
     char *initrd_file;
     char *disk_file;
+    char *netdev;
     int hart_count = 1;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file, &hart_count);
+                   &disk_file, &netdev, &hart_count);
 
     /* Initialize the emulator */
     emu_state_t emu;
@@ -573,7 +583,7 @@ static int semu_start(int argc, char **argv)
     emu.uart.in_fd = 0, emu.uart.out_fd = 1;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
-    if (!virtio_net_init(&(emu.vnet)))
+    if (!virtio_net_init(&(emu.vnet), netdev))
         fprintf(stderr, "No virtio-net functioned\n");
     emu.vnet.ram = emu.ram;
 #endif
