@@ -31,6 +31,7 @@ ifeq ($(call has, VIRTIOBLK), 1)
     endif
 endif
 
+NETDEV ?= tap
 # virtio-net
 ENABLE_VIRTIONET ?= 1
 ifneq ($(UNAME_S),Linux)
@@ -39,6 +40,7 @@ endif
 $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
+    OBJS_EXTRA += netdev.o
 endif
 
 BIN = semu
@@ -96,7 +98,7 @@ ext4.img:
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) -n $(NETDEV) $(OPTS)
 
 build-image:
 	scripts/build-image.sh
