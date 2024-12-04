@@ -772,11 +772,11 @@ static int virtio_snd_tx_desc_handler(virtio_snd_state_t *vsnd,
             goto early_continue;
         }
 
-        frame = (virtio_snd_pcm_frame_t *) malloc(sizeof(*frame));
+        /*frame = (virtio_snd_pcm_frame_t *) malloc(sizeof(*frame));
         void *buf = (void *) (base + addr);
         frame->buf = (void *) malloc(sizeof(frame->buf) * len);
         memcpy(frame->buf, buf, len);
-        queue_push(&frame->q, frame_q);
+        queue_push(&frame->q, frame_q);*/
         ret_len += len;
 
     early_continue:
