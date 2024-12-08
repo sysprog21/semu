@@ -466,6 +466,7 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
 static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
                                       uint32_t *plen)
 {
+    fprintf(stderr, "start virtio_snd_read_pcm_start\n");
     const virtio_snd_pcm_hdr_t *request = query;
     uint32_t stream_id = request->stream_id;
     uint32_t code = vsnd_props[stream_id].pp.hdr.hdr.code;
@@ -484,12 +485,13 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
     pthread_cond_signal(&virtio_snd_ctrl_cond);
 
     *plen = 0;
-    fprintf(stderr, "virtio_snd_read_pcm_start\n");
+    fprintf(stderr, "end virtio_snd_read_pcm_start\n");
 }
 
 static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
                                      uint32_t *plen)
 {
+    fprintf(stderr, "start virtio_snd_read_pcm_stop\n");
     const virtio_snd_pcm_hdr_t *request = query;
     uint32_t stream_id = request->stream_id;
     uint32_t code = vsnd_props[stream_id].pp.hdr.hdr.code;
@@ -507,7 +509,7 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
     pthread_cond_signal(&virtio_snd_ctrl_cond);
 
     *plen = 0;
-    fprintf(stderr, "virtio_snd_read_pcm_stop\n");
+    fprintf(stderr, "end virtio_snd_read_pcm_stop\n");
 }
 
 static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
@@ -530,20 +532,6 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
     fprintf(stderr, "pass CNFAclose\n");
 
     /* Tear down the PCM frames. */
-    virtio_snd_pcm_frame_t *t = NULL;
-    struct queue_head *frame_q = &(vsnd_props[stream_id].pcm_frames_q);
-    virtio_snd_pcm_frame_t *frame = vsnd_props[stream_id].pcm_frames;
-    int idx = 0;
-    queue_for_each_entry_safe(frame, t, frame_q, q)
-    {
-        free(frame->buf);
-        queue_del(&frame->q);
-        free(frame);
-
-        fprintf(stderr, "tear down frame %d\n", idx);
-        idx++;
-    }
-    assert(queue_empty(frame_q));
 
     *plen = 0;
     fprintf(stderr, "virtio_snd_read_pcm_release\n");
