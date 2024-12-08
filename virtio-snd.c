@@ -243,11 +243,6 @@ typedef struct {
     uint8_t positions[VIRTIO_SND_CHMAP_MAX_SIZE];
 } virtio_snd_chmap_info_t;
 
-/* A queue to hold arbitrary number of PCM frames. */
-typedef struct {
-    void *buf;
-    struct queue_head q;
-} virtio_snd_pcm_frame_t;
 /* virtio-snd to hold the settings of each stream */
 typedef struct {
     virtio_snd_jack_info_t j;
@@ -257,9 +252,9 @@ typedef struct {
     struct CNFADriver *audio_host;
     bool is_guest_playing;
 
-    // PCM frame buffer
-    virtio_snd_pcm_frame_t *pcm_frames;
-    struct queue_head pcm_frames_q;
+    // PCM frame ring buffer
+    void *buffer;
+    int sz;
 } virtio_snd_prop_t;
 
 static virtio_snd_config_t vsnd_configs[VSND_DEV_CNT_MAX];
@@ -457,7 +452,6 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     vsnd_props[stream_id].audio_host =
         CNFAInit(NULL, "semu-virtio-snd", virtio_snd_cb, 44100, 0, 1, 0,
                  vsnd_props[stream_id].pp.buffer_bytes, NULL, NULL, &v);
-    INIT_QUEUE_HEAD(&(vsnd_props[stream_id].pcm_frames_q));
 
     *plen = 0;
     fprintf(stderr, "virtio_snd_read_pcm_prepare\n");
@@ -734,9 +728,6 @@ static int virtio_snd_tx_desc_handler(virtio_snd_state_t *vsnd,
     int idx = 0;
     uint32_t stream_id;
     uintptr_t base = (uintptr_t) vsnd->ram;
-    struct queue_head *frame_q = &(vsnd_props[stream_id].pcm_frames_q);
-
-    virtio_snd_pcm_frame_t *frame = vsnd_props[stream_id].pcm_frames;
     uint32_t ret_len = 0;
     queue_for_each_entry(node, &q, q)
     {
