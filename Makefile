@@ -1,4 +1,5 @@
 include mk/common.mk
+include mk/check-libs.mk
 
 CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
@@ -12,6 +13,8 @@ CFLAGS += $(DT_CFLAGS)
 OBJS_EXTRA :=
 # command line option
 OPTS :=
+
+LDFLAGS := -lm
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -42,6 +45,51 @@ ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
     OBJS_EXTRA += netdev.o
 endif
+
+# virtio-snd
+ENABLE_VIRTIOSND ?= 1
+ifneq ($(UNAME_S),$(filter $(UNAME_S),Linux Darwin))
+    ENABLE_VIRTIOSND := 0
+endif
+
+# Check ALSA installation
+ifeq ($(UNAME_S),Linux)
+    ifeq (0, $(call check-alsa))
+        $(warning No libasound installed. Check libasound in advance.)
+        ENABLE_VIRTIOSND := 0
+    endif
+endif
+# Check core audio installation
+ifeq ($(UNAME_S),Darwin)
+    ifeq (0, $(call check-coreaudio))
+        $(warning No CoreAudio framework installed.)
+        ENABLE_VIRTIOSND := 0
+    endif
+endif
+$(call set-feature, VIRTIOSND)
+ifeq ($(call has, VIRTIOSND), 1)
+    OBJS_EXTRA += virtio-snd.o
+
+    ifeq ($(UNAME_S),Linux)
+        LDFLAGS += -lasound -lpthread
+    else ifeq ($(UNAME_S),Darwin)
+        LDFLAGS += -framework AudioToolbox -lpthread
+    endif
+    CFLAGS += -Icnfa
+
+cnfa/Makefile:
+	git submodule update --init cnfa
+cnfa/os_generic: cnfa/Makefile
+	$(MAKE) -C $(dir $<) os_generic.h
+CNFA_LIB := cnfa/CNFA_sf.h
+$(CNFA_LIB): cnfa/Makefile cnfa/os_generic
+	$(MAKE) -C $(dir $<) CNFA_sf.h
+main.o: $(CNFA_LIB)
+endif
+
+# .DEFAULT_GOAL should be set to all since the very first target is not all
+# after git submodule.
+.DEFAULT_GOAL := all
 
 BIN = semu
 all: $(BIN) minimal.dtb
