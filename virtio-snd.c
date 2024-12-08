@@ -254,7 +254,6 @@ typedef struct {
 
     // PCM frame ring buffer
     void *buffer;
-    int sz;
 } virtio_snd_prop_t;
 
 static virtio_snd_config_t vsnd_configs[VSND_DEV_CNT_MAX];
@@ -449,9 +448,11 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     v.stream_id = stream_id;
     // pthread_mutex_unlock(&virtio_snd_mutex);
     vsnd_props[stream_id].pp.hdr.hdr.code = VIRTIO_SND_R_PCM_PREPARE;
+    uint32_t buffer_bytes = vsnd_props[stream_id].pp.buffer_bytes;
     vsnd_props[stream_id].audio_host =
         CNFAInit(NULL, "semu-virtio-snd", virtio_snd_cb, 44100, 0, 1, 0,
-                 vsnd_props[stream_id].pp.buffer_bytes, NULL, NULL, &v);
+                 buffer_bytes, NULL, NULL, &v);
+    vsnd_props[stream_id].buffer = (void *)malloc(sizeof(void) * buffer_bytes);
 
     *plen = 0;
     fprintf(stderr, "virtio_snd_read_pcm_prepare\n");
@@ -526,6 +527,7 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
     fprintf(stderr, "pass CNFAclose\n");
 
     /* Tear down the PCM frames. */
+    free(vsnd_props[stream_id].buffer);
 
     *plen = 0;
     fprintf(stderr, "virtio_snd_read_pcm_release\n");
