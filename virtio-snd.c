@@ -81,6 +81,24 @@ enum {
     VIRTIO_SND_PCM_RATE_384000,   /* 384000 Hz */
 };
 
+/* supported PCM frames rates mapping */
+int pcm_rate_tbl[] = {
+    [VIRTIO_SND_PCM_RATE_5512] = 5512,
+    [VIRTIO_SND_PCM_RATE_8000] = 8000,
+    [VIRTIO_SND_PCM_RATE_11025] = 11025,
+    [VIRTIO_SND_PCM_RATE_16000] = 16000,
+    [VIRTIO_SND_PCM_RATE_22050] = 22050,
+    [VIRTIO_SND_PCM_RATE_32000] = 32000,
+    [VIRTIO_SND_PCM_RATE_44100] = 44100,
+    [VIRTIO_SND_PCM_RATE_48000] = 48000,
+    [VIRTIO_SND_PCM_RATE_64000] = 64000,
+    [VIRTIO_SND_PCM_RATE_88200] = 88200,
+    [VIRTIO_SND_PCM_RATE_96000] = 96000,
+    [VIRTIO_SND_PCM_RATE_176400] = 176400,
+    [VIRTIO_SND_PCM_RATE_192000] = 192000,
+    [VIRTIO_SND_PCM_RATE_384000] = 384000,
+};
+
 /* supported PCM stream features */
 enum {
     VIRTIO_SND_PCM_F_SHMEM_HOST = 0,
@@ -449,10 +467,10 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     // pthread_mutex_unlock(&virtio_snd_mutex);
     vsnd_props[stream_id].pp.hdr.hdr.code = VIRTIO_SND_R_PCM_PREPARE;
     uint32_t buffer_bytes = vsnd_props[stream_id].pp.buffer_bytes;
-    vsnd_props[stream_id].audio_host =
-        CNFAInit(NULL, "semu-virtio-snd", virtio_snd_cb, 44100, 0, 1, 0,
-                 buffer_bytes, NULL, NULL, &v);
-    vsnd_props[stream_id].buffer = (void *)malloc(sizeof(void) * buffer_bytes);
+    vsnd_props[stream_id].audio_host = CNFAInit(
+        NULL, "semu-virtio-snd", virtio_snd_cb, vsnd_props[stream_id].pp.rate,
+        0, 1, 0, buffer_bytes, NULL, NULL, &v);
+    vsnd_props[stream_id].buffer = (void *) malloc(sizeof(void) * buffer_bytes);
 
     *plen = 0;
     fprintf(stderr, "virtio_snd_read_pcm_prepare\n");
