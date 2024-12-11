@@ -27,26 +27,14 @@ def plic_irq_format(nums):
     for i in range(nums):
         s += f"<&cpu{i}_intc 9>, "
     return s[:-2]
-  
-def sswi_irq_format(nums):
+
+def clint_irq_format(nums):
     s = ""
     for i in range(nums):
-        s += f"<&cpu{i}_intc 1>, "    # 1 is the SSWI interrupt number (Supervisor Software Interrupt)
-    return s[:-2]
-  
-def mswi_irq_format(nums):
-    s = ""
-    for i in range(nums):
-        s += f"<&cpu{i}_intc 3>, "    # 3 is the MSWI interrupt number (Machine Software Interrupt)
-    return s[:-2]
-  
-def mtimer_irq_format(nums):
-    s = ""
-    for i in range(nums):
-        s += f"<&cpu{i}_intc 7>, "    # 7 is the MTIMER interrupt number (Machine Timer Interrupt)
+        s += f"<&cpu{i}_intc 3 &cpu{i}_intc 7>, "
     return s[:-2]
 
-def dtsi_template (cpu_list: str, plic_list, sswi_list, mtimer_list, mswi_list, clock_freq):
+def dtsi_template (cpu_list: str, plic_list, clint_list, clock_freq):
     return f"""/{{
     cpus {{
         #address-cells = <1>;
@@ -66,26 +54,11 @@ def dtsi_template (cpu_list: str, plic_list, sswi_list, mtimer_list, mswi_list, 
             riscv,ndev = <31>;
         }};
 
-        sswi0: sswi@4500000 {{
-          #interrupt-cells = <0>;
-          interrupt-controller;
-          interrupts-extended = {sswi_list};
-          reg = <0x4500000 0x4000>;
-          compatible = "riscv,aclint-sswi";
-        }};
-
-        mswi0: mswi@4400000 {{
-          #interrupt-cells = <0>;
-          interrupt-controller;
-          interrupts-extended = {mswi_list};
-          reg = <0x4400000 0x4000>;
-          compatible = "riscv,aclint-mswi";
-        }};
-        
-        mtimer0: mtimer@4300000 {{
-          interrupts-extended = {mtimer_list};
-          reg = <0x4300000 0x8000>;
-          compatible = "riscv,aclint-mtimer";
+        clint0: clint@4300000 {{
+            compatible = "riscv,clint0";
+            interrupts-extended =
+            {clint_list};
+            reg = <0x4300000 0x10000>;
         }};
     }};
 }};
@@ -96,4 +69,4 @@ harts = int(sys.argv[2])
 clock_freq = int(sys.argv[3])
 
 with open(dtsi, "w") as dts:
-    dts.write(dtsi_template(cpu_format(harts), plic_irq_format(harts), sswi_irq_format(harts), mswi_irq_format(harts), mtimer_irq_format(harts), clock_freq))
+    dts.write(dtsi_template(cpu_format(harts), plic_irq_format(harts), clint_irq_format(harts), clock_freq))
