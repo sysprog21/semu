@@ -191,6 +191,53 @@ void clint_write(hart_t *vm,
                  uint8_t width,
                  uint32_t value);
 
+/* VirtIO-Sound */
+
+#if SEMU_HAS(VIRTIOSND)
+#define IRQ_VSND 4
+#define IRQ_VSND_BIT (1 << IRQ_VSND)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_snd_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_snd_queue_t queues[4];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_snd_state_t;
+
+void virtio_snd_read(hart_t *core,
+                     virtio_snd_state_t *vsnd,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_snd_write(hart_t *core,
+                      virtio_snd_state_t *vsnd,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+bool virtio_snd_init(virtio_snd_state_t *vsnd);
+#endif /* SEMU_HAS(VIRTIOSND) */
+
 /* memory mapping */
 
 typedef struct {
@@ -206,4 +253,8 @@ typedef struct {
     virtio_blk_state_t vblk;
 #endif
     clint_state_t clint;
+#if SEMU_HAS(VIRTIOSND)
+    virtio_snd_state_t vsnd;
+#endif
+    uint64_t timer;
 } emu_state_t;
