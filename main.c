@@ -77,9 +77,23 @@ static void emu_update_timer_interrupt(hart_t *hart)
     emu_state_t *data = PRIV(hart);
 
     /* Sync global timer with local timer */
+#if SEMU_HAS(ACLINT)
+    hart->time = data->mtimer.mtime;
+    aclint_mtimer_update_interrupts(hart, &data->mtimer);
+#else
     hart->time = data->clint.mtime;
     clint_update_interrupts(hart, &data->clint);
+#endif
 }
+
+#if SEMU_HAS(ACLINT)
+static void emu_update_swi_interrupt(hart_t *hart)
+{
+    emu_state_t *data = PRIV(hart);
+    aclint_mswi_update_interrupts(hart, &data->mswi);
+    aclint_sswi_update_interrupts(hart, &data->sswi);
+}
+#endif
 
 static void mem_load(hart_t *hart,
                      uint32_t addr,
@@ -117,10 +131,26 @@ static void mem_load(hart_t *hart,
             emu_update_vblk_interrupts(hart->vm);
             return;
 #endif
+#if SEMU_HAS(ACLINT)
+        case 0x43: /* mtimer */
+            aclint_mtimer_read(hart, &data->mtimer, addr & 0xFFFFF, width,
+                               value);
+            aclint_mtimer_update_interrupts(hart, &data->mtimer);
+            return;
+        case 0x44: /* mswi */
+            aclint_mswi_read(hart, &data->mswi, addr & 0xFFFFF, width, value);
+            aclint_mswi_update_interrupts(hart, &data->mswi);
+            return;
+        case 0x45: /* sswi */
+            aclint_sswi_read(hart, &data->sswi, addr & 0xFFFFF, width, value);
+            aclint_sswi_update_interrupts(hart, &data->sswi);
+            return;
+#else
         case 0x43: /* clint */
             clint_read(hart, &data->clint, addr & 0xFFFFF, width, value);
             clint_update_interrupts(hart, &data->clint);
             return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_LOAD_FAULT, hart->exc_val);
@@ -162,10 +192,26 @@ static void mem_store(hart_t *hart,
             emu_update_vblk_interrupts(hart->vm);
             return;
 #endif
+#if SEMU_HAS(ACLINT)
+        case 0x43: /* mtimer */
+            aclint_mtimer_write(hart, &data->mtimer, addr & 0xFFFFF, width,
+                                value);
+            aclint_mtimer_update_interrupts(hart, &data->mtimer);
+            return;
+        case 0x44: /* mswi */
+            aclint_mswi_write(hart, &data->mswi, addr & 0xFFFFF, width, value);
+            aclint_mswi_update_interrupts(hart, &data->mswi);
+            return;
+        case 0x45: /* sswi */
+            aclint_sswi_write(hart, &data->sswi, addr & 0xFFFFF, width, value);
+            aclint_sswi_update_interrupts(hart, &data->sswi);
+            return;
+#else
         case 0x43: /* clint */
             clint_write(hart, &data->clint, addr & 0xFFFFF, width, value);
             clint_update_interrupts(hart, &data->clint);
             return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_STORE_FAULT, hart->exc_val);
@@ -185,9 +231,15 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(hart_t *hart, int32_t fid)
     emu_state_t *data = PRIV(hart);
     switch (fid) {
     case SBI_TIMER__SET_TIMER:
+#if SEMU_HAS(ACLINT)
+        data->mtimer.mtimecmp[hart->mhartid] =
+            (((uint64_t) hart->x_regs[RV_R_A1]) << 32) |
+            (uint64_t) (hart->x_regs[RV_R_A0]);
+#else
         data->clint.mtimecmp[hart->mhartid] =
             (((uint64_t) hart->x_regs[RV_R_A1]) << 32) |
             (uint64_t) (hart->x_regs[RV_R_A0]);
+#endif
         hart->sip &= ~RV_INT_STI_BIT;
         return (sbi_ret_t){SBI_SUCCESS, 0};
     default:
@@ -262,11 +314,19 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
         hart_mask_base = (uint64_t) hart->x_regs[RV_R_A1];
         if (hart_mask_base == 0xFFFFFFFFFFFFFFFF) {
             for (uint32_t i = 0; i < hart->vm->n_hart; i++) {
+#if SEMU_HAS(ACLINT)
+                data->sswi.ssip[i] = 1;
+#else
                 data->clint.msip[i] = 1;
+#endif
             }
         } else {
             for (int i = hart_mask_base; hart_mask; hart_mask >>= 1, i++) {
+#if SEMU_HAS(ACLINT)
+                data->sswi.ssip[i] = hart_mask & 1;
+#else
                 data->clint.msip[i] = hart_mask & 1;
+#endif
             }
         }
 
@@ -526,7 +586,11 @@ static int semu_start(int argc, char **argv)
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
+#if SEMU_HAS(ACLINT)
+    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);
+#else
     semu_timer_init(&emu.clint.mtime, CLOCK_FREQ);
+#endif
 
     /* Set up RAM */
     emu.ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,
@@ -616,6 +680,9 @@ static int semu_start(int argc, char **argv)
             }
 
             emu_update_timer_interrupt(vm.hart[i]);
+#if SEMU_HAS(ACLINT)
+            emu_update_swi_interrupt(vm.hart[i]);
+#endif
 
             vm_step(vm.hart[i]);
             if (likely(!vm.hart[i]->error))

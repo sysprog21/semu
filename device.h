@@ -172,6 +172,59 @@ void virtio_blk_write(hart_t *vm,
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 #endif /* SEMU_HAS(VIRTIOBLK) */
 
+#if SEMU_HAS(ACLINT)
+/* ACLINT MTIMER */
+typedef struct {
+    uint64_t mtimecmp[4095];  // Machine Timer Compare array
+    semu_timer_t mtime;       // Machine Timer Counter
+} mtimer_state_t;
+
+void aclint_mtimer_update_interrupts(hart_t *hart, mtimer_state_t *mtimer);
+void aclint_mtimer_read(hart_t *hart,
+                        mtimer_state_t *mtimer,
+                        uint32_t addr,
+                        uint8_t width,
+                        uint32_t *value);
+void aclint_mtimer_write(hart_t *hart,
+                         mtimer_state_t *mtimer,
+                         uint32_t addr,
+                         uint8_t width,
+                         uint32_t value);
+
+/* ACLINT MSWI */
+typedef struct {
+    uint32_t msip[4096];  // Machine Software Interrupt Pending array
+} mswi_state_t;
+
+void aclint_mswi_update_interrupts(hart_t *hart, mswi_state_t *mswi);
+void aclint_mswi_read(hart_t *hart,
+                      mswi_state_t *mswi,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t *value);
+void aclint_mswi_write(hart_t *hart,
+                       mswi_state_t *mswi,
+                       uint32_t addr,
+                       uint8_t width,
+                       uint32_t value);
+
+/* ACLINT SSWI */
+typedef struct {
+    uint32_t ssip[4096];  // Supervisor Software Interrupt Pending array
+} sswi_state_t;
+
+void aclint_sswi_update_interrupts(hart_t *hart, sswi_state_t *sswi);
+void aclint_sswi_read(hart_t *hart,
+                      sswi_state_t *sswi,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t *value);
+void aclint_sswi_write(hart_t *hart,
+                       sswi_state_t *sswi,
+                       uint32_t addr,
+                       uint8_t width,
+                       uint32_t value);
+#else
 /* clint */
 typedef struct {
     uint32_t msip[4096];
@@ -190,9 +243,9 @@ void clint_write(hart_t *vm,
                  uint32_t addr,
                  uint8_t width,
                  uint32_t value);
+#endif
 
 /* memory mapping */
-
 typedef struct {
     bool stopped;
     uint32_t *ram;
@@ -205,5 +258,12 @@ typedef struct {
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
 #endif
+#if SEMU_HAS(ACLINT)
+    /* ACLINT */
+    mtimer_state_t mtimer;
+    mswi_state_t mswi;
+    sswi_state_t sswi;
+#else
     clint_state_t clint;
+#endif
 } emu_state_t;

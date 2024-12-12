@@ -12,5 +12,10 @@
 #define SEMU_FEATURE_VIRTIONET 1
 #endif
 
+/* ACLINT */
+#ifndef SEMU_FEATURE_ACLINT
+#define SEMU_FEATURE_ACLINT 1
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x
