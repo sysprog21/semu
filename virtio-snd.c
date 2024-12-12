@@ -638,7 +638,7 @@ static void virtio_snd_cb(struct CNFADriver *dev,
     fprintf(stderr, "start to play\n");
     int channels = dev->channelsPlay;
     uint32_t id = v_ptr->stream_id;
-    int out_buf_sz = framesp * channels;
+    uint32_t out_buf_sz = framesp * channels;
 
     /*if (!(playing)) {
         memset(out, 0, sizeof(short) * out_buf_sz);
@@ -646,7 +646,7 @@ static void virtio_snd_cb(struct CNFADriver *dev,
     }*/
 
     /* TODO: add single consumer */
-    __virtio_snd_frame_dequeue(&out, out_buf_sz, id);
+    __virtio_snd_frame_dequeue((void **) &out, out_buf_sz, id);
 #if 0
     for (int i = 0; i < framesp; i++) {
         // Shift phase, so we run at 440 Hz (A4)
@@ -772,9 +772,9 @@ static void __virtio_snd_frame_enqueue(void *payload,
      * prod_head > cons_tail). So 'free_entries' is always between 0
      * and size(ring)-1. */
     free_entries = mask + cons_tail - prod_head;
-    /*fprintf(stderr,
+    fprintf(stderr,
             "mask %" PRIu32 " cons_tail %" PRIu32 " prod_head %" PRIu32 "\n",
-            mask, cons_tail, prod_head);*/
+            mask, cons_tail, prod_head);
 
     /* Move prod_head. */
     if (n > free_entries)
