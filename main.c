@@ -302,7 +302,12 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
 
 static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
 {
-    /* TODO: RFENCE SBI extension */
+    /* TODO: Since the current implementation sequentially emulates
+     * multi-core execution, the implementation of RFENCE extension is not
+     * complete, for example, FENCE.I is currently ignored. To support
+     * multi-threaded system emulation, RFENCE extension has to be implemented
+     * completely.
+     */
     uint64_t hart_mask, hart_mask_base;
     switch (fid) {
     case 0:
@@ -622,6 +627,9 @@ static int semu_start(int argc, char **argv)
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
     while (!emu.stopped) {
+        /* TODO: Add support for multi-threaded system emulation after the
+         * RFENCE extension is completely implemented.
+         */
         for (uint32_t i = 0; i < vm.n_hart; i++) {
             if (peripheral_update_ctr-- == 0) {
                 peripheral_update_ctr = 64;
