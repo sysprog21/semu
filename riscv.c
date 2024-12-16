@@ -805,7 +805,7 @@ void vm_step(hart_t *vm)
         uint8_t idx = ilog2(applicable);
         if (idx == 1) {
             emu_state_t *data = PRIV(vm);
-            data->clint.msip[vm->mhartid] = 0;
+            data->sswi.ssip[vm->mhartid] = 0;
         }
         vm->exc_cause = (1U << 31) | idx;
         vm->stval = 0;

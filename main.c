@@ -77,8 +77,15 @@ static void emu_update_timer_interrupt(hart_t *hart)
     emu_state_t *data = PRIV(hart);
 
     /* Sync global timer with local timer */
-    hart->time = data->clint.mtime;
-    clint_update_interrupts(hart, &data->clint);
+    hart->time = data->mtimer.mtime;
+    aclint_mtimer_update_interrupts(hart, &data->mtimer);
+}
+
+static void emu_update_swi_interrupt(hart_t *hart)
+{
+    emu_state_t *data = PRIV(hart);
+    aclint_mswi_update_interrupts(hart, &data->mswi);
+    aclint_sswi_update_interrupts(hart, &data->sswi);
 }
 
 static void mem_load(hart_t *hart,
@@ -117,9 +124,18 @@ static void mem_load(hart_t *hart,
             emu_update_vblk_interrupts(hart->vm);
             return;
 #endif
-        case 0x43: /* clint */
-            clint_read(hart, &data->clint, addr & 0xFFFFF, width, value);
-            clint_update_interrupts(hart, &data->clint);
+        case 0x43: /* mtimer */
+            aclint_mtimer_read(hart, &data->mtimer, addr & 0xFFFFF, width,
+                               value);
+            aclint_mtimer_update_interrupts(hart, &data->mtimer);
+            return;
+        case 0x44: /* mswi */
+            aclint_mswi_read(hart, &data->mswi, addr & 0xFFFFF, width, value);
+            aclint_mswi_update_interrupts(hart, &data->mswi);
+            return;
+        case 0x45: /* sswi */
+            aclint_sswi_read(hart, &data->sswi, addr & 0xFFFFF, width, value);
+            aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
         }
     }
@@ -162,9 +178,18 @@ static void mem_store(hart_t *hart,
             emu_update_vblk_interrupts(hart->vm);
             return;
 #endif
-        case 0x43: /* clint */
-            clint_write(hart, &data->clint, addr & 0xFFFFF, width, value);
-            clint_update_interrupts(hart, &data->clint);
+        case 0x43: /* mtimer */
+            aclint_mtimer_write(hart, &data->mtimer, addr & 0xFFFFF, width,
+                                value);
+            aclint_mtimer_update_interrupts(hart, &data->mtimer);
+            return;
+        case 0x44: /* mswi */
+            aclint_mswi_write(hart, &data->mswi, addr & 0xFFFFF, width, value);
+            aclint_mswi_update_interrupts(hart, &data->mswi);
+            return;
+        case 0x45: /* sswi */
+            aclint_sswi_write(hart, &data->sswi, addr & 0xFFFFF, width, value);
+            aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
         }
     }
@@ -185,7 +210,7 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(hart_t *hart, int32_t fid)
     emu_state_t *data = PRIV(hart);
     switch (fid) {
     case SBI_TIMER__SET_TIMER:
-        data->clint.mtimecmp[hart->mhartid] =
+        data->mtimer.mtimecmp[hart->mhartid] =
             (((uint64_t) hart->x_regs[RV_R_A1]) << 32) |
             (uint64_t) (hart->x_regs[RV_R_A0]);
         hart->sip &= ~RV_INT_STI_BIT;
@@ -261,13 +286,11 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
         hart_mask = (uint64_t) hart->x_regs[RV_R_A0];
         hart_mask_base = (uint64_t) hart->x_regs[RV_R_A1];
         if (hart_mask_base == 0xFFFFFFFFFFFFFFFF) {
-            for (uint32_t i = 0; i < hart->vm->n_hart; i++) {
-                data->clint.msip[i] = 1;
-            }
+            for (uint32_t i = 0; i < hart->vm->n_hart; i++)
+                data->sswi.ssip[i] = 1;
         } else {
-            for (int i = hart_mask_base; hart_mask; hart_mask >>= 1, i++) {
-                data->clint.msip[i] = hart_mask & 1;
-            }
+            for (int i = hart_mask_base; hart_mask; hart_mask >>= 1, i++)
+                data->sswi.ssip[i] = hart_mask & 1;
         }
 
         return (sbi_ret_t){SBI_SUCCESS, 0};
@@ -279,7 +302,12 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
 
 static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
 {
-    /* TODO: RFENCE SBI extension */
+    /* TODO: Since the current implementation sequentially emulates
+     * multi-core execution, the implementation of RFENCE extension is not
+     * complete, for example, FENCE.I is currently ignored. To support
+     * multi-threaded system emulation, RFENCE extension has to be implemented
+     * completely.
+     */
     uint64_t hart_mask, hart_mask_base;
     switch (fid) {
     case 0:
@@ -526,7 +554,6 @@ static int semu_start(int argc, char **argv)
     /* Initialize the emulator */
     emu_state_t emu;
     memset(&emu, 0, sizeof(emu));
-    semu_timer_init(&emu.clint.mtime, CLOCK_FREQ);
 
     /* Set up RAM */
     emu.ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,
@@ -591,10 +618,18 @@ static int semu_start(int argc, char **argv)
     emu.vblk.ram = emu.ram;
     emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
 #endif
+    /* Set up ACLINT */
+    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);
+    emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
+    emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
+    emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
 
     /* Emulate */
     uint32_t peripheral_update_ctr = 0;
     while (!emu.stopped) {
+        /* TODO: Add support for multi-threaded system emulation after the
+         * RFENCE extension is completely implemented.
+         */
         for (uint32_t i = 0; i < vm.n_hart; i++) {
             if (peripheral_update_ctr-- == 0) {
                 peripheral_update_ctr = 64;
@@ -616,6 +651,7 @@ static int semu_start(int argc, char **argv)
             }
 
             emu_update_timer_interrupt(vm.hart[i]);
+            emu_update_swi_interrupt(vm.hart[i]);
 
             vm_step(vm.hart[i]);
             if (likely(!vm.hart[i]->error))
