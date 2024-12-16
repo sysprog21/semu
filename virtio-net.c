@@ -121,7 +121,7 @@ static ssize_t handle_read(netdev_t *netdev,
     ssize_t plen = 0;
 #define _(dev) NETDEV_IMPL_##dev
     switch (netdev->type) {
-    case _(tap):
+    case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         plen = readv(tap->tap_fd, iovs_cursor, niovs);
         if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
@@ -134,6 +134,7 @@ static ssize_t handle_read(netdev_t *netdev,
                     strerror(errno));
         }
         break;
+    }
     case _(user):
         /* TODO: handle read  */
         break;
@@ -152,7 +153,7 @@ static ssize_t handle_write(netdev_t *netdev,
     ssize_t plen = 0;
 #define _(dev) NETDEV_IMPL_##dev
     switch (netdev->type) {
-    case _(tap):
+    case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         plen = writev(tap->tap_fd, iovs_cursor, niovs);
         if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
@@ -165,6 +166,7 @@ static ssize_t handle_write(netdev_t *netdev,
                     strerror(errno));
         }
         break;
+    }
     case _(user):
         /* TODO: handle slirp_input */
         break;
@@ -280,7 +282,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
     netdev_impl_t dev_type = vnet->peer.type;
 #define _(dev) NETDEV_IMPL_##dev
     switch (dev_type) {
-    case _(tap):
+    case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) vnet->peer.op;
         struct pollfd pfd = {tap->tap_fd, POLLIN | POLLOUT, 0};
         poll(&pfd, 1, 0);
@@ -293,6 +295,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
             virtio_net_try_tx(vnet);
         }
         break;
+    }
     case _(user):
         /* TODO: handle slirp input/output */
         break;

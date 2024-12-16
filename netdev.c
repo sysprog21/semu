@@ -55,7 +55,7 @@ static int net_init_tap(netdev_t *netdev)
     return 0;
 }
 
-static int net_init_user(netdev_t *netdev)
+static int net_init_user(netdev_t *netdev UNUSED)
 {
     /* TODO: create slirp dev */
     return 0;
