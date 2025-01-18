@@ -105,6 +105,14 @@ OBJS := \
 
 deps := $(OBJS:%.o=.%.o.d)
 
+GDBSTUB_LIB := mini-gdbstub/build/libgdbstub.a
+LDFLAGS += $(GDBSTUB_LIB)
+mini-gdbstub/Makefile:
+	git submodule update --init $(dir $@)
+$(GDBSTUB_LIB): mini-gdbstub/Makefile
+	$(MAKE) -C $(dir $<)
+$(OBJS): $(GDBSTUB_LIB)
+
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
@@ -152,6 +160,7 @@ build-image:
 
 clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
+	$(Q)$(MAKE) -C mini-gdbstub clean
 
 distclean: clean
 	$(Q)$(RM) riscv-harts.dtsi

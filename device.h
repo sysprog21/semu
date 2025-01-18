@@ -355,9 +355,11 @@ bool virtio_snd_init(virtio_snd_state_t *vsnd);
 
 /* memory mapping */
 typedef struct {
+    bool debug;
     bool stopped;
     uint32_t *ram;
     uint32_t *disk;
+    vm_t vm;
     plic_state_t plic;
     u8250_state_t uart;
 #if SEMU_HAS(VIRTIONET)
@@ -376,4 +378,10 @@ typedef struct {
 #if SEMU_HAS(VIRTIOSND)
     virtio_snd_state_t vsnd;
 #endif
+
+    uint32_t peripheral_update_ctr;
+
+    /* The fields used for debug mode */
+    bool is_interrupted;
+    int curr_cpuid;
 } emu_state_t;
