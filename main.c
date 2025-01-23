@@ -619,7 +619,7 @@ static int semu_start(int argc, char **argv)
     emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
 #endif
     /* Set up ACLINT */
-    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);
+    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ, hart_count);
     emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
