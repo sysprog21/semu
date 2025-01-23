@@ -19,7 +19,7 @@ define download
 $($(T)_DATA):
 	$(VECHO) "  GET\t$$@\n"
 	$(Q)curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
-	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@.bz2" | $(SHA1SUM) -c
+	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@.bz2" | $(SHA1SUM) -c -
 	$(Q)bunzip2 $$@.bz2
 endef
 
