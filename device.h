@@ -6,7 +6,7 @@
 
 /* RAM */
 
-#define RAM_SIZE (512 * 1024 * 1024)
+#define RAM_SIZE (1024 * 1024 * 1024)
 #define DTB_SIZE (1 * 1024 * 1024)
 #define INITRD_SIZE (65 * 1024 * 1024)
 
