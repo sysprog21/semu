@@ -77,8 +77,6 @@ DTC ?= dtc
 E :=
 S := $E $E
 
-LDFLAGS := -pg
-
 SMP ?= 1
 CFLAGS += -D SEMU_BOOT_TARGET_TIME=10
 .PHONY: riscv-harts.dtsi
