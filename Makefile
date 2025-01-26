@@ -31,6 +31,13 @@ ifeq ($(call has, VIRTIOBLK), 1)
     endif
 endif
 
+# virtio-rng
+ENABLE_VIRTIORNG ?= 1
+$(call set-feature, VIRTIORNG)
+ifeq ($(call has, VIRTIORNG), 1)
+    OBJS_EXTRA += virtio-rng.o
+endif
+
 NETDEV ?= tap
 # virtio-net
 ENABLE_VIRTIONET ?= 1
