@@ -677,7 +677,17 @@ static int semu_start(int argc, char **argv)
     return 0;
 }
 
+#include <time.h>
+#ifdef CLOCK_MONOTONIC_COARSE
+#define CLOCKID CLOCK_MONOTONIC_COARSE
+#else
+#define CLOCKID CLOCK_REALTIME_COARSE
+#endif
+
+extern struct timespec boot_begin;
+
 int main(int argc, char **argv)
 {
+    clock_gettime(CLOCK_REALTIME, &boot_begin);
     return semu_start(argc, argv);
 }

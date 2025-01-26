@@ -1,0 +1,1 @@
+SMP	real_boot_time	times		ns_per_call	predict_sec	scale_factor	percentage	real_ns_per_call
