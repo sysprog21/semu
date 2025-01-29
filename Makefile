@@ -69,6 +69,16 @@ ifneq ($(UNAME_S),Linux)
     ENABLE_VIRTIOGPU := 0
 endif
 
+# VirGL
+ENABLE_VIRGL ?= 1
+ifneq (ENABLE_VIRTIOGPU,0)
+    CFLAGS += $(shell pkg-config virglrenderer --cflags)
+    LDFLAGS += $(shell pkg-config virglrenderer --libs)
+    OBJS_EXTRA += virgl.o
+endif
+
+$(call set-feature, VIRGL)
+
 # SDL2
 ENABLE_SDL ?= 1
 ifeq (, $(shell which sdl2-config))
