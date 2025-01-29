@@ -80,5 +80,19 @@
             interrupts = <5>;
         };       
 #endif
+
+#if SEMU_FEATURE_VIRTIOINPUT
+        keyboard0: virtio@4800000 {
+            compatible = "virtio,mmio";
+            reg = <0x4800000 0x200>;
+            interrupts = <6>;
+        };
+
+        mouse0: virtio@4900000 {
+            compatible = "virtio,mmio";
+            reg = <0x4900000 0x200>;
+            interrupts = <7>;
+        };
+#endif
     };
 };

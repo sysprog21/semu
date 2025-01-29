@@ -2,6 +2,9 @@
 
 #include "feature.h"
 
+#define BITS_PER_CHAR 8
+#define BITS_PER_LONG (BITS_PER_CHAR * sizeof(long))
+
 #define unlikely(x) __builtin_expect((x), 0)
 #define likely(x) __builtin_expect((x), 1)
 
@@ -15,6 +18,16 @@
 static inline int ilog2(int x)
 {
     return 31 - __builtin_clz(x | 1);
+}
+
+static inline void set_bit(unsigned long bit, unsigned long *word)
+{
+    *word |= (1 << bit);
+}
+
+static inline void bitmap_set_bit(unsigned long *map, unsigned long bit)
+{
+    set_bit(bit % BITS_PER_LONG, &map[bit / BITS_PER_LONG]);
 }
 
 /* Range check
