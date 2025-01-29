@@ -270,8 +270,6 @@ void virtio_gpu_write(hart_t *vm,
                       uint8_t width,
                       uint32_t value);
 
-void semu_virgl_init(virtio_gpu_state_t *vgpu);
-
 void virtio_gpu_init(virtio_gpu_state_t *vgpu);
 void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
                             uint32_t width,

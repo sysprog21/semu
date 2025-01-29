@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/uio.h>
+
 #include "feature.h"
 
 #define BITS_PER_CHAR 8

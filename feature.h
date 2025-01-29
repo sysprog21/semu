@@ -22,6 +22,11 @@
 #define SEMU_FEATURE_VIRTIOGPU 1
 #endif
 
+/* VirGL */
+#ifndef SEMU_FEATURE_VIRGL
+#define SEMU_FEATURE_VIRGL 1
+#endif
+
 /* virtio-input */
 #ifndef SEMU_FEATURE_VIRTIOINPUT
 #define SEMU_FEATURE_VIRTIOINPUT 1

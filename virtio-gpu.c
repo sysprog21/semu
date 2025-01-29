@@ -15,291 +15,102 @@
 #include "riscv.h"
 #include "riscv_private.h"
 #include "utils.h"
+#include "virgl.h"
+#include "virtio-gpu.h"
 #include "virtio.h"
 #include "window.h"
+
+#define VGPU_CMD_TRACE_ENABLED 0
 
 #define VIRTIO_F_VERSION_1 1
 
 #define VIRTIO_GPU_EVENT_DISPLAY (1 << 0)
+#define VIRTIO_GPU_F_VIRGL (1 << 0)
 #define VIRTIO_GPU_F_EDID (1 << 1)
+#define VIRTIO_GPU_F_CONTEXT_INIT (1 << 4)
 #define VIRTIO_GPU_FLAG_FENCE (1 << 0)
 
 #define VGPU_QUEUE_NUM_MAX 1024
 #define VGPU_QUEUE (vgpu->queues[vgpu->QueueSel])
 
-#define PRIV(x) ((struct vgpu_scanout_info *) x->priv)
+#define PRIV(x) ((virtio_gpu_data_t *) x->priv)
 
-#define STRIDE_SIZE 4096
+#if VGPU_CMD_TRACE_ENABLED == 0
+#define VGPU_CMD(cmd, fn)                       \
+    case VIRTIO_GPU_CMD_##cmd:                  \
+        g_vgpu_backend.fn(vgpu, vq_desc, plen); \
+        break;
+#else
+#define VGPU_CMD(cmd, fn)                                            \
+    case VIRTIO_GPU_CMD_##cmd:                                       \
+        printf("(*) semu/virtio-gpu: %s\n", "VIRTIO_GPU_CMD_" #cmd); \
+        g_vgpu_backend.fn(vgpu, vq_desc, plen);                      \
+        break;
+#endif
 
-struct vgpu_scanout_info {
-    uint32_t width;
-    uint32_t height;
-    uint32_t enabled;
-};
+extern const struct vgpu_cmd_backend g_vgpu_backend;
+extern const struct window_backend g_window;
 
-struct vgpu_resource_2d {
-    /* Public: */
-    uint32_t scanout_id;
-    uint32_t format;
-    uint32_t width;
-    uint32_t height;
-    uint32_t stride;
-    uint32_t bits_per_pixel;
-    uint32_t *image;
-    bool scanout_attached;
-    /* Private: */
-    uint32_t resource_id;
-    size_t page_cnt;
-    struct iovec *iovec;
-    struct list_head list;
-};
-
-PACKED(struct vgpu_config {
-    uint32_t events_read;
-    uint32_t events_clear;
-    uint32_t num_scanouts;
-    uint32_t num_capsets;
-});
-
-PACKED(struct vgpu_ctrl_hdr {
-    uint32_t type;
-    uint32_t flags;
-    uint64_t fence_id;
-    uint32_t ctx_id;
-    uint8_t ring_idx;
-    uint8_t padding[3];
-});
-
-PACKED(struct vgpu_rect {
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
-});
-
-PACKED(struct vgpu_resp_disp_info {
-    struct vgpu_ctrl_hdr hdr;
-    struct virtio_gpu_display_one {
-        struct vgpu_rect r;
-        uint32_t enabled;
-        uint32_t flags;
-    } pmodes[VIRTIO_GPU_MAX_SCANOUTS];
-});
-
-PACKED(struct vgpu_res_create_2d {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t resource_id;
-    uint32_t format;
-    uint32_t width;
-    uint32_t height;
-});
-
-PACKED(struct vgpu_res_unref {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t resource_id;
-    uint32_t padding;
-});
-
-PACKED(struct vgpu_set_scanout {
-    struct vgpu_ctrl_hdr hdr;
-    struct vgpu_rect r;
-    uint32_t scanout_id;
-    uint32_t resource_id;
-});
-
-PACKED(struct vgpu_res_flush {
-    struct vgpu_ctrl_hdr hdr;
-    struct vgpu_rect r;
-    uint32_t resource_id;
-    uint32_t padding;
-});
-
-PACKED(struct vgpu_trans_to_host_2d {
-    struct vgpu_ctrl_hdr hdr;
-    struct vgpu_rect r;
-    uint64_t offset;
-    uint32_t resource_id;
-    uint32_t padding;
-});
-
-PACKED(struct vgpu_res_attach_backing {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t resource_id;
-    uint32_t nr_entries;
-});
-
-PACKED(struct vgpu_mem_entry {
-    uint64_t addr;
-    uint32_t length;
-    uint32_t padding;
-});
-
-PACKED(struct vgpu_resp_edid {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t size;
-    uint32_t padding;
-    char edid[1024];
-});
-
-PACKED(struct vgpu_get_capset_info {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t capset_index;
-    uint32_t padding;
-});
-
-PACKED(struct vgpu_resp_capset_info {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t capset_id;
-    uint32_t capset_max_version;
-    uint32_t capset_max_size;
-    uint32_t padding;
-});
-
-PACKED(struct virtio_gpu_resp_capset {
-    struct vgpu_ctrl_hdr hdr;
-    uint8_t *capset_data;
-});
-
-PACKED(struct virtio_gpu_ctx_create {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t nlen;
-    uint32_t context_init;
-    char debug_name[64];
-});
-
-PACKED(struct virtio_gpu_cursor_pos {
-    uint32_t scanout_id;
-    uint32_t x;
-    uint32_t y;
-    uint32_t padding;
-});
-
-PACKED(struct virtio_gpu_update_cursor {
-    struct vgpu_ctrl_hdr hdr;
-    struct virtio_gpu_cursor_pos pos;
-    uint32_t resource_id;
-    uint32_t hot_x;
-    uint32_t hot_y;
-    uint32_t padding;
-});
-
-/* clang-format off */
-PACKED(struct virtio_gpu_ctx_destroy {
-    struct vgpu_ctrl_hdr hdr;
-});
-/* clang-format on */
-
-PACKED(struct virtio_gpu_resource_create_3d {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t resource_id;
-    uint32_t target;
-    uint32_t format;
-    uint32_t bind;
-    uint32_t width;
-    uint32_t height;
-    uint32_t depth;
-    uint32_t array_size;
-    uint32_t last_level;
-    uint32_t nr_samples;
-    uint32_t flags;
-    uint32_t padding;
-});
-
-PACKED(struct virtio_gpu_ctx_resource {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t resource_id;
-    uint32_t padding;
-});
-
-PACKED(struct virtio_gpu_box {
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-    uint32_t w;
-    uint32_t h;
-    uint32_t d;
-});
-
-PACKED(struct virtio_gpu_transfer_host_3d {
-    struct vgpu_ctrl_hdr hdr;
-    struct virtio_gpu_box box;
-    uint64_t offset;
-    uint32_t resource_id;
-    uint32_t level;
-    uint32_t stride;
-    uint32_t layer_stride;
-});
-
-PACKED(struct virtio_gpu_cmd_submit {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t size;
-    uint32_t num_in_fences;
-});
-
-PACKED(struct virtio_gpu_resp_map_info {
-    struct vgpu_ctrl_hdr hdr;
-    uint32_t map_info;
-    uint32_t padding;
-});
-
+static virtio_gpu_data_t virtio_gpu_data;
 static struct vgpu_config vgpu_configs;
 static LIST_HEAD(vgpu_res_2d_list);
 
-typedef void (*vgpu_cmd_func)(virtio_gpu_state_t *vgpu,
-                              struct virtq_desc *vq_desc,
-                              uint32_t *plen);
-
-struct vgpu_cmd_backend {
-    /* 2D commands */
-    vgpu_cmd_func get_display_info;
-    vgpu_cmd_func resource_create_2d;
-    vgpu_cmd_func resource_unref;
-    vgpu_cmd_func set_scanout;
-    vgpu_cmd_func resource_flush;
-    vgpu_cmd_func trasfer_to_host_2d;
-    vgpu_cmd_func resource_attach_backing;
-    vgpu_cmd_func resource_detach_backing;
-    vgpu_cmd_func get_capset_info;
-    vgpu_cmd_func get_capset;
-    vgpu_cmd_func get_edid;
-    vgpu_cmd_func resource_assign_uuid;
-    vgpu_cmd_func resource_create_blob;
-    vgpu_cmd_func set_scanout_blob;
-    /* 3D commands */
-    vgpu_cmd_func ctx_create;
-    vgpu_cmd_func ctx_destroy;
-    vgpu_cmd_func ctx_attach_resource;
-    vgpu_cmd_func ctx_detach_resource;
-    vgpu_cmd_func resource_create_3d;
-    vgpu_cmd_func transfer_to_host_3d;
-    vgpu_cmd_func transfer_from_host_3d;
-    vgpu_cmd_func submit_3d;
-    vgpu_cmd_func resource_map_blob;
-    vgpu_cmd_func resource_unmap_blob;
-    /* Cursor commands */
-    vgpu_cmd_func update_cursor;
-    vgpu_cmd_func move_cursor;
-};
-
-static inline void *vgpu_mem_host_to_guest(virtio_gpu_state_t *vgpu,
-                                           uint32_t addr)
+size_t iov_to_buf(const struct iovec *iov,
+                  const unsigned int iov_cnt,
+                  size_t offset,
+                  void *buf,
+                  size_t bytes)
 {
-    return (void *) ((uintptr_t) vgpu->ram + addr);
+    size_t done = 0;
+
+    for (unsigned int i = 0; i < iov_cnt; i++) {
+        /* Skip empty pages */
+        if (iov[i].iov_base == 0 || iov[i].iov_len == 0)
+            continue;
+
+        if (offset < iov[i].iov_len) {
+            /* Take as much as data of current page can provide */
+            size_t remained = bytes - done;
+            size_t page_avail = iov[i].iov_len - offset;
+            size_t len = (remained < page_avail) ? remained : page_avail;
+
+            /* Copy to buffer */
+            void *src = (void *) ((uintptr_t) iov[i].iov_base + offset);
+            void *dest = (void *) ((uintptr_t) buf + done);
+            memcpy((void *) ((uintptr_t) dest + done), src, len);
+
+            /* If there is still data left to read, but current page is
+             * exhausted, we need to read from the beginning of the next
+             * page, where its offset should be 0 */
+            offset = 0;
+
+            /* Count the total received bytes so far */
+            done += len;
+
+            /* Data transfering of current scanline is complete */
+            if (done >= bytes)
+                break;
+        } else {
+            offset -= iov[i].iov_len;
+        }
+    }
+
+    return done;
 }
 
-static struct vgpu_resource_2d *create_vgpu_resource_2d(int resource_id)
+struct vgpu_resource_2d *vgpu_create_resource_2d(int resource_id)
 {
     struct vgpu_resource_2d *res = malloc(sizeof(struct vgpu_resource_2d));
     if (!res)
         return NULL;
 
+    memset(res, 0, sizeof(*res));
     res->resource_id = resource_id;
-    res->scanout_attached = false;
     list_push(&res->list, &vgpu_res_2d_list);
     return res;
 }
 
-static struct vgpu_resource_2d *acquire_vgpu_resource_2d(uint32_t resource_id)
+struct vgpu_resource_2d *vgpu_get_resource_2d(uint32_t resource_id)
 {
     struct vgpu_resource_2d *res_2d;
     list_for_each_entry (res_2d, &vgpu_res_2d_list, list) {
@@ -310,17 +121,13 @@ static struct vgpu_resource_2d *acquire_vgpu_resource_2d(uint32_t resource_id)
     return NULL;
 }
 
-static int destroy_vgpu_resource_2d(uint32_t resource_id)
+int vgpu_destory_resource_2d(uint32_t resource_id)
 {
-    struct vgpu_resource_2d *res_2d = acquire_vgpu_resource_2d(resource_id);
+    struct vgpu_resource_2d *res_2d = vgpu_get_resource_2d(resource_id);
 
     /* Failed to find the resource */
     if (!res_2d)
         return -1;
-
-    int scanout_id = res_2d->scanout_id;
-    if (res_2d->scanout_attached)
-        window_lock(scanout_id);
 
     /* Release the resource */
     free(res_2d->image);
@@ -328,13 +135,27 @@ static int destroy_vgpu_resource_2d(uint32_t resource_id)
     free(res_2d->iovec);
     free(res_2d);
 
-    if (res_2d->scanout_attached)
-        window_unlock(scanout_id);
-
     return 0;
 }
 
-static void virtio_gpu_set_fail(virtio_gpu_state_t *vgpu)
+void *vgpu_mem_host_to_guest(virtio_gpu_state_t *vgpu, uint32_t addr)
+{
+    return (void *) ((uintptr_t) vgpu->ram + addr);
+}
+
+uint32_t virtio_gpu_write_response(virtio_gpu_state_t *vgpu,
+                                   uint64_t addr,
+                                   uint32_t type)
+{
+    struct vgpu_ctrl_hdr *response = vgpu_mem_host_to_guest(vgpu, addr);
+
+    memset(response, 0, sizeof(*response));
+    response->type = type;
+
+    return sizeof(*response);
+}
+
+void virtio_gpu_set_fail(virtio_gpu_state_t *vgpu)
 {
     vgpu->Status |= VIRTIO_STATUS__DEVICE_NEEDS_RESET;
     if (vgpu->Status & VIRTIO_STATUS__DRIVER_OK)
@@ -378,18 +199,21 @@ static void virtio_gpu_update_status(virtio_gpu_state_t *vgpu, uint32_t status)
     }
 }
 
-static void virtio_gpu_set_response_fencing(struct vgpu_ctrl_hdr *request,
-                                            struct vgpu_ctrl_hdr *response)
+void virtio_gpu_set_response_fencing(virtio_gpu_state_t *vgpu,
+                                     struct vgpu_ctrl_hdr *request,
+                                     uint64_t addr)
 {
-    if (request->flags &= VIRTIO_GPU_FLAG_FENCE) {
+    struct vgpu_ctrl_hdr *response = vgpu_mem_host_to_guest(vgpu, addr);
+
+    if (request->flags & VIRTIO_GPU_FLAG_FENCE) {
         response->flags = VIRTIO_GPU_FLAG_FENCE;
         response->fence_id = request->fence_id;
     }
 }
 
-static void virtio_gpu_get_display_info_handler(virtio_gpu_state_t *vgpu,
-                                                struct virtq_desc *vq_desc,
-                                                uint32_t *plen)
+void virtio_gpu_get_display_info_handler(virtio_gpu_state_t *vgpu,
+                                         struct virtq_desc *vq_desc,
+                                         uint32_t *plen)
 {
     /* Write display infomation */
     struct vgpu_resp_disp_info *response =
@@ -400,125 +224,12 @@ static void virtio_gpu_get_display_info_handler(virtio_gpu_state_t *vgpu,
 
     int scanout_num = vgpu_configs.num_scanouts;
     for (int i = 0; i < scanout_num; i++) {
-        response->pmodes[i].r.width = PRIV(vgpu)[i].width;
-        response->pmodes[i].r.height = PRIV(vgpu)[i].height;
-        response->pmodes[i].enabled = PRIV(vgpu)[i].enabled;
+        response->pmodes[i].r.width = PRIV(vgpu)->scanouts[i].width;
+        response->pmodes[i].r.height = PRIV(vgpu)->scanouts[i].height;
+        response->pmodes[i].enabled = PRIV(vgpu)->scanouts[i].enabled;
     }
 
     /* Update write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
-                                                  struct virtq_desc *vq_desc,
-                                                  uint32_t *plen)
-{
-    /* Read request */
-    struct vgpu_res_create_2d *request =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Create 2D resource */
-    struct vgpu_resource_2d *res_2d =
-        create_vgpu_resource_2d(request->resource_id);
-
-    if (!res_2d) {
-        fprintf(stderr, "%s(): Failed to allocate 2D resource\n", __func__);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    /* Select image formats */
-    uint32_t bits_per_pixel;
-
-    switch (request->format) {
-    case VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_A8B8G8R8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    case VIRTIO_GPU_FORMAT_R8G8B8X8_UNORM:
-        bits_per_pixel = 32;
-        break;
-    default:
-        fprintf(stderr, "%s(): Unsupported format %d\n", __func__,
-                request->format);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    uint32_t bytes_per_pixel = bits_per_pixel / 8;
-
-    /* Set 2D resource */
-    res_2d->width = request->width;
-    res_2d->height = request->height;
-    res_2d->format = request->format;
-    res_2d->bits_per_pixel = bits_per_pixel;
-    res_2d->stride = STRIDE_SIZE;
-    res_2d->image = malloc(bytes_per_pixel * (request->width + res_2d->stride) *
-                           request->height);
-
-    /* Failed to create image buffer */
-    if (!res_2d->image) {
-        fprintf(stderr, "%s(): Failed to allocate image buffer\n", __func__);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Response with fencing flag if needed */
-    virtio_gpu_set_response_fencing(&request->hdr, response);
-
-    /* Return write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
-                                                  struct virtq_desc *vq_desc,
-                                                  uint32_t *plen)
-{
-    /* Read request */
-    struct vgpu_res_unref *request =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Destroy 2D resource */
-    int result = destroy_vgpu_resource_2d(request->resource_id);
-
-    if (result != 0) {
-        fprintf(stderr, "%s(): Failed to destroy 2D resource\n", __func__);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(struct vgpu_ctrl_hdr));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Return write length */
     *plen = sizeof(*response);
 }
 
@@ -615,9 +326,9 @@ static void virtio_gpu_generate_edid(uint8_t *edid, int width_cm, int height_cm)
     edid[127] = virtio_gpu_generate_edid_checksum(edid, 127);
 }
 
-static void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
-                                        struct virtq_desc *vq_desc,
-                                        uint32_t *plen)
+void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
+                                 struct virtq_desc *vq_desc,
+                                 uint32_t *plen)
 {
     /* Generate the display EDID */
     struct vgpu_resp_edid edid = {
@@ -635,319 +346,19 @@ static void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
     *plen = sizeof(*response);
 }
 
-static void virtio_gpu_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
-                                               struct virtq_desc *vq_desc,
-                                               uint32_t *plen)
+void virtio_gpu_cmd_undefined_handler(virtio_gpu_state_t *vgpu,
+                                      struct virtq_desc *vq_desc,
+                                      uint32_t *plen)
 {
-    /* Read request */
-    struct vgpu_set_scanout *request =
+    struct vgpu_ctrl_hdr *header =
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
 
-    /* Acquire 2D resource */
-    struct vgpu_resource_2d *res_2d =
-        acquire_vgpu_resource_2d(request->resource_id);
+    fprintf(stderr, "%s(): unsupported VirtIO-GPU command %d.", __func__,
+            header->type);
 
-    /* Linux's virtio-gpu driver may send scanout command
-     * even if the resource does not exist */
-    if (res_2d) {
-        /* Set scanout ID to proper 2D resource */
-        res_2d->scanout_id = request->scanout_id;
-        res_2d->scanout_attached = true;
-    }
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Return write length */
-    *plen = sizeof(*response);
+    virtio_gpu_set_fail(vgpu);
+    *plen = 0;
 }
-
-static void virtio_gpu_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
-                                                  struct virtq_desc *vq_desc,
-                                                  uint32_t *plen)
-{
-    /* Read request */
-    struct vgpu_res_flush *request =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Acquire 2D resource */
-    struct vgpu_resource_2d *res_2d =
-        acquire_vgpu_resource_2d(request->resource_id);
-
-    /* Trigger display window rendering */
-    window_lock(res_2d->scanout_id);
-    window_render((struct gpu_resource *) res_2d);
-    window_unlock(res_2d->scanout_id);
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Return write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_copy_image_from_pages(struct vgpu_trans_to_host_2d *req,
-                                             struct vgpu_resource_2d *res_2d)
-{
-    uint32_t stride = res_2d->stride;
-    uint32_t bpp = res_2d->bits_per_pixel / 8; /* Bytes per pixel */
-    uint32_t width =
-        (req->r.width < res_2d->width) ? req->r.width : res_2d->width;
-    uint32_t height =
-        (req->r.height < res_2d->height) ? req->r.height : res_2d->height;
-    void *img_data = (void *) res_2d->image;
-
-    for (uint32_t h = 0; h < height; h++) {
-        size_t src_offset = req->offset + stride * h;
-        size_t dest_offset = (req->r.y + h) * stride + (req->r.x * bpp);
-        void *dest = (void *) ((uintptr_t) img_data + dest_offset);
-        size_t done = 0;
-        size_t total = width * bpp;
-
-        for (uint32_t i = 0; i < res_2d->page_cnt; i++) {
-            /* Skip empty pages */
-            if (res_2d->iovec[i].iov_base == 0 || res_2d->iovec[i].iov_len == 0)
-                continue;
-
-            if (src_offset < res_2d->iovec[i].iov_len) {
-                /* Source offset is in the image coordinate. The address to
-                 * copy from is the page base address plus with the offset
-                 */
-                void *src = (void *) ((uintptr_t) res_2d->iovec[i].iov_base +
-                                      src_offset);
-
-                /* Take as much as data of current page can provide */
-                size_t remained = total - done;
-                size_t page_avail = res_2d->iovec[i].iov_len - src_offset;
-                size_t nbytes = (remained < page_avail) ? remained : page_avail;
-
-                /* Copy to 2D resource buffer */
-                memcpy((void *) ((uintptr_t) dest + done), src, nbytes);
-
-                /* If there is still data left to read, but current page is
-                 * exhausted, we need to read from the beginning of the next
-                 * page, where its offset should be 0 */
-                src_offset = 0;
-
-                /* Count the total received bytes so far */
-                done += nbytes;
-
-                /* Data transfering of current scanline is complete */
-                if (done >= total)
-                    break;
-            } else {
-                /* Keep substracting until reaching the page */
-                src_offset -= res_2d->iovec[i].iov_len;
-            }
-        }
-    }
-}
-
-static void virtio_gpu_cursor_image_copy(struct vgpu_resource_2d *res_2d)
-{
-    /* The cursor resource is tightly packed and contiguous */
-    memcpy(res_2d->image, res_2d->iovec[0].iov_base,
-           sizeof(uint32_t) * CURSOR_WIDTH * CURSOR_HEIGHT);
-}
-
-static void virtio_gpu_cmd_transfer_to_host_2d_handler(
-    virtio_gpu_state_t *vgpu,
-    struct virtq_desc *vq_desc,
-    uint32_t *plen)
-{
-    /* Read request */
-    struct vgpu_trans_to_host_2d *req =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Acquire 2D resource */
-    struct vgpu_resource_2d *res_2d =
-        acquire_vgpu_resource_2d(req->resource_id);
-
-    if (!res_2d) {
-        fprintf(stderr, "%s(): Failed to find 2D resource\n", __func__);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    /* Check image boundary */
-    if (req->r.x > res_2d->width || req->r.y > res_2d->height ||
-        req->r.width > res_2d->width || req->r.height > res_2d->height ||
-        req->r.x + req->r.width > res_2d->width ||
-        req->r.y + req->r.height > res_2d->height) {
-        fprintf(stderr, "%s(): Invalid image size\n", __func__);
-        virtio_gpu_set_fail(vgpu);
-        return;
-    }
-
-    uint32_t width =
-        (req->r.width < res_2d->width) ? req->r.width : res_2d->width;
-    uint32_t height =
-        (req->r.height < res_2d->height) ? req->r.height : res_2d->height;
-
-    /* Transfer frame data from guest to host */
-    if (width == CURSOR_WIDTH && height == CURSOR_HEIGHT)
-        virtio_gpu_cursor_image_copy(res_2d);
-    else
-        virtio_gpu_copy_image_from_pages(req, res_2d);
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    struct vgpu_ctrl_hdr res_no_data = {.type = VIRTIO_GPU_RESP_OK_NODATA};
-    memcpy(response, &res_no_data, sizeof(struct vgpu_ctrl_hdr));
-
-    /* Response with fencing flag if needed */
-    virtio_gpu_set_response_fencing(&req->hdr, response);
-
-    /* Update write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_cmd_resource_attach_backing_handler(
-    virtio_gpu_state_t *vgpu,
-    struct virtq_desc *vq_desc,
-    uint32_t *plen)
-{
-    /* Read request */
-    struct vgpu_res_attach_backing *backing_info =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-    struct vgpu_mem_entry *pages =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    /* Acquire 2D resource */
-    struct vgpu_resource_2d *res_2d =
-        acquire_vgpu_resource_2d(backing_info->resource_id);
-
-    /* Dispatch page memories to the 2D resource */
-    res_2d->page_cnt = backing_info->nr_entries;
-    res_2d->iovec = malloc(sizeof(struct iovec) * backing_info->nr_entries);
-    struct vgpu_mem_entry *mem_entries = (struct vgpu_mem_entry *) pages;
-
-    for (size_t i = 0; i < backing_info->nr_entries; i++) {
-        /* Attach address and length of i-th page to the 2D resource */
-        res_2d->iovec[i].iov_base =
-            vgpu_mem_host_to_guest(vgpu, mem_entries[i].addr);
-        res_2d->iovec[i].iov_len = mem_entries[i].length;
-
-        /* Corrupted page address */
-        if (!res_2d->iovec[i].iov_base) {
-            fprintf(stderr, "%s(): Invalid page address\n", __func__);
-            virtio_gpu_set_fail(vgpu);
-            return;
-        }
-    }
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[2].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Response with fencing flag if needed */
-    virtio_gpu_set_response_fencing(&backing_info->hdr, response);
-
-    /* Return write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_cmd_update_cursor_handler(virtio_gpu_state_t *vgpu,
-                                                 struct virtq_desc *vq_desc,
-                                                 uint32_t *plen)
-{
-    /* Read request */
-    struct virtio_gpu_update_cursor *cursor =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Update cursor image */
-    struct vgpu_resource_2d *res_2d =
-        acquire_vgpu_resource_2d(cursor->resource_id);
-
-    if (res_2d != NULL) {
-        window_lock(cursor->pos.scanout_id);
-        cursor_update((struct gpu_resource *) res_2d, cursor->pos.scanout_id,
-                      cursor->pos.x, cursor->pos.y);
-        window_unlock(cursor->pos.scanout_id);
-    } else if (cursor->resource_id == 0) {
-        window_lock(cursor->pos.scanout_id);
-        cursor_clear(cursor->pos.scanout_id);
-        window_unlock(cursor->pos.scanout_id);
-    } else {
-        fprintf(stderr, "Invalid resource ID %d.\n", cursor->resource_id);
-    }
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Return write length */
-    *plen = sizeof(*response);
-}
-
-static void virtio_gpu_cmd_move_cursor_handler(virtio_gpu_state_t *vgpu,
-                                               struct virtq_desc *vq_desc,
-                                               uint32_t *plen)
-{
-    /* Read request */
-    struct virtio_gpu_update_cursor *cursor =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
-
-    /* Move cursor to new position */
-    window_lock(cursor->pos.scanout_id);
-    cursor_move(cursor->pos.scanout_id, cursor->pos.x, cursor->pos.y);
-    window_unlock(cursor->pos.scanout_id);
-
-    /* Write response */
-    struct vgpu_ctrl_hdr *response =
-        vgpu_mem_host_to_guest(vgpu, vq_desc[1].addr);
-
-    memset(response, 0, sizeof(*response));
-    response->type = VIRTIO_GPU_RESP_OK_NODATA;
-
-    /* Return write length */
-    *plen = sizeof(*response);
-}
-
-static struct vgpu_cmd_backend vgpu_cmd_table = {
-    .get_display_info = virtio_gpu_get_display_info_handler,
-    .resource_create_2d = virtio_gpu_resource_create_2d_handler,
-    .resource_unref = virtio_gpu_cmd_resource_unref_handler,
-    .set_scanout = virtio_gpu_cmd_set_scanout_handler,
-    .resource_flush = virtio_gpu_cmd_resource_flush_handler,
-    .trasfer_to_host_2d = virtio_gpu_cmd_transfer_to_host_2d_handler,
-    .resource_attach_backing = virtio_gpu_cmd_resource_attach_backing_handler,
-    .resource_detach_backing = NULL,
-    .get_capset_info = NULL,
-    .get_capset = NULL,
-    .get_edid = virtio_gpu_get_edid_handler,
-    .resource_assign_uuid = NULL,
-    .resource_create_blob = NULL,
-    .set_scanout_blob = NULL,
-    .ctx_create = NULL,
-    .ctx_destroy = NULL,
-    .ctx_attach_resource = NULL,
-    .ctx_detach_resource = NULL,
-    .resource_create_3d = NULL,
-    .transfer_to_host_3d = NULL,
-    .transfer_from_host_3d = NULL,
-    .submit_3d = NULL,
-    .resource_map_blob = NULL,
-    .resource_unmap_blob = NULL,
-    .update_cursor = virtio_gpu_cmd_update_cursor_handler,
-    .move_cursor = virtio_gpu_cmd_move_cursor_handler,
-};
 
 static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
                                    const virtio_gpu_queue_t *queue,
@@ -978,100 +389,39 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
         vgpu_mem_host_to_guest(vgpu, vq_desc[0].addr);
 
     /* Process the command */
-    vgpu_cmd_func vgpu_cmd = NULL;
     switch (header->type) {
-    /* 2D commands */
-    case VIRTIO_GPU_CMD_GET_DISPLAY_INFO:
-        vgpu_cmd = vgpu_cmd_table.get_display_info;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_CREATE_2D:
-        vgpu_cmd = vgpu_cmd_table.resource_create_2d;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_UNREF:
-        vgpu_cmd = vgpu_cmd_table.resource_unref;
-        break;
-    case VIRTIO_GPU_CMD_SET_SCANOUT:
-        vgpu_cmd = vgpu_cmd_table.set_scanout;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_FLUSH:
-        vgpu_cmd = vgpu_cmd_table.resource_flush;
-        break;
-    case VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D:
-        vgpu_cmd = vgpu_cmd_table.trasfer_to_host_2d;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING:
-        vgpu_cmd = vgpu_cmd_table.resource_attach_backing;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING:
-        vgpu_cmd = vgpu_cmd_table.resource_detach_backing;
-        break;
-    case VIRTIO_GPU_CMD_GET_CAPSET_INFO:
-        vgpu_cmd = vgpu_cmd_table.get_capset_info;
-        break;
-    case VIRTIO_GPU_CMD_GET_CAPSET:
-        vgpu_cmd = vgpu_cmd_table.get_capset;
-        break;
-    case VIRTIO_GPU_CMD_GET_EDID:
-        vgpu_cmd = vgpu_cmd_table.get_edid;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID:
-        vgpu_cmd = vgpu_cmd_table.resource_assign_uuid;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB:
-        vgpu_cmd = vgpu_cmd_table.resource_create_blob;
-        break;
-    case VIRTIO_GPU_CMD_SET_SCANOUT_BLOB:
-        vgpu_cmd = vgpu_cmd_table.set_scanout_blob;
-        break;
-    /* 3D commands */
-    case VIRTIO_GPU_CMD_CTX_CREATE:
-        vgpu_cmd = vgpu_cmd_table.ctx_create;
-        break;
-    case VIRTIO_GPU_CMD_CTX_DESTROY:
-        vgpu_cmd = vgpu_cmd_table.ctx_destroy;
-        break;
-    case VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE:
-        vgpu_cmd = vgpu_cmd_table.ctx_attach_resource;
-        break;
-    case VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE:
-        vgpu_cmd = vgpu_cmd_table.ctx_detach_resource;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_CREATE_3D:
-        vgpu_cmd = vgpu_cmd_table.resource_create_3d;
-        break;
-    case VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D:
-        vgpu_cmd = vgpu_cmd_table.transfer_to_host_3d;
-        break;
-    case VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D:
-        vgpu_cmd = vgpu_cmd_table.transfer_from_host_3d;
-        break;
-    case VIRTIO_GPU_CMD_SUBMIT_3D:
-        vgpu_cmd = vgpu_cmd_table.submit_3d;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB:
-        vgpu_cmd = vgpu_cmd_table.resource_map_blob;
-        break;
-    case VIRTIO_GPU_CMD_RESOURCE_UNMAP_BLOB:
-        vgpu_cmd = vgpu_cmd_table.resource_unmap_blob;
-        break;
-    case VIRTIO_GPU_CMD_UPDATE_CURSOR:
-        vgpu_cmd = vgpu_cmd_table.update_cursor;
-        break;
-    case VIRTIO_GPU_CMD_MOVE_CURSOR:
-        vgpu_cmd = vgpu_cmd_table.move_cursor;
-        break;
+        /* 2D commands */
+        VGPU_CMD(GET_DISPLAY_INFO, get_display_info)
+        VGPU_CMD(RESOURCE_CREATE_2D, resource_create_2d)
+        VGPU_CMD(RESOURCE_UNREF, resource_unref)
+        VGPU_CMD(SET_SCANOUT, set_scanout)
+        VGPU_CMD(RESOURCE_FLUSH, resource_flush)
+        VGPU_CMD(TRANSFER_TO_HOST_2D, trasfer_to_host_2d)
+        VGPU_CMD(RESOURCE_ATTACH_BACKING, resource_attach_backing)
+        VGPU_CMD(RESOURCE_DETACH_BACKING, resource_detach_backing)
+        VGPU_CMD(GET_CAPSET_INFO, get_capset_info)
+        VGPU_CMD(GET_CAPSET, get_capset)
+        VGPU_CMD(GET_EDID, get_edid)
+        VGPU_CMD(RESOURCE_ASSIGN_UUID, resource_assign_uuid)
+        VGPU_CMD(RESOURCE_CREATE_BLOB, resource_create_blob)
+        VGPU_CMD(SET_SCANOUT_BLOB, set_scanout_blob)
+        /* 3D commands */
+        VGPU_CMD(CTX_CREATE, ctx_create)
+        VGPU_CMD(CTX_DESTROY, ctx_destroy)
+        VGPU_CMD(CTX_ATTACH_RESOURCE, ctx_attach_resource)
+        VGPU_CMD(CTX_DETACH_RESOURCE, ctx_detach_resource)
+        VGPU_CMD(RESOURCE_CREATE_3D, resource_create_3d)
+        VGPU_CMD(TRANSFER_TO_HOST_3D, transfer_to_host_3d)
+        VGPU_CMD(TRANSFER_FROM_HOST_3D, transfer_from_host_3d)
+        VGPU_CMD(SUBMIT_3D, submit_3d)
+        VGPU_CMD(RESOURCE_MAP_BLOB, resource_map_blob)
+        VGPU_CMD(RESOURCE_UNMAP_BLOB, resource_unmap_blob)
+        VGPU_CMD(UPDATE_CURSOR, update_cursor)
+        VGPU_CMD(MOVE_CURSOR, move_cursor)
     default:
-        fprintf(stderr, "%s(): unknown command %d\n", __func__, header->type);
-        virtio_gpu_set_fail(vgpu);
-        *plen = 0;
-        return -1;
+        virtio_gpu_cmd_undefined_handler(vgpu, vq_desc, plen);
+        break;
     }
-
-    if (vgpu_cmd)
-        vgpu_cmd(vgpu, vq_desc, plen);
-    else
-        fprintf(stderr, "%s(): unsupported VirtIO-GPU command %d.", __func__,
-                header->type);
 
     return 0;
 }
@@ -1160,6 +510,10 @@ static bool virtio_gpu_reg_read(virtio_gpu_state_t *vgpu,
             *value = VIRTIO_F_VERSION_1;
         } else { /* [31:0] */
             *value = VIRTIO_GPU_F_EDID;
+#if SEMU_HAS(VIRGL)
+            *value |= VIRTIO_GPU_F_VIRGL;
+            //*value |= VIRTIO_GPU_F_CONTEXT_INIT;
+#endif
         }
         return true;
     case _(QueueNumMax):
@@ -1205,7 +559,11 @@ static bool virtio_gpu_reg_read(virtio_gpu_state_t *vgpu,
             return true;
         }
         case offsetof(struct vgpu_config, num_capsets): {
-            *value = 0; /* TODO: Add at least one capset to support VirGl */
+#if SEMU_HAS(VIRGL)
+            *value = semu_virgl_get_num_capsets();
+#else
+            *value = 0;
+#endif
             return true;
         }
         default:
@@ -1347,8 +705,8 @@ void virtio_gpu_write(hart_t *vm,
 
 void virtio_gpu_init(virtio_gpu_state_t *vgpu)
 {
-    vgpu->priv =
-        calloc(sizeof(struct vgpu_scanout_info), VIRTIO_GPU_MAX_SCANOUTS);
+    memset(&virtio_gpu_data, 0, sizeof(virtio_gpu_data_t));
+    vgpu->priv = &virtio_gpu_data;
 }
 
 void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
@@ -1362,11 +720,11 @@ void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
         exit(2);
     }
 
-    PRIV(vgpu)[scanout_num].width = width;
-    PRIV(vgpu)[scanout_num].height = height;
-    PRIV(vgpu)[scanout_num].enabled = 1;
+    PRIV(vgpu)->scanouts[scanout_num].width = width;
+    PRIV(vgpu)->scanouts[scanout_num].height = height;
+    PRIV(vgpu)->scanouts[scanout_num].enabled = 1;
 
-    window_add(width, height);
+    g_window.window_add(width, height);
 
     vgpu_configs.num_scanouts++;
 }
