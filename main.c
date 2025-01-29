@@ -11,6 +11,7 @@
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "virgl.h"
 #include "window.h"
 
 #define PRIV(x) ((emu_state_t *) x->priv)
@@ -726,6 +727,8 @@ static int semu_start(int argc, char **argv)
     emu.vgpu.ram = emu.ram;
     virtio_gpu_init(&(emu.vgpu));
     virtio_gpu_add_scanout(&(emu.vgpu), 1024, 768);
+
+    semu_virgl_init(&(emu.vgpu));
     window_init();
 #endif
 #if SEMU_HAS(VIRTIOINPUT)

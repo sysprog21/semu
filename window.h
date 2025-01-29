@@ -1,5 +1,8 @@
 #pragma once
 
+#include <SDL.h>
+#include <SDL_opengl.h>
+
 /* Cursor size is always 64*64 in VirtIO GPU */
 #define CURSOR_WIDTH 64
 #define CURSOR_HEIGHT 64
@@ -34,4 +37,8 @@ void cursor_update(struct gpu_resource *resource, int scanout_id, int x, int y);
 void cursor_move(int scanout_id, int x, int y);
 void window_lock(uint32_t id);
 void window_unlock(uint32_t id);
+
+void setup_scanout_gl(int scanout_id, uint32_t texture_id);
+void window_render_gl(int scanout_id);
+
 #endif

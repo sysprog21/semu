@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <GL/glew.h>
 #include <SDL.h>
+#include <SDL_opengl.h>
 #include <SDL_thread.h>
 
 #include "device.h"
@@ -148,6 +150,12 @@ struct display_info {
     SDL_Thread *ev_thread;
     SDL_Window *window;
     SDL_Renderer *renderer;
+
+#if SEMU_HAS(VIRGL)
+    SDL_GLContext win_ctx;
+    GLuint gl_fb;
+    GLuint gl_texture;
+#endif
 };
 
 static struct display_info displays[VIRTIO_GPU_MAX_SCANOUTS];
@@ -210,6 +218,7 @@ static int event_thread(void *data)
     }
 }
 
+#if !SEMU_HAS(VIRGL)
 static int window_thread(void *data)
 {
     struct display_info *display = (struct display_info *) data;
@@ -298,9 +307,166 @@ static int window_thread(void *data)
         SDL_UnlockMutex(display->img_mtx);
     }
 }
+#else
+void clear_screen_gl(struct display_info *display)
+{
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    /* Set rendering region */
+    int width = 0, height = 0;
+    SDL_GetWindowSize(display->window, &width, &height);
+    glViewport(0, 0, width, height);
+
+    /* Generate GL texture */
+    uint32_t gl_texture;
+    glEnable(GL_TEXTURE_2D);
+    glGenTextures(1, &gl_texture);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Fill GL texture with black */
+    glColor3f(0.0f, /*0.0f*/ 255, 0.0f);
+    glBegin(GL_QUADS);
+    glVertex2f(-1.0f, -1.0f);  // buttom left
+    glVertex2f(1.0f, -1.0f);   // buttom right
+    glVertex2f(1.0f, 1.0f);    // upper right
+    glVertex2f(-1.0f, 1.0f);   // upper left
+    glEnd();
+
+    /* Update the window */
+    SDL_GL_SwapWindow(display->window);
+
+    /* Delete GL texture */
+    glDeleteTextures(1, &gl_texture);
+}
+
+void setup_scanout_gl(int scanout_id, uint32_t texture_id)
+{
+    struct display_info *display = &displays[scanout_id];
+
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    /* Allocate GL framebuffer for the guest */
+    if (!display->gl_fb) {
+        glGenFramebuffers(1, &display->gl_fb);
+        printf("@@@ Framebuffer created = %d\n", display->gl_fb);
+    }
+
+    display->gl_texture = texture_id;
+
+    /* Setup framebuffer for the guest */
+    glBindFramebuffer(GL_FRAMEBUFFER_EXT, display->gl_fb);
+    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
+                              GL_TEXTURE_2D, display->gl_texture, 0);
+}
+
+void flush_scanout_gl(struct display_info *display)
+{
+    /* Set window for GL to work */
+    SDL_GL_MakeCurrent(display->window, display->win_ctx);
+
+    /* Set rendering region */
+    int width = 0, height = 0;
+    SDL_GetWindowSize(display->window, &width, &height);
+    glViewport(0, 0, width, height);
+
+    printf("###USING %d\n", display->gl_fb);
+
+#if 1
+    /* Generate GL texture */
+    glEnable(GL_TEXTURE_2D);
+    glGenTextures(1, &display->gl_texture);
+    glBindTexture(GL_TEXTURE_2D, display->gl_texture);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Fill GL texture with black */
+    glColor3f(255.0f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);
+    glVertex2f(-1.0f, -1.0f);  // buttom left
+    glVertex2f(1.0f, -1.0f);   // buttom right
+    glVertex2f(1.0f, 1.0f);    // upper right
+    glVertex2f(-1.0f, 1.0f);   // upper left
+    glEnd();
+
+    glBindFramebuffer(GL_FRAMEBUFFER_EXT, display->gl_fb);
+    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
+                              GL_TEXTURE_2D, display->gl_texture, 0);
+#endif
+
+    /* Specifying source and destination of framebuffer copy */
+    uint32_t src_fb = display->gl_fb; /* Guest framebuffer */
+    uint32_t dst_fb = 0;              /* 0 to write to the window */
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst_fb);
+
+    /* Source */
+    GLint src_x0 = 0, src_y0 = 0;
+    GLint src_x1 = width, src_y1 = height;
+
+    /* Destination */
+    GLint dst_x0 = 0, dst_y0 = 0;
+    GLint dst_x1 = width, dst_y1 = height;
+
+    /* Copy framebuffer from guest to the window */
+    glBlitFramebuffer(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1,
+                      dst_y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    /* Update the window */
+    SDL_GL_SwapWindow(display->window);
+}
+
+static int window_thread_gl(void *data)
+{
+    struct display_info *display = (struct display_info *) data;
+    struct gpu_resource *resource = &display->resource;
+
+    /* Create SDL window */
+    display->window = SDL_CreateWindow("semu", SDL_WINDOWPOS_UNDEFINED,
+                                       SDL_WINDOWPOS_UNDEFINED, resource->width,
+                                       resource->height,
+                                       SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+
+    if (!display->window) {
+        fprintf(stderr, "%s(): failed to create window\n", __func__);
+        exit(2);
+    }
+
+    /* Initialize window context */
+    display->win_ctx = SDL_GL_CreateContext(display->window);
+    clear_screen_gl(display);
+
+    /* Create event handling thread */
+    ((struct display_info *) data)->ev_thread =
+        SDL_CreateThread(event_thread, NULL, data);
+
+    while (1) {
+        /* Mutex lock */
+        SDL_LockMutex(display->img_mtx);
+
+        /* Wait until the image is arrived */
+        while (SDL_CondWaitTimeout(display->img_cond, display->img_mtx,
+                                   SDL_COND_TIMEOUT))
+            ;
+
+        if (display->render_type == RENDER_PRIMARY_PLANE) {
+            printf("!!!RENDER_PRIMARY_PLANE!!!\n");
+            flush_scanout_gl(display);
+        } else if (display->render_type == UPDATE_CURSOR_RESOURCE) {
+        } else if (display->render_type == CLEAR_CURSOR_RESOURCE) {
+        }
+
+        /* Mutex unlock */
+        SDL_UnlockMutex(display->img_mtx);
+    }
+}
+#endif
 
 void window_init(void)
 {
+    glewInit();
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
         exit(2);
@@ -310,8 +476,13 @@ void window_init(void)
         displays[i].img_mtx = SDL_CreateMutex();
         displays[i].img_cond = SDL_CreateCond();
 
+#if !SEMU_HAS(VIRGL)
         displays[i].win_thread =
             SDL_CreateThread(window_thread, NULL, (void *) &displays[i]);
+#else
+        displays[i].win_thread =
+            SDL_CreateThread(window_thread_gl, NULL, (void *) &displays[i]);
+#endif
         SDL_DetachThread(displays[i].win_thread);
     }
 }
@@ -440,6 +611,14 @@ void window_render(struct gpu_resource *resource)
     memcpy(&display->resource, resource, sizeof(struct gpu_resource));
 
     /* Trigger primary plane rendering */
-    displays[id].render_type = RENDER_PRIMARY_PLANE;
+    display->render_type = RENDER_PRIMARY_PLANE;
+    SDL_CondSignal(display->img_cond);
+}
+
+void window_render_gl(int scanout_id)
+{
+    /* Trigger primary plane rendering */
+    struct display_info *display = &displays[scanout_id];
+    display->render_type = RENDER_PRIMARY_PLANE;
     SDL_CondSignal(display->img_cond);
 }

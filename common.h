@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/uio.h>
+
 #include "feature.h"
 
 #define BITS_PER_CHAR 8
@@ -29,6 +33,12 @@ static inline void bitmap_set_bit(unsigned long *map, unsigned long bit)
 {
     set_bit(bit % BITS_PER_LONG, &map[bit / BITS_PER_LONG]);
 }
+
+size_t copy_iov_to_buf(const struct iovec *iov,
+                       const unsigned int iov_cnt,
+                       size_t offset,
+                       void *buf,
+                       size_t bytes);
 
 /* Range check
  * For any variable range checking:
