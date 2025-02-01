@@ -72,6 +72,18 @@ static void emu_update_vblk_interrupts(vm_t *vm)
 }
 #endif
 
+#if SEMU_HAS(VIRTIORNG)
+static void emu_update_vrng_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vrng.InterruptStatus)
+        data->plic.active |= IRQ_VRNG_BIT;
+    else
+        data->plic.active &= ~IRQ_VRNG_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void emu_update_timer_interrupt(hart_t *hart)
 {
     emu_state_t *data = PRIV(hart);
@@ -137,6 +149,12 @@ static void mem_load(hart_t *hart,
             aclint_sswi_read(hart, &data->sswi, addr & 0xFFFFF, width, value);
             aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
+#if SEMU_HAS(VIRTIORNG)
+        case 0x46: /* virtio-rng */
+            virtio_rng_read(hart, &data->vrng, addr & 0xFFFFF, width, value);
+            emu_update_vrng_interrupts(hart->vm);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_LOAD_FAULT, hart->exc_val);
@@ -191,6 +209,12 @@ static void mem_store(hart_t *hart,
             aclint_sswi_write(hart, &data->sswi, addr & 0xFFFFF, width, value);
             aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
+#if SEMU_HAS(VIRTIORNG)
+        case 0x46: /* virtio-rng */
+            virtio_rng_write(hart, &data->vrng, addr & 0xFFFFF, width, value);
+            emu_update_vrng_interrupts(hart->vm);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_STORE_FAULT, hart->exc_val);
@@ -617,6 +641,10 @@ static int semu_start(int argc, char **argv)
 #if SEMU_HAS(VIRTIOBLK)
     emu.vblk.ram = emu.ram;
     emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
+#endif
+#if SEMU_HAS(VIRTIORNG)
+    emu.vrng.ram = emu.ram;
+    virtio_rng_init();
 #endif
     /* Set up ACLINT */
     semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);

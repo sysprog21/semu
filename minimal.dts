@@ -63,5 +63,13 @@
             interrupts = <3>;
         };
 #endif
+
+#if SEMU_FEATURE_VIRTIORNG
+        rng0: virtio@4600000 {
+            compatible = "virtio,mmio";
+            reg = <0x4600000 0x200>;
+            interrupts = <4>;
+        };
+#endif
     };
 };

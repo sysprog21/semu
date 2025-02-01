@@ -172,6 +172,52 @@ void virtio_blk_write(hart_t *vm,
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
 #endif /* SEMU_HAS(VIRTIOBLK) */
 
+/* VirtIO-RNG */
+
+#if SEMU_HAS(VIRTIORNG)
+
+#define IRQ_VRNG 4
+#define IRQ_VRNG_BIT (1 << IRQ_VRNG)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_rng_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_rng_queue_t queues[1];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+} virtio_rng_state_t;
+
+void virtio_rng_read(hart_t *vm,
+                     virtio_rng_state_t *rng,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_rng_write(hart_t *vm,
+                      virtio_rng_state_t *vrng,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+void virtio_rng_init(void);
+#endif /* SEMU_HAS(VIRTIORNG) */
+
 /* ACLINT MTIMER */
 typedef struct {
     /* A MTIMER device has two separate base addresses: one for the MTIME
@@ -272,6 +318,9 @@ typedef struct {
 #endif
 #if SEMU_HAS(VIRTIOBLK)
     virtio_blk_state_t vblk;
+#endif
+#if SEMU_HAS(VIRTIORNG)
+    virtio_rng_state_t vrng;
 #endif
     /* ACLINT */
     mtimer_state_t mtimer;
