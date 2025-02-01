@@ -27,8 +27,6 @@ static double scale_factor;
 uint64_t count = 0;
 struct timespec boot_begin, boot_end;
 double TEST_ns_per_call, TEST_predict_sec;
-static uint64_t local_start;  // or use a local var
-static uint64_t total_clocksource_ns = 0;
 static int G_n_harts = 0;
 
 /* Calculate "x * n / d" without unnecessary overflow or loss of precision.
@@ -74,13 +72,6 @@ static inline uint64_t host_time_ns()
     time_t now_sec = time(0);
     return (uint64_t) now_sec * 1e9;
 #endif
-}
-
-/* for testing */
-static inline void semu_timer_clocksource_exit(void)
-{
-    uint64_t end = host_time_ns();
-    total_clocksource_ns += end - local_start;
 }
 
 /* BogoMips is a rough measurement of CPU speed, typically calculated by
@@ -183,6 +174,12 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
     static int64_t offset = 0;
     static bool first_switch = true;
 
+    /* for testing */
+    static volatile uint64_t local_total_ns = 0;
+    static volatile uint64_t local_start;
+    static volatile uint64_t local_end;
+    static volatile uint64_t total_clocksource_ns = 0;
+
 #if defined(HAVE_POSIX_TIMER) || defined(HAVE_MACH_TIMER)
     uint64_t now_ns = host_time_ns();
     local_start = now_ns;
@@ -200,18 +197,23 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
     uint64_t scaled_ticks = real_ticks * 0.001;
 
     if (!boot_complete) {
-        semu_timer_clocksource_exit();
+        local_end = host_time_ns();
+        total_clocksource_ns += local_end - local_start;
+        local_total_ns += local_end - local_start;
         char filename[50];
         snprintf(filename, sizeof(filename), "./time_log/time_log_%d.txt",
                  G_n_harts);
 
         if (cnt % 1000000 == 0) {
-            cnt = 0;
-            start_count = false;
             time_2 = now_ns;
             time_log_file = fopen(filename, "a");
-            fprintf(time_log_file, "diff: %lu\n", time_2 - time_1);
+            fprintf(time_log_file, "diff: %lu, total: %lu\n", (time_2 - time_1),
+                    local_total_ns);
             fclose(time_log_file);
+
+            cnt = 0;
+            start_count = false;
+            local_total_ns = 0;
         }
         return scaled_ticks; /* Return scaled ticks in the boot phase. */
     }
@@ -222,7 +224,8 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
         offset = (int64_t) (real_ticks - scaled_ticks);
 
         /* for testing */
-        semu_timer_clocksource_exit();
+        local_end = host_time_ns();
+        total_clocksource_ns += local_end - local_start;
         clock_gettime(CLOCK_REALTIME, &boot_end);
 
         double boot_time = (boot_end.tv_sec - boot_begin.tv_sec) +
@@ -241,9 +244,10 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
             "\033[1;31m[SEMU LOG]: total_clocksource_ns = %lu, "
             "percentage = %.5f\033[0m\n",
             total_clocksource_ns,
-            ((double) total_clocksource_ns) /
-                ((boot_end.tv_sec - boot_begin.tv_sec) * 1e9 +
-                 boot_end.tv_nsec - boot_begin.tv_nsec));
+            ((double) total_clocksource_ns / 2) /
+                (((boot_end.tv_sec - boot_begin.tv_sec) * 1e9 +
+                  boot_end.tv_nsec - boot_begin.tv_nsec) -
+                 (total_clocksource_ns / 2)));
 
         printf(
             "\033[1;31m[SEMU LOG]: real_ns_per_call = %.5f, diff_ns_per_call = "
