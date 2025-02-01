@@ -61,20 +61,16 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng,
     VRNG_QUEUE.last_avail++;
 
     /* Read descriptor */
-    uint32_t *desc = &vrng->ram[queue->QueueDesc + buffer_idx * 4];
-    struct virtq_desc vq_desc = {
-        .addr = desc[0],
-        .len = desc[2],
-        .flags = desc[3],
-    };
+    struct virtq_desc *vq_desc =
+        (struct virtq_desc *) &vrng->ram[queue->QueueDesc + buffer_idx * 4];
 
     /* Write entropy buffer */
     void *entropy_buf =
-        (void *) ((uintptr_t) vrng->ram + (uintptr_t) vq_desc.addr);
-    ssize_t total = read(rng_fd, entropy_buf, vq_desc.len);
+        (void *) ((uintptr_t) vrng->ram + (uintptr_t) vq_desc->addr);
+    ssize_t total = read(rng_fd, entropy_buf, vq_desc->len);
 
     /* Clear write flag */
-    desc[3] = 0;
+    vq_desc->flags = 0;
 
     /* Get virtq_used.idx (le16) */
     uint16_t used = ram[queue->QueueUsed] >> 16;

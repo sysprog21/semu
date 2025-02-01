@@ -57,9 +57,9 @@ enum {
 #undef _
 };
 
-struct virtq_desc {
-    uint32_t addr;
+PACKED(struct virtq_desc {
+    uint64_t addr;
     uint32_t len;
     uint16_t flags;
     uint16_t next;
-};
+});

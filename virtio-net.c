@@ -180,35 +180,36 @@ static ssize_t handle_write(netdev_t *netdev,
 /* Require existing 'desc_idx' to use as iteration variable, and input
  * 'buffer_idx'.
  */
-#define VNET_ITERATE_BUFFER(checked, body)                            \
-    desc_idx = buffer_idx;                                            \
-    while (1) {                                                       \
-        if (checked && desc_idx >= queue->QueueNum)                   \
-            return virtio_net_set_fail(vnet);                         \
-        const uint32_t *desc = &ram[queue->QueueDesc + desc_idx * 4]; \
-        uint16_t desc_flags = desc[3];                                \
-        body if (!(desc_flags & VIRTIO_DESC_F_NEXT)) break;           \
-        desc_idx = desc[3] >> 16;                                     \
+#define VNET_ITERATE_BUFFER(checked, body)                               \
+    desc_idx = buffer_idx;                                               \
+    while (1) {                                                          \
+        if (checked && desc_idx >= queue->QueueNum)                      \
+            return virtio_net_set_fail(vnet);                            \
+        const struct virtq_desc *desc =                                  \
+            (struct virtq_desc *) &ram[queue->QueueDesc + desc_idx * 4]; \
+        uint16_t desc_flags = desc->flags;                               \
+        body if (!(desc_flags & VIRTIO_DESC_F_NEXT)) break;              \
+        desc_idx = desc->next;                                           \
     }
 
 /* Input: 'buffer_idx'.
  * Output: 'buffer_niovs' and 'buffer_iovs'
  */
-#define VNET_BUFFER_TO_IOV(expect_readable)                               \
-    uint16_t desc_idx;                                                    \
-    /* do a first pass to validate flags and count buffers */             \
-    size_t buffer_niovs = 0;                                              \
-    VNET_ITERATE_BUFFER(                                                  \
-        true, if ((!!(desc_flags & VIRTIO_DESC_F_WRITE)) !=               \
-                  (expect_readable)) return virtio_net_set_fail(vnet);    \
-        buffer_niovs++;)                                                  \
-    /* convert to iov */                                                  \
-    struct iovec buffer_iovs[buffer_niovs];                               \
-    buffer_niovs = 0;                                                     \
-    VNET_ITERATE_BUFFER(                                                  \
-        false, uint32_t desc_addr = desc[0]; uint32_t desc_len = desc[2]; \
-        buffer_iovs[buffer_niovs].iov_base =                              \
-            (void *) ((uintptr_t) ram + desc_addr);                       \
+#define VNET_BUFFER_TO_IOV(expect_readable)                                    \
+    uint16_t desc_idx;                                                         \
+    /* do a first pass to validate flags and count buffers */                  \
+    size_t buffer_niovs = 0;                                                   \
+    VNET_ITERATE_BUFFER(                                                       \
+        true, if ((!!(desc_flags & VIRTIO_DESC_F_WRITE)) !=                    \
+                  (expect_readable)) return virtio_net_set_fail(vnet);         \
+        buffer_niovs++;)                                                       \
+    /* convert to iov */                                                       \
+    struct iovec buffer_iovs[buffer_niovs];                                    \
+    buffer_niovs = 0;                                                          \
+    VNET_ITERATE_BUFFER(                                                       \
+        false, uint64_t desc_addr = desc->addr; uint32_t desc_len = desc->len; \
+        buffer_iovs[buffer_niovs].iov_base =                                   \
+            (void *) ((uintptr_t) ram + desc_addr);                            \
         buffer_iovs[buffer_niovs].iov_len = desc_len; buffer_niovs++;)
 
 #define VNET_GENERATE_QUEUE_HANDLER(NAME_SUFFIX, VERB, QUEUE_IDX, READ)        \

@@ -102,7 +102,7 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
 
 static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
                                      uint64_t sector,
-                                     uint32_t desc_addr,
+                                     uint64_t desc_addr,
                                      uint32_t len)
 {
     void *dest = (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
@@ -112,7 +112,7 @@ static void virtio_blk_write_handler(virtio_blk_state_t *vblk,
 
 static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
                                     uint64_t sector,
-                                    uint32_t desc_addr,
+                                    uint64_t desc_addr,
                                     uint32_t len)
 {
     void *dest = (void *) ((uintptr_t) vblk->ram + desc_addr);
@@ -141,13 +141,15 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     /* Collect the descriptors */
     for (int i = 0; i < 3; i++) {
         /* The size of the `struct virtq_desc` is 4 words */
-        const uint32_t *desc = &vblk->ram[queue->QueueDesc + desc_idx * 4];
+        const struct virtq_desc *desc =
+            (struct virtq_desc *) &vblk->ram[queue->QueueDesc + desc_idx * 4];
+
 
         /* Retrieve the fields of current descriptor */
-        vq_desc[i].addr = desc[0];
-        vq_desc[i].len = desc[2];
-        vq_desc[i].flags = desc[3];
-        desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
+        vq_desc[i].addr = desc->addr;
+        vq_desc[i].len = desc->len;
+        vq_desc[i].flags = desc->flags;
+        desc_idx = desc->next;
     }
 
     /* The next flag for the first and second descriptors should be set,
