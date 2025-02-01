@@ -29,6 +29,7 @@ struct timespec boot_begin, boot_end;
 double TEST_ns_per_call, TEST_predict_sec;
 static uint64_t local_start;  // or use a local var
 static uint64_t total_clocksource_ns = 0;
+static int G_n_harts = 0;
 
 /* Calculate "x * n / d" without unnecessary overflow or loss of precision.
  *
@@ -109,6 +110,8 @@ static inline void semu_timer_clocksource_exit(void)
  */
 static void measure_bogomips_ns(uint64_t iterations, int n_harts)
 {
+    G_n_harts = n_harts;
+
     /* Perform 'iterations' times calling the host HRT.
      *
      * Assuming the cost of loop overhead is 'e' and the cost of 'host_time_ns'
@@ -168,8 +171,14 @@ static void measure_bogomips_ns(uint64_t iterations, int n_harts)
  */
 static uint64_t semu_timer_clocksource(semu_timer_t *timer)
 {
+    static uint64_t cnt = 0;
+    static uint64_t time_1 = 0, time_2 = 0;
+    static bool start_count = false;
+    static FILE *time_log_file = NULL;
+
     semu_timer_clocksource_enter();
     count++;
+    cnt++;
 
     /* After boot process complete, the timer will switch to real time. Thus,
      * there is an offset between the real time and the emulator time.
@@ -182,6 +191,10 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
 
 #if defined(HAVE_POSIX_TIMER) || defined(HAVE_MACH_TIMER)
     uint64_t now_ns = host_time_ns();
+    if (!start_count) {
+        start_count = true;
+        time_1 = now_ns;
+    }
 
     /* real_ticks = (now_ns * freq) / 1e9 */
     uint64_t real_ticks = mult_frac(now_ns, timer->freq, 1e9);
@@ -193,6 +206,18 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
 
     if (!boot_complete) {
         semu_timer_clocksource_exit();
+        char filename[50];
+        snprintf(filename, sizeof(filename), "./time_log/time_log_%d.txt",
+                 G_n_harts);
+
+        if (cnt % 1000000 == 0) {
+            cnt = 0;
+            start_count = false;
+            time_2 = now_ns;
+            time_log_file = fopen(filename, "a");
+            fprintf(time_log_file, "diff: %lu\n", time_2 - time_1);
+            fclose(time_log_file);
+        }
         return scaled_ticks; /* Return scaled ticks in the boot phase. */
     }
 

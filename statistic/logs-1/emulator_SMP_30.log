@@ -1,0 +1,94 @@
+ DTC	minimal.dtb
+[32;01mReady to launch Linux kernel. Please be patient.[0m
+failed to allocate TAP device: Operation not permitted
+[    0.000000] Linux version 6.1.99 (jserv@node1) (riscv32-buildroot-linux-gnu-gcc.br_real (Buildroot 2024.02.4) 12.3.0, GNU ld (GNU Binutils) 2.41) #1 SMP Thu Jul 18 13:04:10 CST 2024
+[    0.000000] Machine model: semu
+[    0.000000] earlycon: ns16550 at MMIO 0xf4000000 (options '')
+[    0.000000] printk: bootconsole [ns16550] enabled
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000000000000-0x000000001fffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000000000000-0x000000001fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000000000000-0x000000001fffffff]
+[    0.000000] SBI specification v2.0 detected
+[    0.000000] SBI implementation ID=0x999 Version=0x1
+[    0.000000] SBI TIME extension detected
+[    0.000000] SBI IPI extension detected
+[    0.000000] SBI RFENCE extension detected
+[    0.000000] SBI SRST extension detected
+[    0.000000] SBI HSM extension detected
+[    0.000000] riscv: base ISA extensions aim
+[    0.000000] riscv: ELF capabilities aim
+[    0.000000] percpu: Embedded 10 pages/cpu s11604 r8192 d21164 u40960
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 130048
+[    0.000000] Kernel command line: earlycon console=ttyS0
+[    0.000000] printk: log_buf_len individual max cpu contribution: 4096 bytes
+[    0.000000] printk: log_buf_len total cpu_extra contributions: 118784 bytes
+[    0.000000] printk: log_buf_len min size: 65536 bytes
+[    0.000000] printk: log_buf_len: 262144 bytes
+[    0.000000] printk: early log buf free: 63964(97%)
+[    0.000000] Dentry cache hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 5, 131072 bytes, linear)
+[    0.000000] mem auto-init: stack:off, heap alloc:off, heap free:off
+[    0.000000] Memory: 504180K/524288K available (3578K kernel code, 345K rwdata, 873K rodata, 185K init, 140K bss, 20108K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=30, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=32 to nr_cpu_ids=30.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=30
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] riscv-intc: 32 local interrupts mapped
+[    0.000000] plic: interrupt-controller@0: mapped 31 interrupts with 30 handlers for 30 contexts.
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] riscv-timer: riscv_timer_init_dt: Registering clocksource cpuid [0] hartid [0]
+[    0.000000] clocksource: riscv_clocksource: mask: 0xffffffffffffffff max_cycles: 0xefdb196da, max_idle_ns: 440795204367 ns
+[    0.000000] sched_clock: 64 bits at 65MHz, resolution 15ns, wraps every 2199023255550ns
+[    0.000268] Console: colour dummy device 80x25
+[    0.000327] Calibrating delay loop (skipped), value calculated using timer frequency.. 130.00 BogoMIPS (lpj=260000)
+[    0.000357] pid_max: default: 32768 minimum: 301
+[    0.000546] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.000576] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.001489] ASID allocator disabled (0 bits)
+[    0.001548] rcu: Hierarchical SRCU implementation.
+[    0.001568] rcu: 	Max phase no-delay instances is 1000.
+[    0.002203] smp: Bringing up secondary CPUs ...
+[    0.012500] smp: Brought up 1 node, 30 CPUs
+[    0.013757] devtmpfs: initialized
+[    0.017005] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.017056] futex hash table entries: 8192 (order: 7, 524288 bytes, linear)
+[    0.018336] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.022367] platform soc@F0000000: Fixed dependency cycle(s) with /soc@F0000000/interrupt-controller@0
+[    0.031603] clocksource: Switched to clocksource riscv_clocksource
+[    0.039340] NET: Registered PF_INET protocol family
+[    0.039588] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.042134] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.042183] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.042213] TCP established hash table entries: 4096 (order: 2, 16384 bytes, linear)
+[    0.042322] TCP bind hash table entries: 4096 (order: 4, 65536 bytes, linear)
+[    0.042480] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.042659] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.042698] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.042956] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.043490] Unpacking initramfs...
+[    0.053438] workingset: timestamp_bits=30 max_order=17 bucket_order=0
+[    0.107409] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+[    0.108587] printk: console [ttyS0] disabled
+[    0.108627] f4000000.serial: ttyS0 at MMIO 0xf4000000 (irq = 1, base_baud = 312500) is a 16550
+[    0.108676] printk: console [ttyS0] enabled
+[    0.108676] printk: console [ttyS0] enabled
+[    0.108716] printk: bootconsole [ns16550] disabled
+[    0.108716] printk: bootconsole [ns16550] disabled
+[    0.110384] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[    0.111743] virtio_blk virtio1: [vda] 4800 512-byte logical blocks (2.46 MB/2.34 MiB)
+[    0.112594] virtio_net virtio0: Assigned random MAC address 4a:a9:9f:bb:3d:1a
+[    0.114184] clk: Disabling unused clocks
+[    0.320957] Freeing initrd memory: 8188K
+[    0.321454] Freeing unused kernel image (initmem) memory: 180K
+[    0.321484] Kernel memory protection not selected by kernel config.
+[    0.321524] Run /init as init process
+[1;31m[SEMU LOG]: Use clock_gettime[0m
+[1;31m[SEMU LOG]: Real boot time: 357.61206 seconds, called 6389768778 times semu_timer_clocksource[0m
+[1;31m[SEMU LOG]: ns_per_call = 2.75634, predict_sec = 165.38022, scale_factor = 0.06047[0m
+[1;31m[SEMU LOG]: test_total_clocksource_ns = 82782774632, real_total_clocksource_ns = 47558062620, percentage = 0.13299[0m
+[1;31m[SEMU LOG]: real_ns_per_call = 7.44285, diff_ns_per_call = 4.68651[0m
