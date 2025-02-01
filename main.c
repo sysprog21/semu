@@ -647,7 +647,7 @@ static int semu_start(int argc, char **argv)
     virtio_rng_init();
 #endif
     /* Set up ACLINT */
-    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);
+    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ, hart_count);
     emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
     emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
     emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
@@ -705,7 +705,17 @@ static int semu_start(int argc, char **argv)
     return 0;
 }
 
+#include <time.h>
+#ifdef CLOCK_MONOTONIC_COARSE
+#define CLOCKID CLOCK_MONOTONIC_COARSE
+#else
+#define CLOCKID CLOCK_REALTIME_COARSE
+#endif
+
+extern struct timespec boot_begin;
+
 int main(int argc, char **argv)
 {
+    clock_gettime(CLOCK_REALTIME, &boot_begin);
     return semu_start(argc, argv);
 }
