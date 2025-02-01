@@ -8,12 +8,12 @@ COMMON_URL = https://github.com/sysprog21/semu/raw/blob
 # kernel
 KERNEL_DATA_URL = $(COMMON_URL)/Image.bz2
 KERNEL_DATA = Image
-KERNEL_DATA_SHA1 = a1fb94ff9d47d833759a2ff5d912858faa125a6c
+KERNEL_DATA_SHA1 = a749e507a2a09f42690d6fec1de05fd1e45c51b5
 
 # initrd
 INITRD_DATA_URL = $(COMMON_URL)/rootfs.cpio.bz2
 INITRD_DATA = rootfs.cpio
-INITRD_DATA_SHA1 = 3b3fd7131b5e27cbb6675145cbfeccfcedcb867f
+INITRD_DATA_SHA1 = 6edc1a91aaf9ecb4eb60b4f28c85c1d486611fb4
 
 define download
 $($(T)_DATA):
