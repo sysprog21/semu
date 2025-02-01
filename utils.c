@@ -77,11 +77,6 @@ static inline uint64_t host_time_ns()
 }
 
 /* for testing */
-static inline void semu_timer_clocksource_enter(void)
-{
-    local_start = host_time_ns();
-}
-
 static inline void semu_timer_clocksource_exit(void)
 {
     uint64_t end = host_time_ns();
@@ -176,7 +171,6 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
     static bool start_count = false;
     static FILE *time_log_file = NULL;
 
-    semu_timer_clocksource_enter();
     count++;
     cnt++;
 
@@ -191,6 +185,7 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
 
 #if defined(HAVE_POSIX_TIMER) || defined(HAVE_MACH_TIMER)
     uint64_t now_ns = host_time_ns();
+    local_start = now_ns;
     if (!start_count) {
         start_count = true;
         time_1 = now_ns;
@@ -243,23 +238,18 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
             TEST_ns_per_call, TEST_predict_sec, scale_factor);
 
         printf(
-            "\033[1;31m[SEMU LOG]: test_total_clocksource_ns = %lu, "
-            "real_total_clocksource_ns = %.0f, percentage = "
-            "%.5f\033[0m\n",
+            "\033[1;31m[SEMU LOG]: total_clocksource_ns = %lu, "
+            "percentage = %.5f\033[0m\n",
             total_clocksource_ns,
-            ((double) total_clocksource_ns - TEST_ns_per_call * 2 * count),
-            ((double) total_clocksource_ns - TEST_ns_per_call * 2 * count) /
+            ((double) total_clocksource_ns) /
                 ((boot_end.tv_sec - boot_begin.tv_sec) * 1e9 +
                  boot_end.tv_nsec - boot_begin.tv_nsec));
 
         printf(
             "\033[1;31m[SEMU LOG]: real_ns_per_call = %.5f, diff_ns_per_call = "
             "%.5f\033[0m\n",
-            ((double) total_clocksource_ns - TEST_ns_per_call * 2 * count) /
-                count,
-            (((double) total_clocksource_ns - TEST_ns_per_call * 2 * count) /
-             count) -
-                TEST_ns_per_call);
+            ((double) total_clocksource_ns / 2) / count,
+            (((double) total_clocksource_ns / 2) / count) - TEST_ns_per_call);
 
         exit(0);
     }
