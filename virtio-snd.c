@@ -696,10 +696,10 @@ finally:
 }
 
 #define VSND_DESC_CNT 3
-static int virtio_snd_desc_handler(virtio_snd_state_t *vsnd,
-                                   const virtio_snd_queue_t *queue,
-                                   uint32_t desc_idx,
-                                   uint32_t *plen)
+static int virtio_snd_ctrl_desc_handler(virtio_snd_state_t *vsnd,
+                                        const virtio_snd_queue_t *queue,
+                                        uint32_t desc_idx,
+                                        uint32_t *plen)
 {
     /* A control message uses at most 3 virtqueue descriptors, where
      * the first descriptor contains:
@@ -713,13 +713,14 @@ static int virtio_snd_desc_handler(virtio_snd_state_t *vsnd,
     /* Collect the descriptors */
     for (int i = 0; i < VSND_DESC_CNT; i++) {
         /* The size of the `struct virtq_desc` is 4 words */
-        const uint32_t *desc = &vsnd->ram[queue->QueueDesc + desc_idx * 4];
+        const struct virtq_desc *desc =
+            (struct virtq_desc *) &vsnd->ram[queue->QueueDesc + desc_idx * 4];
 
         /* Retrieve the fields of current descriptor */
-        vq_desc[i].addr = desc[0];
-        vq_desc[i].len = desc[2];
-        vq_desc[i].flags = desc[3];
-        desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
+        vq_desc[i].addr = desc->addr;
+        vq_desc[i].len = desc->len;
+        vq_desc[i].flags = desc->flags;
+        desc_idx = desc->next;
 
         /* Leave the loop if next-flag is not set */
         if (!(vq_desc[i].flags & VIRTIO_DESC_F_NEXT))
@@ -836,20 +837,21 @@ static int virtio_snd_tx_desc_handler(virtio_snd_state_t *vsnd,
     int cnt = 0;
     for (;;) {
         /* The size of the `struct virtq_desc` is 4 words */
-        const uint32_t *desc = &vsnd->ram[queue->QueueDesc + desc_idx * 4];
+        const struct virtq_desc *desc =
+            (struct virtq_desc *) &vsnd->ram[queue->QueueDesc + desc_idx * 4];
 
         /* Retrieve the fields of current descriptor */
         node = (virtq_desc_queue_node_t *) malloc(sizeof(*node));
-        node->vq_desc.addr = desc[0];
-        node->vq_desc.len = desc[2];
-        node->vq_desc.flags = desc[3];
+        node->vq_desc.addr = desc->addr;
+        node->vq_desc.len = desc->len;
+        node->vq_desc.flags = desc->flags;
         list_push(&node->q, &q);
-        desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */
+        desc_idx = desc->next;
 
         cnt++;
 
         /* Leave the loop if next-flag is not set */
-        if (!(desc[3] & VIRTIO_DESC_F_NEXT))
+        if (!(desc->flags & VIRTIO_DESC_F_NEXT))
             break;
     }
 
@@ -1088,7 +1090,7 @@ static bool virtio_snd_reg_write(virtio_snd_state_t *vsnd,
             switch (value) {
             case VSND_QUEUE_CTRL:
                 virtio_queue_notify_handler(vsnd, value,
-                                            virtio_snd_desc_handler);
+                                            virtio_snd_ctrl_desc_handler);
                 break;
             case VSND_QUEUE_TX:
                 tx_ev_notify++;
