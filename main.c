@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdio.h>
@@ -9,9 +10,9 @@
 #include <unistd.h>
 
 #include "device.h"
+#include "mini-gdbstub/include/gdbstub.h"
 #include "riscv.h"
 #include "riscv_private.h"
-
 #define PRIV(x) ((emu_state_t *) x->priv)
 
 /* Define fetch separately since it is simpler (fixed width, already checked
@@ -520,20 +521,21 @@ static void handle_options(int argc,
                            char **initrd_file,
                            char **disk_file,
                            char **net_dev,
-                           int *hart_count)
+                           int *hart_count,
+                           bool *debug)
 {
     *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev = NULL;
 
     int optidx = 0;
     struct option opts[] = {
-        {"kernel", 1, NULL, 'k'}, {"dtb", 1, NULL, 'b'},
-        {"initrd", 1, NULL, 'i'}, {"disk", 1, NULL, 'd'},
-        {"netdev", 1, NULL, 'n'}, {"smp", 1, NULL, 'c'},
-        {"help", 0, NULL, 'h'},
+        {"kernel", 1, NULL, 'k'},  {"dtb", 1, NULL, 'b'},
+        {"initrd", 1, NULL, 'i'},  {"disk", 1, NULL, 'd'},
+        {"netdev", 1, NULL, 'n'},  {"smp", 1, NULL, 'c'},
+        {"gdbstub", 0, NULL, 'g'}, {"help", 0, NULL, 'h'},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:h", opts, &optidx)) !=
+    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:gh", opts, &optidx)) !=
            -1) {
         switch (c) {
         case 'k':
@@ -553,6 +555,9 @@ static void handle_options(int argc,
             break;
         case 'c':
             *hart_count = atoi(optarg);
+            break;
+        case 'g':
+            *debug = true;
             break;
         case 'h':
             usage(argv[0]);
@@ -591,7 +596,7 @@ static void handle_options(int argc,
         vm_init(hart);                            \
     } while (0)
 
-static int semu_start(int argc, char **argv)
+static int semu_init(emu_state_t *emu, int argc, char **argv)
 {
     char *kernel_file;
     char *dtb_file;
@@ -599,21 +604,22 @@ static int semu_start(int argc, char **argv)
     char *disk_file;
     char *netdev;
     int hart_count = 1;
+    bool debug = false;
+    vm_t *vm = &emu->vm;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file, &netdev, &hart_count);
+                   &disk_file, &netdev, &hart_count, &debug);
 
     /* Initialize the emulator */
-    emu_state_t emu;
-    memset(&emu, 0, sizeof(emu));
+    memset(emu, 0, sizeof(*emu));
 
     /* Set up RAM */
-    emu.ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (emu.ram == MAP_FAILED) {
+    emu->ram = mmap(NULL, RAM_SIZE, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (emu->ram == MAP_FAILED) {
         fprintf(stderr, "Could not map RAM\n");
         return 2;
     }
-    assert(!(((uintptr_t) emu.ram) & 0b11));
+    assert(!(((uintptr_t) emu->ram) & 0b11));
 
     /* *-----------------------------------------*
      * |              Memory layout              |
@@ -621,19 +627,19 @@ static int semu_start(int argc, char **argv)
      * |  kernel image  |  initrd image  |  dtb  |
      * *----------------*----------------*-------*
      */
-    char *ram_loc = (char *) emu.ram;
+    char *ram_loc = (char *) emu->ram;
     /* Load Linux kernel image */
     map_file(&ram_loc, kernel_file);
     /* Load at last 1 MiB to prevent kernel from overwriting it */
     uint32_t dtb_addr = RAM_SIZE - DTB_SIZE; /* Device tree */
-    ram_loc = ((char *) emu.ram) + dtb_addr;
+    ram_loc = ((char *) emu->ram) + dtb_addr;
     map_file(&ram_loc, dtb_file);
     /* Load optional initrd image at last 8 MiB before the dtb region to
      * prevent kernel from overwritting it
      */
     if (initrd_file) {
         uint32_t initrd_addr = dtb_addr - INITRD_SIZE; /* Init RAM disk */
-        ram_loc = ((char *) emu.ram) + initrd_addr;
+        ram_loc = ((char *) emu->ram) + initrd_addr;
         map_file(&ram_loc, initrd_file);
     }
 
@@ -641,108 +647,245 @@ static int semu_start(int argc, char **argv)
     atexit(unmap_files);
 
     /* Set up RISC-V harts */
-    vm_t vm = {
-        .n_hart = hart_count,
-        .hart = malloc(sizeof(hart_t *) * vm.n_hart),
-    };
-    for (uint32_t i = 0; i < vm.n_hart; i++) {
+    vm->n_hart = hart_count;
+    vm->hart = malloc(sizeof(hart_t *) * vm->n_hart);
+    for (uint32_t i = 0; i < vm->n_hart; i++) {
         hart_t *newhart = malloc(sizeof(hart_t));
-        INIT_HART(newhart, &emu, i);
+        INIT_HART(newhart, emu, i);
         newhart->x_regs[RV_R_A0] = i;
         newhart->x_regs[RV_R_A1] = dtb_addr;
         if (i == 0)
             newhart->hsm_status = SBI_HSM_STATE_STARTED;
 
-        newhart->vm = &vm;
-        vm.hart[i] = newhart;
+        newhart->vm = vm;
+        vm->hart[i] = newhart;
     }
 
     /* Set up peripherals */
-    emu.uart.in_fd = 0, emu.uart.out_fd = 1;
+    emu->uart.in_fd = 0, emu->uart.out_fd = 1;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
-    if (!virtio_net_init(&(emu.vnet), netdev))
+    if (!virtio_net_init(&(emu->vnet), netdev))
         fprintf(stderr, "No virtio-net functioned\n");
-    emu.vnet.ram = emu.ram;
+    emu->vnet.ram = emu->ram;
 #endif
 #if SEMU_HAS(VIRTIOBLK)
-    emu.vblk.ram = emu.ram;
-    emu.disk = virtio_blk_init(&(emu.vblk), disk_file);
+    emu->vblk.ram = emu->ram;
+    emu->disk = virtio_blk_init(&(emu->vblk), disk_file);
 #endif
 #if SEMU_HAS(VIRTIORNG)
-    emu.vrng.ram = emu.ram;
+    emu->vrng.ram = emu->ram;
     virtio_rng_init();
 #endif
     /* Set up ACLINT */
-    semu_timer_init(&emu.mtimer.mtime, CLOCK_FREQ);
-    emu.mtimer.mtimecmp = calloc(vm.n_hart, sizeof(uint64_t));
-    emu.mswi.msip = calloc(vm.n_hart, sizeof(uint32_t));
-    emu.sswi.ssip = calloc(vm.n_hart, sizeof(uint32_t));
+    semu_timer_init(&emu->mtimer.mtime, CLOCK_FREQ);
+    emu->mtimer.mtimecmp = calloc(vm->n_hart, sizeof(uint64_t));
+    emu->mswi.msip = calloc(vm->n_hart, sizeof(uint32_t));
+    emu->sswi.ssip = calloc(vm->n_hart, sizeof(uint32_t));
 #if SEMU_HAS(VIRTIOSND)
-    if (!virtio_snd_init(&(emu.vsnd)))
+    if (!virtio_snd_init(&(emu->vsnd)))
         fprintf(stderr, "No virtio-snd functioned\n");
-    emu.vsnd.ram = emu.ram;
+    emu->vsnd.ram = emu->ram;
 #endif
 
-    /* Emulate */
-    uint32_t peripheral_update_ctr = 0;
-    while (!emu.stopped) {
-        /* TODO: Add support for multi-threaded system emulation after the
-         * RFENCE extension is completely implemented.
-         */
-        for (uint32_t i = 0; i < vm.n_hart; i++) {
-            if (peripheral_update_ctr-- == 0) {
-                peripheral_update_ctr = 64;
+    emu->peripheral_update_ctr = 0;
+    emu->debug = debug;
 
-                u8250_check_ready(&emu.uart);
-                if (emu.uart.in_ready)
-                    emu_update_uart_interrupts(&vm);
+    return 0;
+}
+
+static int semu_step(emu_state_t *emu)
+{
+    vm_t *vm = &emu->vm;
+
+    /* TODO: Add support for multi-threaded system emulation after the
+     * RFENCE extension is completely implemented.
+     */
+    for (uint32_t i = 0; i < vm->n_hart; i++) {
+        if (emu->peripheral_update_ctr-- == 0) {
+            emu->peripheral_update_ctr = 64;
+
+            u8250_check_ready(&emu->uart);
+            if (emu->uart.in_ready)
+                emu_update_uart_interrupts(vm);
 
 #if SEMU_HAS(VIRTIONET)
-                virtio_net_refresh_queue(&emu.vnet);
-                if (emu.vnet.InterruptStatus)
-                    emu_update_vnet_interrupts(&vm);
+            virtio_net_refresh_queue(&emu->vnet);
+            if (emu->vnet.InterruptStatus)
+                emu_update_vnet_interrupts(vm);
 #endif
 
 #if SEMU_HAS(VIRTIOBLK)
-                if (emu.vblk.InterruptStatus)
-                    emu_update_vblk_interrupts(&vm);
+            if (emu->vblk.InterruptStatus)
+                emu_update_vblk_interrupts(vm);
 #endif
 
 #if SEMU_HAS(VIRTIOSND)
-                if (emu.vsnd.InterruptStatus)
-                    emu_update_vsnd_interrupts(&vm);
+            if (emu->vsnd.InterruptStatus)
+                emu_update_vsnd_interrupts(vm);
 #endif
-            }
-
-            emu_update_timer_interrupt(vm.hart[i]);
-            emu_update_swi_interrupt(vm.hart[i]);
-
-            vm_step(vm.hart[i]);
-            if (likely(!vm.hart[i]->error))
-                continue;
-
-            if (vm.hart[i]->error == ERR_EXCEPTION &&
-                vm.hart[i]->exc_cause == RV_EXC_ECALL_S) {
-                handle_sbi_ecall(vm.hart[i]);
-                continue;
-            }
-
-            if (vm.hart[i]->error == ERR_EXCEPTION) {
-                hart_trap(vm.hart[i]);
-                continue;
-            }
-
-            vm_error_report(vm.hart[i]);
-            return 2;
         }
+
+        emu_update_timer_interrupt(vm->hart[i]);
+        emu_update_swi_interrupt(vm->hart[i]);
+
+        vm_step(vm->hart[i]);
+        if (likely(!vm->hart[i]->error))
+            continue;
+
+        if (vm->hart[i]->error == ERR_EXCEPTION &&
+            vm->hart[i]->exc_cause == RV_EXC_ECALL_S) {
+            handle_sbi_ecall(vm->hart[i]);
+            continue;
+        }
+
+        if (vm->hart[i]->error == ERR_EXCEPTION) {
+            hart_trap(vm->hart[i]);
+            continue;
+        }
+
+        vm_error_report(vm->hart[i]);
+        return 2;
+    }
+
+    return 0;
+}
+
+static int semu_run(emu_state_t *emu)
+{
+    int ret;
+
+    /* Emulate */
+    while (!emu->stopped) {
+        ret = semu_step(emu);
+        if (ret)
+            return ret;
     }
 
     /* unreachable */
     return 0;
 }
 
+static inline bool semu_is_interrupt(emu_state_t *emu)
+{
+    return __atomic_load_n(&emu->is_interrupted, __ATOMIC_RELAXED);
+}
+
+static int semu_read_reg(void *args, int regno, size_t *data)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+
+    if (regno > 32)
+        return EFAULT;
+
+    assert((uint32_t) emu->curr_cpuid < emu->vm.n_hart);
+
+    if (regno == 32)
+        *data = emu->vm.hart[emu->curr_cpuid]->pc;
+    else
+        *data = emu->vm.hart[emu->curr_cpuid]->x_regs[regno];
+
+    return 0;
+}
+
+static int semu_read_mem(void *args, size_t addr, size_t len, void *val)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    hart_t *hart = emu->vm.hart[emu->curr_cpuid];
+    mem_load(hart, addr, len, val);
+    return 0;
+}
+
+static gdb_action_t semu_cont(void *args)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    while (!semu_is_interrupt(emu)) {
+        semu_step(emu);
+    }
+
+    /* Clear the interrupt if it's pending */
+    __atomic_store_n(&emu->is_interrupted, false, __ATOMIC_RELAXED);
+
+    return ACT_RESUME;
+}
+
+static gdb_action_t semu_stepi(void *args)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    semu_step(emu);
+    return ACT_RESUME;
+}
+
+static void semu_on_interrupt(void *args)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    /* Notify the emulator to break out the for loop in rv_cont */
+    __atomic_store_n(&emu->is_interrupted, true, __ATOMIC_RELAXED);
+}
+
+static int semu_get_cpu(void *args)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    return emu->curr_cpuid;
+}
+
+static void semu_set_cpu(void *args, int cpuid)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    emu->curr_cpuid = cpuid;
+}
+
+static int semu_run_debug(emu_state_t *emu)
+{
+    vm_t *vm = &emu->vm;
+
+    gdbstub_t gdbstub;
+    struct target_ops gdbstub_ops = {
+        .read_reg = semu_read_reg,
+        .write_reg = NULL,
+        .read_mem = semu_read_mem,
+        .write_mem = NULL,
+        .cont = semu_cont,
+        .stepi = semu_stepi,
+        .set_bp = NULL,
+        .del_bp = NULL,
+        .on_interrupt = semu_on_interrupt,
+
+        .get_cpu = semu_get_cpu,
+        .set_cpu = semu_set_cpu,
+    };
+
+    emu->curr_cpuid = 0;
+    if (!gdbstub_init(&gdbstub, &gdbstub_ops,
+                      (arch_info_t){
+                          .smp = vm->n_hart,
+                          .reg_num = 33,
+                          .reg_byte = 4,
+                          .target_desc = TARGET_RV32,
+                      },
+                      "127.0.0.1:1234")) {
+        return 1;
+    }
+
+    emu->is_interrupted = false;
+    if (!gdbstub_run(&gdbstub, (void *) emu))
+        return 1;
+
+    gdbstub_close(&gdbstub);
+
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
-    return semu_start(argc, argv);
+    int ret;
+    emu_state_t emu;
+    ret = semu_init(&emu, argc, argv);
+    if (ret)
+        return ret;
+
+    if (emu.debug)
+        return semu_run_debug(&emu);
+
+    return semu_run(&emu);
 }
