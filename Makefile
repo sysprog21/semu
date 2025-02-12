@@ -14,7 +14,7 @@ OBJS_EXTRA :=
 # command line option
 OPTS :=
 
-LDFLAGS := -lm
+LDFLAGS :=
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -56,14 +56,20 @@ endif
 
 # virtio-snd
 ENABLE_VIRTIOSND ?= 1
-ifneq ($(UNAME_S),$(filter $(UNAME_S),Linux))
+ifneq ($(UNAME_S),$(filter $(UNAME_S),Linux Darwin))
     ENABLE_VIRTIOSND := 0
 endif
 
-# Check ALSA installation
 ifeq ($(UNAME_S),Linux)
+    # Check ALSA installation
     ifeq (0, $(call check-alsa))
         $(warning No libasound installed. Check libasound in advance.)
+        ENABLE_VIRTIOSND := 0
+    endif
+endif
+ifeq ($(UNAME_S),Darwin)
+    ifeq (0, $(call check-coreaudio))
+        $(warning No CoreAudio installed Check AudioToolbox in advance.)
         ENABLE_VIRTIOSND := 0
     endif
 endif
@@ -71,21 +77,39 @@ $(call set-feature, VIRTIOSND)
 ifeq ($(call has, VIRTIOSND), 1)
     OBJS_EXTRA += virtio-snd.o
 
-    LDFLAGS += -lasound -lpthread
-    CFLAGS += -Icnfa
+    PORTAUDIOLIB := portaudio/lib/.libs/libportaudio.a
+    LDFLAGS += $(PORTAUDIOLIB)
 
-cnfa/Makefile:
-	git submodule update --init cnfa
-cnfa/os_generic: cnfa/Makefile
-	$(MAKE) -C $(dir $<) os_generic.h
-CNFA_LIB := cnfa/CNFA_sf.h
-$(CNFA_LIB): cnfa/Makefile cnfa/os_generic
-	$(MAKE) -C $(dir $<) CNFA_sf.h
-main.o: $(CNFA_LIB)
+    ifeq ($(UNAME_S),Linux)
+        LDFLAGS += -lasound -lrt
+        # Check PulseAudio installation
+        ifeq (0, $(call check-pa))
+            LDFLAGS += -lpulse
+        endif
+    endif
+    ifeq ($(UNAME_S),Darwin)
+        LDFLAGS += -framework CoreServices -framework CoreFoundation -framework AudioUnit -framework AudioToolbox -framework CoreAudio
+    endif
 
-# suppress warning when compiling CNFA
-virtio-snd.o: CFLAGS += -Wno-unused-parameter -Wno-sign-compare
+    CFLAGS += -Iportaudio/include
+    # PortAudio requires libm, yet we set -lm in the end of LDFLAGS
+    # so that the other libraries will be benefited for no need to set
+    # -lm separately.
+    LDFLAGS += -lpthread
+
+portaudio/Makefile:
+	git submodule update --init portaudio
+$(PORTAUDIOLIB): portaudio/Makefile
+	cd $(dir $<) && ./configure
+	$(MAKE) -C $(dir $<)
+main.o: $(PORTAUDIOLIB)
+
+# suppress warning when compiling PortAudio
+virtio-snd.o: CFLAGS += -Wno-unused-parameter
 endif
+
+# Set libm as the last dependency so that no need to set -lm seperately.
+LDFLAGS += -lm
 
 # .DEFAULT_GOAL should be set to all since the very first target is not all
 # after git submodule.
