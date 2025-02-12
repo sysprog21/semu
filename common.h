@@ -34,3 +34,19 @@ static inline int ilog2(int x)
 #else /* unsupported compilers */
 #define PACKED(name)
 #endif
+
+/* Pattern Matching for C macros.
+ * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
+ */
+
+/* In Visual Studio, __VA_ARGS__ is treated as a separate parameter. */
+#define FIX_VC_BUG(x) x
+
+/* catenate */
+#define PRIMITIVE_CAT(a, ...) FIX_VC_BUG(a##__VA_ARGS__)
+
+#define IIF(c) PRIMITIVE_CAT(IIF_, c)
+/* run the 2nd parameter */
+#define IIF_0(t, ...) __VA_ARGS__
+/* run the 1st parameter */
+#define IIF_1(t, ...) t
