@@ -14,7 +14,7 @@ OBJS_EXTRA :=
 # command line option
 OPTS :=
 
-LDFLAGS := -lm
+LDFLAGS :=
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -70,21 +70,26 @@ $(call set-feature, VIRTIOSND)
 ifeq ($(call has, VIRTIOSND), 1)
     OBJS_EXTRA += virtio-snd.o
 
-    LDFLAGS += -lasound -lpthread
-    CFLAGS += -Icnfa
+    PORTAUDIOLIB := portaudio/lib/.libs/libportaudio.a
+	# PortAudio requires libm, yet we set -lm in the end of LDFLAGS
+	# so that the other libraries will be benefited for no need to set
+	# -lm separately.
+    LDFLAGS += $(PORTAUDIOLIB) -lasound -lpthread -lrt -lpulse
+    CFLAGS += -Iportaudio/include
 
-cnfa/Makefile:
-	git submodule update --init cnfa
-cnfa/os_generic: cnfa/Makefile
-	$(MAKE) -C $(dir $<) os_generic.h
-CNFA_LIB := cnfa/CNFA_sf.h
-$(CNFA_LIB): cnfa/Makefile cnfa/os_generic
-	$(MAKE) -C $(dir $<) CNFA_sf.h
-main.o: $(CNFA_LIB)
+portaudio/Makefile:
+	git submodule update --init portaudio
+$(PORTAUDIOLIB): portaudio/Makefile
+	@cd $(dir $<) && ./configure
+	@cd $(dir $<) && $(MAKE)
+main.o: $(PORTAUDIOLIB)
 
-# suppress warning when compiling CNFA
-virtio-snd.o: CFLAGS += -Wno-unused-parameter -Wno-sign-compare
+# suppress warning when compiling PortAudio
+virtio-snd.o: CFLAGS += -Wno-unused-parameter
 endif
+
+# Set libm as the last dependency so that no need to set -lm seperately. 
+LDFLAGS += -lm
 
 # .DEFAULT_GOAL should be set to all since the very first target is not all
 # after git submodule.
