@@ -382,6 +382,14 @@ static void op_sret(hart_t *vm)
     vm->s_mode = vm->sstatus_spp;
     vm->sstatus_sie = vm->sstatus_spie;
 
+    /* After the booting process is complete, initrd will be loaded. At this
+     * point, the sytstem will switch to U mode for the first time. Therefore,
+     * by checking whether the switch to U mode has already occurred, we can
+     * determine if the boot process has been completed.
+     */
+    if (!boot_complete && !vm->s_mode)
+        boot_complete = true;
+
     /* Reset stack */
     vm->sstatus_spp = false;
     vm->sstatus_spie = true;
