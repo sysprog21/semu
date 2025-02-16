@@ -132,6 +132,16 @@ DTC ?= dtc
 E :=
 S := $E $E
 
+# During boot process, he emulator manually manages the growth of ticks to 
+# suppress RCU CPU stall warnings. Thus, we need an target time to set the 
+# increment of ticks. According to Using RCU’s CPU Stall Detector[1], the
+# grace period for RCU CPU stalls is typically set to 21 seconds. 
+# By dividing this value by two as the expected completion time, we can 
+# provide a sufficient buffer to reduce the impact of errors and avoid 
+# RCU CPU stall warnings.
+# [1] docs.kernel.org/RCU/stallwarn.html#config-rcu-cpu-stall-timeout
+CFLAGS += -D SEMU_BOOT_TARGET_TIME=10
+
 SMP ?= 1
 .PHONY: riscv-harts.dtsi
 riscv-harts.dtsi:
