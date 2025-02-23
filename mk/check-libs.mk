@@ -13,11 +13,11 @@ endef
 # Create a mininal PulseAudio program
 define create-pa-prog
 echo '\
-#include <pulseaudio/pulseaudio.h>\n\
+#include <pulse/pulseaudio.h>\n\
 int main(){\n\
-pa_mainloop *m = NULL;\n\
-ma_mainloop_free(m);\n\
-return 0;\n\
+    pa_mainloop *m = NULL;\n\
+    pa_mainloop_free(m);\n\
+    return 0;\n\
 }\n'
 endef
 

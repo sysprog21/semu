@@ -75,7 +75,7 @@ ifeq ($(call has, VIRTIOSND), 1)
 	# so that the other libraries will be benefited for no need to set
 	# -lm separately.
     LDFLAGS += $(PORTAUDIOLIB) -lasound -lpthread -lrt
-    ifneq (0, $(call check-pa))
+    ifeq (1, $(call check-pa))
         LDFLAGS += -lpulse
     endif
     CFLAGS += -Iportaudio/include
