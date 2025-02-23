@@ -74,7 +74,10 @@ ifeq ($(call has, VIRTIOSND), 1)
 	# PortAudio requires libm, yet we set -lm in the end of LDFLAGS
 	# so that the other libraries will be benefited for no need to set
 	# -lm separately.
-    LDFLAGS += $(PORTAUDIOLIB) -lasound -lpthread -lrt -lpulse
+    LDFLAGS += $(PORTAUDIOLIB) -lasound -lpthread -lrt
+    ifneq (0, $(call check-pa))
+        LDFLAGS += -lpulse
+    endif
     CFLAGS += -Iportaudio/include
 
 portaudio/Makefile:
