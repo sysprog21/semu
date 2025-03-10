@@ -1,8 +1,8 @@
-[submodule "cnfa"]
-    path = cnfa
-    url = https://github.com/cntools/cnfa
-    shallow = true
 [submodule "mini-gdbstub"]
     path = mini-gdbstub
     url = https://github.com/RinHizakura/mini-gdbstub
+    shallow = true
+[submodule "portaudio"]
+	path = portaudio
+    url = https://github.com/PortAudio/portaudio
     shallow = true
