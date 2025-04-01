@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   semu-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
     - name: install-dependencies
@@ -37,11 +37,11 @@ jobs:
       shell: bash
 
   coding_style:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
     - name: coding convention
       run: |
-            sudo apt-get install -q -y clang-format-12
+            sudo apt-get install -q -y clang-format-18
             .ci/check-format.sh
       shell: bash

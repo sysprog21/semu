@@ -87,7 +87,7 @@ static inline void list_del_init(struct list_head *node)
     })
 #else
 #define container_of(ptr, type, member) \
-    ((type *) ((char *) (ptr) -offsetof(type, member)))
+    ((type *) ((char *) (ptr) - offsetof(type, member)))
 #endif
 
 #define list_entry(node, type, member) container_of(node, type, member)
