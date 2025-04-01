@@ -650,7 +650,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     vm->n_hart = hart_count;
     vm->hart = malloc(sizeof(hart_t *) * vm->n_hart);
     for (uint32_t i = 0; i < vm->n_hart; i++) {
-        hart_t *newhart = malloc(sizeof(hart_t));
+        hart_t *newhart = calloc(1, sizeof(hart_t));
+        if (!newhart) {
+            fprintf(stderr, "Failed to allocate hart #%u.\n", i);
+            return 1;
+        }
         INIT_HART(newhart, emu, i);
         newhart->x_regs[RV_R_A0] = i;
         newhart->x_regs[RV_R_A1] = dtb_addr;
