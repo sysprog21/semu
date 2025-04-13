@@ -399,6 +399,7 @@ typedef struct {
                 goto early_continue;                                    \
             }                                                           \
                                                                         \
+            fprintf(stderr, "=== hit " #NAME_SUFFIX "---\n"); \
             IIF(WRITE)                                                  \
             (/* enqueue frames */                                       \
              void *payload = (void *) (base + addr);                    \
@@ -578,6 +579,7 @@ static void virtio_snd_read_pcm_set_params(
     props->pp.padding = request->padding;
 
     *plen = 0;
+    fprintf(stderr, "*** hit set_params id %" PRIu32 "***\n", id);
 }
 
 static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
@@ -735,6 +737,9 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
             free(node);
         }
     }
+    
+    /* avoid dangling pointers */
+    props->intermediate = NULL;
 
     PaError err = Pa_CloseStream(props->pa_stream);
     if (err != paNoError) {
@@ -798,6 +803,7 @@ static int virtio_snd_stream_cb(const void *input,
                                 PaStreamCallbackFlags status_flags,
                                 void *user_data)
 {
+    fprintf(stderr, "=== hit virtio_snd_stream_cb ===\n");
     vsnd_stream_sel_t *v_ptr = (vsnd_stream_sel_t *) user_data;
     uint32_t id = v_ptr->stream_id;
     int channels = vsnd_props[id].pp.channels;
