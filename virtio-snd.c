@@ -307,6 +307,11 @@ typedef struct {
 static virtio_snd_config_t vsnd_configs[VSND_DEV_CNT_MAX];
 static virtio_snd_prop_t vsnd_props[VSND_DEV_CNT_MAX] = {
     [0 ... VSND_DEV_CNT_MAX - 1].pp.hdr.hdr.code = VIRTIO_SND_R_PCM_SET_PARAMS,
+    [0 ... VSND_DEV_CNT_MAX - 1].lock = {
+        .lock = PTHREAD_MUTEX_INITIALIZER,
+        .readable = PTHREAD_COND_INITIALIZER,
+        .writable = PTHREAD_COND_INITIALIZER,
+    },
 };
 static int vsnd_dev_cnt = 0;
 
@@ -389,6 +394,10 @@ typedef struct {
                 const virtio_snd_pcm_xfer_t *request =                  \
                     (virtio_snd_pcm_xfer_t *) (base + addr);            \
                 stream_id = request->stream_id;                         \
+                if(stream_id >= VSND_DEV_CNT_MAX) { \
+                    fprintf(stderr, "invalide stream_id %" PRIu32 "\n", stream_id);\
+                    goto err; \
+                } \
                 goto early_continue;                                    \
             } else if (idx == cnt - 1) { /* the last descriptor */      \
                 virtio_snd_pcm_status_t *response =                     \
@@ -399,10 +408,10 @@ typedef struct {
                 goto early_continue;                                    \
             }                                                           \
                                                                         \
-            fprintf(stderr, "=== hit " #NAME_SUFFIX "---\n"); \
             IIF(WRITE)                                                  \
             (/* enqueue frames */                                       \
              void *payload = (void *) (base + addr);                    \
+            fprintf(stderr, "=== hit " #NAME_SUFFIX "%" PRIu32 "---\n", stream_id); \
              __virtio_snd_frame_enqueue(payload, len, stream_id);       \
              , /* flush queue */                                        \
              (void) stream_id;                                          \
@@ -427,6 +436,9 @@ typedef struct {
         }                                                               \
                                                                         \
         return 0;                                                       \
+\
+        err: \
+        return -1;\
     }
 
 VSND_GEN_TX_QUEUE_HANDLER(normal, 1);
@@ -620,10 +632,6 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     /* Calculate the period size (in frames) for CNFA . */
     uint32_t cnfa_period_frames = cnfa_period_bytes / VSND_CNFA_FRAME_SZ;
 
-    pthread_mutex_init(&props->lock.lock, NULL);
-    pthread_cond_init(&props->lock.readable, NULL);
-    pthread_cond_init(&props->lock.writable, NULL);
-
     INIT_LIST_HEAD(&props->buf_queue_head);
     props->intermediate =
         (void *) malloc(sizeof(*props->intermediate) * cnfa_period_bytes);
@@ -643,6 +651,7 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
         return;
     }
 
+finally:
     *plen = 0;
 }
 
@@ -725,10 +734,7 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
     pthread_cond_broadcast(&props->lock.readable);
     pthread_cond_broadcast(&props->lock.writable);
     pthread_mutex_unlock(&props->lock.lock);
-    pthread_mutex_destroy(&props->lock.lock);
-    pthread_cond_destroy(&props->lock.readable);
-    pthread_cond_destroy(&props->lock.writable);
-    /* Tear down PCM buffer queue. */
+
     vsnd_buf_queue_node_t *tmp = NULL;
     vsnd_buf_queue_node_t *node;
     if (!list_empty(&props->buf_queue_head)) {
