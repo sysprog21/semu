@@ -775,7 +775,12 @@ static inline bool semu_is_interrupt(emu_state_t *emu)
     return __atomic_load_n(&emu->is_interrupted, __ATOMIC_RELAXED);
 }
 
-static int semu_read_reg(void *args, int regno, size_t *data)
+static size_t semu_get_reg_bytes(UNUSED int regno)
+{
+    return 4;
+}
+
+static int semu_read_reg(void *args, int regno, void *data)
 {
     emu_state_t *emu = (emu_state_t *) args;
 
@@ -785,9 +790,9 @@ static int semu_read_reg(void *args, int regno, size_t *data)
     assert((uint32_t) emu->curr_cpuid < emu->vm.n_hart);
 
     if (regno == 32)
-        *data = emu->vm.hart[emu->curr_cpuid]->pc;
+        *(uint32_t *) data = emu->vm.hart[emu->curr_cpuid]->pc;
     else
-        *data = emu->vm.hart[emu->curr_cpuid]->x_regs[regno];
+        *(uint32_t *) data = emu->vm.hart[emu->curr_cpuid]->x_regs[regno];
 
     return 0;
 }
@@ -845,6 +850,7 @@ static int semu_run_debug(emu_state_t *emu)
 
     gdbstub_t gdbstub;
     struct target_ops gdbstub_ops = {
+        .get_reg_bytes = semu_get_reg_bytes,
         .read_reg = semu_read_reg,
         .write_reg = NULL,
         .read_mem = semu_read_mem,
@@ -864,7 +870,6 @@ static int semu_run_debug(emu_state_t *emu)
                       (arch_info_t){
                           .smp = vm->n_hart,
                           .reg_num = 33,
-                          .reg_byte = 4,
                           .target_desc = TARGET_RV32,
                       },
                       "127.0.0.1:1234")) {
