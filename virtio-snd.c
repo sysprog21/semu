@@ -395,18 +395,21 @@ typedef struct {
             if (idx == 0) { /* the first descriptor */                    \
                 const virtio_snd_pcm_xfer_t *request =                    \
                     (virtio_snd_pcm_xfer_t *) (base + addr);              \
+                fprintf(stderr, "sizeof request: %d\n", sizeof(*request)); \
                 stream_id = request->stream_id;                           \
                 if (stream_id >= VSND_DEV_CNT_MAX) {                      \
-                    fprintf(stderr, "invalid stream_id %" PRIu32 "\n",    \
-                            stream_id);                                   \
                     bad_msg_err = 1;                                      \
                 }                                                         \
                 goto early_continue;                                      \
             } else if (idx == cnt - 1) { /* the last descriptor */        \
                 virtio_snd_pcm_status_t *response =                       \
                     (virtio_snd_pcm_status_t *) (base + addr);            \
-                response->status =                                        \
-                    bad_msg_err ? VIRTIO_SND_S_BAD_MSG : VIRTIO_SND_S_OK; \
+                response->status = IIF(WRITE)                                        \
+                    (/* Normal error handling */  \
+                     bad_msg_err ? VIRTIO_SND_S_BAD_MSG : VIRTIO_SND_S_OK \
+                     , /* Merely inform driver */ \
+                     VIRTIO_SND_S_OK); \
+                fprintf(stderr, #NAME_SUFFIX "response->status %" PRIu32 "\n", response->status);\
                 response->latency_bytes = ret_len;                        \
                 *plen = sizeof(*response);                                \
                 goto early_continue;                                      \
@@ -415,10 +418,6 @@ typedef struct {
             IIF(WRITE)                                                    \
             (/* enqueue frames */                                         \
              void *payload = (void *) (base + addr);                      \
-             fprintf(stderr,                                              \
-                     "=== hit " #NAME_SUFFIX " %" PRIu32                  \
-                     " bas_msg_err %" PRIu8 "---\n",                      \
-                     stream_id, bad_msg_err);                             \
              if (bad_msg_err == 0)                                        \
                  __virtio_snd_frame_enqueue(payload, len, stream_id);     \
              , /* flush queue */                                          \
@@ -599,7 +598,6 @@ static void virtio_snd_read_pcm_set_params(
     props->pp.padding = request->padding;
 
     *plen = 0;
-    fprintf(stderr, "*** hit set_params id %" PRIu32 "***\n", id);
 }
 
 static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
@@ -671,7 +669,7 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
     if (code != VIRTIO_SND_R_PCM_PREPARE && code != VIRTIO_SND_R_PCM_STOP) {
         fprintf(
             stderr,
-            "virtio_snd_read_pcm_start with previous invalide state %#08x\n",
+            "virtio_snd_read_pcm_start with previous invalide stat %#08x\n",
             code);
         return;
     }
@@ -698,7 +696,7 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
     uint32_t code = vsnd_props[stream_id].pp.hdr.hdr.code;
     if (code != VIRTIO_SND_R_PCM_START) {
         fprintf(stderr,
-                "virtio_snd_read_pcm_stop with previous invalide state %#08x\n",
+                "virtio_snd_read_pcm_stop with previous invalid state %#08x\n",
                 code);
         return;
     }
@@ -728,7 +726,7 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
     if (code != VIRTIO_SND_R_PCM_PREPARE && code != VIRTIO_SND_R_PCM_STOP) {
         fprintf(
             stderr,
-            "virtio_snd_read_pcm_release with previous invalide state %#08x\n",
+            "virtio_snd_read_pcm_release with previous invalid state %#08x\n",
             code);
         return;
     }
@@ -816,7 +814,6 @@ static int virtio_snd_stream_cb(const void *input,
                                 PaStreamCallbackFlags status_flags,
                                 void *user_data)
 {
-    fprintf(stderr, "=== hit virtio_snd_stream_cb ===\n");
     vsnd_stream_sel_t *v_ptr = (vsnd_stream_sel_t *) user_data;
     uint32_t id = v_ptr->stream_id;
     int channels = vsnd_props[id].pp.channels;
