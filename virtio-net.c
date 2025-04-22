@@ -136,7 +136,20 @@ static ssize_t handle_read(netdev_t *netdev,
         break;
     }
     case _(user):
-        /* TODO: handle read  */
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+
+        plen = readv(usr->channel[SLIRP_READ_SIDE], iovs_cursor, niovs);
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+
+        if (plen < 0) {
+            plen = 0;
+            fprintf(stderr, "[VNET] could not read packet: %s\n",
+                    strerror(errno));
+        }
+
         break;
     default:
         break;
@@ -168,7 +181,20 @@ static ssize_t handle_write(netdev_t *netdev,
         break;
     }
     case _(user):
-        /* TODO: handle slirp_input */
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+
+        uint8_t pkt[1514];
+
+        /* Aggregate data from scatter-gater I/O vector into a
+         * contiguous packet buffer
+         */
+        for (size_t i = 0; i < niovs; i++) {
+            memcpy(pkt + plen, iovs_cursor[i].iov_base, iovs_cursor[i].iov_len);
+            plen += iovs_cursor[i].iov_len;
+        }
+
+        slirp_input(usr->slirp, pkt, plen);
+
         break;
     default:
         break;
@@ -298,12 +324,21 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
         break;
     }
     case _(user):
-        /* TODO: handle slirp input/output */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+        virtio_net_try_tx(vnet);
         break;
     default:
         break;
     }
 #undef _
+}
+
+void virtio_net_recv_from_peer(void *peer)
+{
+    virtio_net_state_t *vnet = (virtio_net_state_t *) peer;
+    vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+
+    virtio_net_try_rx(vnet);
 }
 
 static bool virtio_net_reg_read(virtio_net_state_t *vnet,

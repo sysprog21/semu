@@ -761,9 +761,38 @@ static int semu_run(emu_state_t *emu)
 
     /* Emulate */
     while (!emu->stopped) {
-        ret = semu_step(emu);
-        if (ret)
-            return ret;
+#if SEMU_HAS(VIRTIONET)
+        int i = 0;
+        if (emu->vnet.peer.type == NETDEV_IMPL_user && boot_complete) {
+            net_user_options_t *usr = (net_user_options_t *) emu->vnet.peer.op;
+
+            uint32_t timeout = -1;
+            usr->pfd_len = 1;
+            slirp_pollfds_fill_socket(usr->slirp, &timeout,
+                                      semu_slirp_add_poll_socket, usr);
+
+            /* Poll the internal pipe for incoming data. If data is
+             * available (POLL_IN), process it and forward it to the
+             * virtio-net device.
+             */
+            int pollout = poll(usr->pfd, usr->pfd_len, 1);
+            if (usr->pfd[0].revents & POLLIN) {
+                virtio_net_recv_from_peer(usr->peer);
+            }
+            slirp_pollfds_poll(usr->slirp, (pollout <= 0),
+                               semu_slirp_get_revents, usr);
+            for (i = 0; i < SLIRP_POLL_INTERVAL; i++) {
+                ret = semu_step(emu);
+                if (ret)
+                    return ret;
+            }
+        } else
+#endif
+        {
+            ret = semu_step(emu);
+            if (ret)
+                return ret;
+        }
     }
 
     /* unreachable */
