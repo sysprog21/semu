@@ -51,6 +51,7 @@ $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
     OBJS_EXTRA += netdev.o
+	OBJS_EXTRA += slirp.o
 endif
 
 # virtio-snd
@@ -113,6 +114,17 @@ $(GDBSTUB_LIB): mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<)
 $(OBJS): $(GDBSTUB_LIB)
 
+ifeq ($(call has, VIRTIONET), 1)
+MINISLIRP_DIR := minislirp
+MINISLIRP_LIB := minislirp/src/libslirp.a
+LDFLAGS += $(MINISLIRP_LIB)
+$(MINISLIRP_DIR)/src/Makefile:
+	git submodule update --init $(MINISLIRP_DIR)
+$(MINISLIRP_LIB): $(MINISLIRP_DIR)/src/Makefile
+	$(MAKE) -C $(dir $<)
+$(OBJS): $(MINISLIRP_LIB)
+endif
+
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
@@ -171,6 +183,7 @@ build-image:
 clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 	$(Q)$(MAKE) -C mini-gdbstub clean
+	$(Q)$(MAKE) -C minislirp/src clean
 
 distclean: clean
 	$(Q)$(RM) riscv-harts.dtsi

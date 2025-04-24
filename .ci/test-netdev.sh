@@ -45,10 +45,13 @@ ASSERT expect <<DONE
         expect "riscv32 GNU/Linux" { send "ip l set eth0 up\n" } timeout { exit 3 }
         expect "# " { send "ip a add 192.168.10.2/24 dev eth0\n" }
         expect "# " { send "ping -c 3 192.168.10.1\n" }
-        expect "3 packets transmitted, 3 packets received, 0% packet loss" { } timeout { exit 4 }    
+        expect "3 packets transmitted, 3 packets received, 0% packet loss" { } timeout { exit 4 }
     } elseif { "$NETDEV" == "user" } {
-        # Test slirp configuration
-        expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "ip addr add 10.0.2.15/24 dev eth0\n" } timeout { exit 3 }
+        expect "# " { send "ip link set eth0 up\n"}
+        expect "# " { send "ip route add default via 10.0.2.2\n"}
+        expect "# " { send "ping -c 3 10.0.2.2\n" }
+        expect "3 packets transmitted, 3 packets received, 0% packet loss" { } timeout { exit 4 }
     }
 DONE
 }

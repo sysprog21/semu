@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
+#include "device.h"
 #include "netdev.h"
 
 static int net_init_tap();
@@ -55,9 +56,19 @@ static int net_init_tap(netdev_t *netdev)
     return 0;
 }
 
-static int net_init_user(netdev_t *netdev UNUSED)
+static int net_init_user(netdev_t *netdev)
 {
-    /* TODO: create slirp dev */
+    net_user_options_t *usr = (net_user_options_t *) netdev->op;
+    memset(usr, 0, sizeof(*usr));
+    usr->peer = container_of(netdev, virtio_net_state_t, peer);
+    if (pipe(usr->channel) < 0)
+        return false;
+    assert(fcntl(usr->channel[SLIRP_READ_SIDE], F_SETFL,
+                 fcntl(usr->channel[SLIRP_READ_SIDE], F_GETFL, 0) |
+                     O_NONBLOCK) >= 0);
+
+    net_slirp_init(usr);
+
     return 0;
 }
 

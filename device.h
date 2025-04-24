@@ -1,6 +1,8 @@
 #pragma once
 
+#if SEMU_HAS(VIRTIONET)
 #include "netdev.h"
+#endif
 #include "riscv.h"
 #include "virtio.h"
 
@@ -119,6 +121,8 @@ void virtio_net_write(hart_t *core,
                       uint8_t width,
                       uint32_t value);
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
+
+void virtio_net_recv_from_peer(void *peer);
 
 bool virtio_net_init(virtio_net_state_t *vnet, const char *name);
 #endif /* SEMU_HAS(VIRTIONET) */
