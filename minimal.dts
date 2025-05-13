@@ -17,8 +17,9 @@
     chosen {
         bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
-        linux,initrd-start = <0x1f700000>; /* @403 MiB (503 * 1024 * 1024)     */
-        linux,initrd-end = <0x1fefffff>;   /* @511 MiB (511 * 1024 * 1024 - 1) */
+        /* Reserve 150 MiB for initrd image */
+        linux,initrd-start = <0x36900000>; /* @ 923 MiB (958 * 1024 * 1024)     */
+        linux,initrd-end = <0x3fefffff>;   /* @1023 MiB (1023 * 1024 * 1024 - 1) */
     };
 
     cpus {
@@ -29,7 +30,7 @@
 
     sram: memory@0 {
         device_type = "memory";
-        reg = <0x00000000 0x20000000>;
+        reg = <0x00000000 0x40000000>; /* 1024 MiB */
         reg-names = "sram0";
     };
 
@@ -77,6 +78,28 @@
             compatible = "virtio,mmio";
             reg = <0x4700000 0x200>;
             interrupts = <5>;
+        };
+#endif
+
+#if SEMU_FEATURE_VIRTIOGPU 
+        gpu0: virtio@4800000 {
+            compatible = "virtio,mmio";
+            reg = <0x4800000 0x200>;
+            interrupts = <6>;
+        };       
+#endif
+
+#if SEMU_FEATURE_VIRTIOINPUT
+        keyboard0: virtio@4900000 {
+            compatible = "virtio,mmio";
+            reg = <0x4900000 0x200>;
+            interrupts = <7>;
+        };
+
+        mouse0: virtio@5000000 {
+            compatible = "virtio,mmio";
+            reg = <0x5000000 0x200>;
+            interrupts = <8>;
         };
 #endif
     };

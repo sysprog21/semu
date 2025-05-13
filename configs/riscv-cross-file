@@ -1,0 +1,18 @@
+[binaries]
+    c = 'riscv32-buildroot-linux-gnu-gcc'
+    strip = 'riscv32-buildroot-linux-gnu-strip'
+    pkgconfig = 'pkg-config'
+    python = '/usr/bin/python3'
+
+[properties]
+    pkg_config_libdir = ['@GLOBAL_SOURCE_ROOT@' / '../buildroot/output/host/riscv32-buildroot-linux-gnu/sysroot/usr/local/lib/pkgconfig',
+                         '@GLOBAL_SOURCE_ROOT@' / '../buildroot/output/host/riscv32-buildroot-linux-gnu/sysroot/usr/share/pkgconfig/',
+                         '@GLOBAL_SOURCE_ROOT@' / '../buildroot/output/host/riscv32-buildroot-linux-gnu/sysroot/usr/lib/pkgconfig/'
+                        ]
+    sys_root = '@GLOBAL_SOURCE_ROOT@' / '../buildroot/output/host/riscv32-buildroot-linux-gnu/sysroot'
+
+[host_machine]
+    system = 'linux'
+    cpu_family = 'riscv'
+    cpu = 'riscv32-ima'
+    endian = 'little'
