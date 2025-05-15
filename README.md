@@ -12,9 +12,10 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - Three types of I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
     - virtio-net is mapped as TAP interface.
-    - virtio-snd uses ALSA for sound operation with the following limitations:
-        - The emulator will hang if PulseAudio is enabled on host.
-        - The playback may plays with repeating artifact.
+    - virtio-snd uses PortAudio for sound playback on the host with one limitations:
+        - As some unknown issues in guest Linux OS (confirmed in v6.7), you need
+          to adjust the buffer size to more than four times of period size, or
+          the program cannot write the PCM frames into guest OS ALSA stack.
 
 ## Prerequisites
 
