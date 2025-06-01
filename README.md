@@ -90,8 +90,54 @@ You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwar
 An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source.
 Please note that it only supports the Linux host environment.
 
+To build everything, simply run:
+
 ```shell
 $ make build-image
+```
+
+This command invokes the underlying script: `scripts/build-image.sh`, which also offers more flexible usage options.
+
+### Script Usage
+
+```
+./scripts/build-image.sh [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+
+Options:
+  --buildroot         Build Buildroot rootfs
+  --linux             Build Linux kernel
+  --all               Build both Buildroot and Linux
+  --external-root     Use external rootfs instead of initramfs
+  --clean-build       Remove entire buildroot/ and/or linux/ directories before build
+  --help              Show this message
+```
+
+### Examples
+
+Build the Linux kernel only:
+
+```
+$ scripts/build-image.sh --linux
+```
+
+Build Buildroot only:
+
+```
+$ scripts/build-image.sh --buildroot
+```
+
+Build Buildroot and generate an external root file system (ext4 image):
+
+```
+$ scripts/build-image.sh --buildroot --external-root
+```
+
+Force a clean build:
+
+```
+$ scripts/build-image.sh --all --clean-build
+$ scripts/build-image.sh --linux --clean-build
+$ scripts/build-image.sh --buildroot --clean-build
 ```
 
 ## License

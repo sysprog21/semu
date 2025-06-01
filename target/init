@@ -1,0 +1,40 @@
+#!/bin/sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+ROOTFS_DEV=/dev/vda
+
+mount -t devtmpfs devtmpfs /dev
+mount -t proc none /proc
+mount -t sysfs none /sys
+
+# use the /dev/console device node from devtmpfs if possible to not
+# confuse glibc's ttyname_r().
+# This may fail (e.g., booted with console=), and errors from exec will
+# terminate the shell, so use a subshell for the test
+if (exec 0</dev/console) 2>/dev/null; then
+    exec 0</dev/console
+    exec 1>/dev/console
+    exec 2>/dev/console
+fi
+
+echo "[*] Attempting to mount $ROOTFS_DEV"
+mkdir -p /mnt
+
+mount -t ext4 $ROOTFS_DEV /mnt
+if [ $? -ne 0 ]; then
+    echo "[!] Failed to mount $ROOTFS_DEV. Using initramfs."
+    exec /sbin/init "$@"
+fi
+
+echo "[*] $ROOTFS_DEV mounted successfully. Checking for root filesystem..."
+if [ -x /mnt/sbin/init ]; then
+    echo "[*] Valid root filesystem found. Switching root to $ROOTFS_DEV"
+    mount --move /sys  /mnt/sys
+    mount --move /proc /mnt/proc
+    mount --move /dev  /mnt/dev
+    exec switch_root -c /dev/console /mnt /sbin/init "$@"
+else
+    echo "[!] No valid root filesystem found on $ROOTFS_DEV. Using initramfs."
+    umount /mnt
+    exec /sbin/init "$@"
+fi
