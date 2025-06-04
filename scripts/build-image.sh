@@ -37,7 +37,7 @@ function do_buildroot
 
 function do_linux
 {
-    ASSERT git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git -b linux-6.1.y --depth=1
+    ASSERT git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git -b linux-6.12.y --depth=1
     cp -f configs/linux.config linux/.config
     export PATH="$PWD/buildroot/output/host/bin:$PATH"
     export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
