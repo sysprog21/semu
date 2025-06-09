@@ -100,7 +100,7 @@ ifeq ($(call has, VIRTIOSND), 1)
 portaudio/Makefile:
 	git submodule update --init portaudio
 $(PORTAUDIOLIB): portaudio/Makefile
-	cd $(dir $<) && ./configure
+	cd $(dir $<) && ./configure --without-sndio
 	$(MAKE) -C $(dir $<)
 main.o: $(PORTAUDIOLIB)
 
