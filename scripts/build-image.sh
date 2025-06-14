@@ -53,6 +53,10 @@ function do_buildroot
     ASSERT make $PARALLEL
     popd
 
+    if [[ $BUILD_EXTRA_PACKAGES -eq 1 ]]; then
+        do_extra_packages
+    fi
+
     if [[ $EXTERNAL_ROOT -eq 1 ]]; then
         echo "Copying rootfs.cpio to rootfs_full.cpio (external root mode)"
         cp -f buildroot/output/images/rootfs.cpio ./rootfs_full.cpio
@@ -77,21 +81,24 @@ function do_linux
     export PATH="$PWD/buildroot/output/host/bin:$PATH"
     export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
     export ARCH=riscv
+    export INSTALL_MOD_PATH="out"
     pushd linux
     ASSERT make olddefconfig
     ASSERT make $PARALLEL
+    ASSERT make modules_install
     cp -f arch/riscv/boot/Image ../Image
     popd
 }
 
 function show_help {
     cat << EOF
-Usage: $0 [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+Usage: $0 [--buildroot] [--linux] [--extra-packages] [--all] [--external-root] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --extra-packages    Build extra packages along with Buildroot
   --linux             Build Linux kernel
-  --all               Build both Buildroot and Linux
+  --all               Build both Buildroot, Linux kernel
   --external-root     Use external rootfs instead of initramfs
   --clean-build       Remove entire buildroot/ and/or linux/ directories before build
   --help              Show this message
@@ -101,6 +108,7 @@ EOF
 
 BUILD_BUILDROOT=0
 BUILD_LINUX=0
+BUILD_EXTRA_PACKAGES=0
 EXTERNAL_ROOT=0
 CLEAN_BUILD=0
 
@@ -108,6 +116,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --buildroot)
             BUILD_BUILDROOT=1
+            ;;
+        --extra-packages)
+            BUILD_EXTRA_PACKAGES=1
             ;;
         --linux)
             BUILD_LINUX=1
@@ -133,8 +144,82 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+function do_libepoxy
+{
+    ASSERT git clone https://github.com/anholt/libepoxy.git
+    pushd libepoxy
+    cp ../configs/riscv-cross-file .
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=../../../libepoxy_out meson install -C build/riscv
+    DESTDIR=../../../buildroot/output/host/riscv32-buildroot-linux-gnu/sysroot meson install -C build/riscv
+    popd
+}
+
+function do_virglrenderer
+{
+    ASSERT git clone https://gitlab.freedesktop.org/virgl/virglrenderer.git
+    pushd virglrenderer
+    cp ../configs/riscv-cross-file .
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=../../../virglrenderer_out meson install -C build/riscv
+    popd
+}
+
+function do_directfb
+{
+    export PATH=$PATH:$PWD/buildroot/output/host/bin
+    export BUILDROOT_OUT=$PWD/buildroot/output/
+    mkdir -p directfb
+
+    # Build DirectFB2
+    ASSERT git clone https://github.com/directfb2/DirectFB2.git
+    pushd DirectFB2
+    cp ../configs/riscv-cross-file .
+    ASSERT meson -Ddrmkms=true --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=$BUILDROOT_OUT/host/riscv32-buildroot-linux-gnu/sysroot meson install -C build/riscv
+    DESTDIR=../../../directfb meson install -C build/riscv
+    popd
+
+    # Build DirectFB2 examples
+    ASSERT git clone https://github.com/directfb2/DirectFB-examples.git
+    pushd DirectFB-examples/
+    cp ../configs/riscv-cross-file .
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    DESTDIR=../../../directfb meson install -C build/riscv
+    popd
+}
+
+function do_extra_packages
+{
+    export PATH="$PWD/buildroot/output/host/bin:$PATH"
+    export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
+
+    rm -rf extra_packages
+    mkdir -p extra_packages
+    mkdir -p extra_packages/root
+
+    do_libepoxy && OK
+    do_virglrenderer && OK
+    do_directfb && OK
+
+    cp -r libepoxy_out/* extra_packages
+    cp -r virglrenderer_out/* extra_packages
+    cp -r directfb/* extra_packages
+
+    cp target/run.sh extra_packages/root/
+}
+
 if [[ $BUILD_BUILDROOT -eq 0 && $BUILD_LINUX -eq 0 ]]; then
     echo "Error: No build target specified. Use --buildroot, --linux, or --all."
+    show_help
+fi
+
+if [[ $BUILD_EXTRA_PACKAGES -eq 1 && $BUILD_BUILDROOT -eq 0 ]]; then
+    echo "Error: --extra-packages requires --buildroot to be specified."
     show_help
 fi
 
