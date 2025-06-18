@@ -16,6 +16,13 @@ OPTS :=
 
 LDFLAGS :=
 
+# virtio-pci
+ENABLE_VIRTIOPCI ?= 1
+$(call set-feature, VIRTIOPCI)
+ifeq ($(call has, VIRTIOPCI), 1)
+    OBJS_EXTRA += virtio-pci.o
+endif
+
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
 $(call set-feature, VIRTIOBLK)

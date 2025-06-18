@@ -125,7 +125,15 @@ static void mem_load(hart_t *hart,
         return;
     }
 
-    if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */
+    /* TODO */
+    if (addr >= 0x100000 && addr <= 0x200000) {
+        printf("!!!!!!!!!!!!!!!!!\n\n\n\n\n");
+    }
+
+    if ((addr >> 28) == 0x2) { /* MMIO at 0x2_______ */
+        virtio_pci_read(hart, &data->vsnd, addr, width, value);
+        return;
+    } else if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */
         /* 256 regions of 1MiB */
         switch ((addr >> 20) & MASK(8)) {
         case 0x0:
@@ -192,7 +200,15 @@ static void mem_store(hart_t *hart,
         return;
     }
 
-    if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */
+    /* TODO */
+    if (addr >= 0x100000 && addr <= 0x200000) {
+        printf("!!!!!!!!!!!!!!!!!\n\n\n\n\n");
+    }
+
+    if ((addr >> 28) == 0x2) { /* MMIO at 0x2_______ */
+        virtio_pci_write(hart, &data->vsnd, addr, width, value);
+        return;
+    } else if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */
         /* 256 regions of 1MiB */
         switch ((addr >> 20) & MASK(8)) {
         case 0x0:
@@ -668,6 +684,9 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     /* Set up peripherals */
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
     capture_keyboard_input(); /* set up uart */
+#if SEMU_HAS(VIRTIOPCI)
+    virtio_pci_init(&(emu->vpci));
+#endif
 #if SEMU_HAS(VIRTIONET)
     if (!virtio_net_init(&(emu->vnet), netdev))
         fprintf(stderr, "No virtio-net functioned\n");
