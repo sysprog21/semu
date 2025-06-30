@@ -34,17 +34,17 @@ endef
 
 # Check ALSA installation
 define check-alsa
-$(shell $(call create-alsa-prog) | $(CC) -x c -lasound -o /dev/null > /dev/null 2> /dev/null - 
-	&& echo $$?)
+$(shell $(call create-alsa-prog) | $(CC) -x c - -lasound -o /dev/null > /dev/null 2> /dev/null 
+	&& echo 0 || echo 1)
 endef
 
 # Check PulseAudio installation
 define check-pa
-$(shell $(call create-pa-prog) | $(CC) -x c -lpulse -o /dev/null - && echo 0 || echo 1)
+$(shell $(call create-pa-prog) | $(CC) -x c - -lpulse -o /dev/null && echo 0 || echo 1)
 endef
 
 # Check CoreAudio installation
 define check-coreaudio
-$(shell $(call create-ca-prog) | $(CC) -x c -framework AudioToolbox -o /dev/null > /dev/null 2> /dev/null - 
-	&& echo $$?)
+$(shell $(call create-ca-prog) | $(CC) -x c - -framework AudioToolbox -o /dev/null > /dev/null 2> /dev/null 
+	&& echo 0 || echo 1)
 endef

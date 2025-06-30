@@ -62,13 +62,13 @@ endif
 
 ifeq ($(UNAME_S),Linux)
     # Check ALSA installation
-    ifeq (0, $(call check-alsa))
+    ifeq (1, $(call check-alsa))
         $(warning No libasound installed. Check libasound in advance.)
         ENABLE_VIRTIOSND := 0
     endif
 endif
 ifeq ($(UNAME_S),Darwin)
-    ifeq (0, $(call check-coreaudio))
+    ifeq (1, $(call check-coreaudio))
         $(warning No CoreAudio installed Check AudioToolbox in advance.)
         ENABLE_VIRTIOSND := 0
     endif
