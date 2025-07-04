@@ -17,5 +17,10 @@
 #define SEMU_FEATURE_VIRTIOSND 1
 #endif
 
+/* virtio-fs */
+#ifndef SEMU_FEATURE_VIRTIOFS
+#define SEMU_FEATURE_VIRTIOFS 1
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x
