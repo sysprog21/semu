@@ -77,21 +77,29 @@ $(call set-feature, VIRTIOSND)
 ifeq ($(call has, VIRTIOSND), 1)
     OBJS_EXTRA += virtio-snd.o
 
-    PORTAUDIOLIB := portaudio/lib/.libs/libportaudio.a
-    LDFLAGS += $(PORTAUDIOLIB)
+    PA_LIB := portaudio/lib/.libs/libportaudio.a
+    PA_CFLAGS := -Iportaudio/include
+    PA_CONFIG_PARAMS :=
+    LDFLAGS += $(PA_LIB)
+    CFLAGS += $(PA_CFLAGS)
 
     ifeq ($(UNAME_S),Linux)
         LDFLAGS += -lasound -lrt
+        PA_CONFIG_PARAMS += --with-alsa
         # Check PulseAudio installation
         ifeq (0, $(call check-pa))
             LDFLAGS += -lpulse
+            PA_CONFIG_PARAMS += --with-pulseaudio
+        endif
+        ifeq (0, $(call check-jack2))
+            LDFLAGS += -ljack
+            PA_CONFIG_PARAMS += --with-jack
         endif
     endif
     ifeq ($(UNAME_S),Darwin)
         LDFLAGS += -framework CoreServices -framework CoreFoundation -framework AudioUnit -framework AudioToolbox -framework CoreAudio
     endif
 
-    CFLAGS += -Iportaudio/include
     # PortAudio requires libm, yet we set -lm in the end of LDFLAGS
     # so that the other libraries will be benefited for no need to set
     # -lm separately.
@@ -99,11 +107,20 @@ ifeq ($(call has, VIRTIOSND), 1)
 
 portaudio/Makefile:
 	git submodule update --init portaudio
-$(PORTAUDIOLIB): portaudio/Makefile
-	cd $(dir $<) && LDFLAGS="" ./configure --without-sndio
+$(PA_LIB): portaudio/Makefile
+	cd $(dir $<) && git clean -fdx && git reset --hard HEAD
+	cd $(dir $<) && ./configure \
+        --enable-static \
+        --disable-shared \
+        --without-samples \
+        --without-tests \
+        --without-oss \
+        --without-sndio \
+        --disable-dependency-tracking \
+        $(PA_CONFIG_PARAMS)
 	$(MAKE) -C $(dir $<)
-main.o: $(PORTAUDIOLIB)
-
+main.o: $(PA_LIB)
+virtio-snd.o: $(PA_LIB)
 # suppress warning when compiling PortAudio
 virtio-snd.o: CFLAGS += -Wno-unused-parameter
 endif
