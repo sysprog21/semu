@@ -8,8 +8,9 @@ jobs:
     strategy:
       matrix:
         dependency:
-          - libpulse-dev
           - none
+          - libpulse-dev
+          - libjack-jackd2-dev
     steps:
     - name: checkout code
       uses: actions/checkout@v4
@@ -19,7 +20,9 @@ jobs:
             sudo apt-get install libasound2-dev libudev-dev
     - name: install sound multiplexer ${{ matrix.dependency }}
       if: matrix.dependency != 'none'
-      run: sudo apt-get install ${{ matrix.dependency }}
+      run: |
+            sudo apt-get update
+            sudo apt-get install ${{ matrix.dependency }}
     - name: default build
       run: make
       shell: bash
