@@ -76,6 +76,27 @@ void u8250_write(hart_t *core,
 void u8250_check_ready(u8250_state_t *uart);
 void capture_keyboard_input();
 
+/* virtio-pci */
+#if SEMU_HAS(VIRTIOPCI)
+typedef struct {
+    void *priv;
+} virtio_pci_state_t;
+
+void virtio_pci_read(hart_t *vm,
+                     virtio_pci_state_t *vpci,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_pci_write(hart_t *vm,
+                      virtio_pci_state_t *vpci,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+void virtio_pci_init(virtio_pci_state_t *vpci);
+#endif /* SEMU_HAS(VIRTIOPCI) */
+
 /* virtio-net */
 
 #if SEMU_HAS(VIRTIONET)
@@ -366,6 +387,9 @@ typedef struct {
     vm_t vm;
     plic_state_t plic;
     u8250_state_t uart;
+#if SEMU_HAS(VIRTIOPCI)
+    virtio_pci_state_t vpci;
+#endif
 #if SEMU_HAS(VIRTIONET)
     virtio_net_state_t vnet;
 #endif
