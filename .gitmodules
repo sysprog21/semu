@@ -1,12 +1,12 @@
-[submodule "mini-gdbstub"]
-    path = mini-gdbstub
-    url = https://github.com/RinHizakura/mini-gdbstub
-    shallow = true
-[submodule "minislirp"]
-	path = minislirp
+[submodule "3rdparty/mini-gdbstub"]
+	path = 3rdparty/mini-gdbstub
+	url = https://github.com/RinHizakura/mini-gdbstub
+	shallow = true
+[submodule "3rdparty/minislirp"]
+	path = 3rdparty/minislirp
 	url = https://github.com/edubart/minislirp
-    shallow = true
-[submodule "portaudio"]
-    path = portaudio
-    url = https://github.com/PortAudio/portaudio
-    shallow = true
+	shallow = true
+[submodule "3rdparty/portaudio"]
+	path = 3rdparty/portaudio
+	url = https://github.com/PortAudio/portaudio
+	shallow = true
