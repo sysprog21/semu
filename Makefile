@@ -109,7 +109,7 @@ portaudio/Makefile:
 	git submodule update --init portaudio
 $(PA_LIB): portaudio/Makefile
 	cd $(dir $<) && git clean -fdx && git reset --hard HEAD
-	cd $(dir $<) && ./configure \
+	cd $(dir $<) && LDFLAGS="" ./configure \
         --enable-static \
         --disable-shared \
         --without-samples \
