@@ -1,10 +1,6 @@
-*.o
-*.o.d
-*.sw*
-semu
+build/
 
 # Linux-specific
-*.dtb
 Image
 ext4.img
 rootfs.cpio

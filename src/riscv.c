@@ -1,6 +1,5 @@
 #include <stdio.h>
 
-#include "common.h"
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"

@@ -1,9 +1,14 @@
 include mk/common.mk
 include mk/check-libs.mk
 
+THIRDPARTY_DIR := 3rdparty
+INCLUDE_DIR := include
+BUILD_DIR := build
+SRC_DIR := src
+
 CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
-CFLAGS += -include common.h
+CFLAGS += -I$(INCLUDE_DIR) -I$(THIRDPARTY_DIR) -include $(INCLUDE_DIR)/common.h
 
 # clock frequency
 CLOCK_FREQ ?= 65000000
@@ -11,10 +16,14 @@ DT_CFLAGS := -D CLOCK_FREQ=$(CLOCK_FREQ)
 CFLAGS += $(DT_CFLAGS)
 
 OBJS_EXTRA :=
+LIBS_EXTRA :=
+
 # command line option
 OPTS :=
 
 LDFLAGS :=
+
+SHELL_HACK := $(shell mkdir -p $(BUILD_DIR))
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -24,7 +33,7 @@ MKFS_EXT4 ?= mkfs.ext4
 ifeq ($(call has, VIRTIOBLK), 1)
     OBJS_EXTRA += virtio-blk.o
     DISKIMG_FILE := ext4.img
-    OPTS += -d $(DISKIMG_FILE)
+    OPTS += -d $(BUILD_DIR)/$(DISKIMG_FILE)
     MKFS_EXT4 := $(shell which $(MKFS_EXT4))
     ifndef MKFS_EXT4
 	MKFS_EXT4 := $(shell which $$(brew --prefix e2fsprogs)/sbin/mkfs.ext4)
@@ -77,8 +86,9 @@ $(call set-feature, VIRTIOSND)
 ifeq ($(call has, VIRTIOSND), 1)
     OBJS_EXTRA += virtio-snd.o
 
-    PA_LIB := portaudio/lib/.libs/libportaudio.a
-    PA_CFLAGS := -Iportaudio/include
+    PORTAUDIO_DIR := $(THIRDPARTY_DIR)/portaudio
+    PA_LIB := $(PORTAUDIO_DIR)/lib/.libs/libportaudio.a
+    PA_CFLAGS := -I$(PORTAUDIO_DIR)/include
     PA_CONFIG_PARAMS :=
     LDFLAGS += $(PA_LIB)
     CFLAGS += $(PA_CFLAGS)
@@ -105,9 +115,10 @@ ifeq ($(call has, VIRTIOSND), 1)
     # -lm separately.
     LDFLAGS += -lpthread
 
-portaudio/Makefile:
-	git submodule update --init portaudio
-$(PA_LIB): portaudio/Makefile
+$(PORTAUDIO_DIR)/Makefile:
+	git submodule update --init $(PORTAUDIO_DIR)
+
+$(PA_LIB): $(PORTAUDIO_DIR)/Makefile
 	cd $(dir $<) && git clean -fdx && git reset --hard HEAD
 	cd $(dir $<) && ./configure \
         --enable-static \
@@ -119,10 +130,10 @@ $(PA_LIB): portaudio/Makefile
         --disable-dependency-tracking \
         $(PA_CONFIG_PARAMS)
 	$(MAKE) -C $(dir $<)
-main.o: $(PA_LIB)
-virtio-snd.o: $(PA_LIB)
+$(BUILD_DIR)/main.o: $(PA_LIB)
+$(BUILD_DIR)/virtio-snd.o: $(PA_LIB)
 # suppress warning when compiling PortAudio
-virtio-snd.o: CFLAGS += -Wno-unused-parameter
+$(BUILD_DIR)/virtio-snd.o: CFLAGS += -Wno-unused-parameter
 endif
 
 # Set libm as the last dependency so that no need to set -lm seperately.
@@ -132,8 +143,9 @@ LDFLAGS += -lm
 # after git submodule.
 .DEFAULT_GOAL := all
 
-BIN = semu
-all: $(BIN) minimal.dtb
+BIN = $(BUILD_DIR)/semu
+
+all: $(BIN) $(BUILD_DIR)/minimal.dtb
 
 OBJS := \
 	riscv.o \
@@ -145,34 +157,36 @@ OBJS := \
 	aclint.o \
 	$(OBJS_EXTRA)
 
-deps := $(OBJS:%.o=.%.o.d)
+objs := $(foreach obj,$(OBJS),$(BUILD_DIR)/$(obj))
+deps := $(patsubst %.o,$(BUILD_DIR)/%.o.d,$(OBJS))
 
-GDBSTUB_LIB := mini-gdbstub/build/libgdbstub.a
-LDFLAGS += $(GDBSTUB_LIB)
-mini-gdbstub/Makefile:
+MINI_GDBSTUB_DIR := $(THIRDPARTY_DIR)/mini-gdbstub
+MINI_GDBSTUB_LIB := $(MINI_GDBSTUB_DIR)/build/libgdbstub.a
+LDFLAGS += $(MINI_GDBSTUB_LIB)
+$(THIRDPARTY_DIR)/mini-gdbstub/Makefile:
 	git submodule update --init $(dir $@)
-$(GDBSTUB_LIB): mini-gdbstub/Makefile
+$(MINI_GDBSTUB_LIB): $(MINI_GDBSTUB_DIR)/Makefile
 	$(MAKE) -C $(dir $<)
-$(OBJS): $(GDBSTUB_LIB)
+LIBS_EXTRA += $(MINI_GDBSTUB_LIB)
 
 ifeq ($(call has, VIRTIONET), 1)
-MINISLIRP_DIR := minislirp
-MINISLIRP_LIB := minislirp/src/libslirp.a
+MINISLIRP_DIR := $(THIRDPARTY_DIR)/minislirp
+MINISLIRP_LIB := $(MINISLIRP_DIR)/src/libslirp.a
 LDFLAGS += $(MINISLIRP_LIB)
 $(MINISLIRP_DIR)/src/Makefile:
 	git submodule update --init $(MINISLIRP_DIR)
 $(MINISLIRP_LIB): $(MINISLIRP_DIR)/src/Makefile
 	$(MAKE) -C $(dir $<)
-$(OBJS): $(MINISLIRP_LIB)
+LIBS_EXTRA += $(MINISLIRP_LIB)
 endif
 
-$(BIN): $(OBJS)
+$(BIN): $(objs)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
-%.o: %.c
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(LIBS_EXTRA)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF .$@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 
 DTC ?= dtc
 
@@ -196,40 +210,42 @@ S := $E $E
 CFLAGS += -D SEMU_BOOT_TARGET_TIME=10
 
 SMP ?= 1
-.PHONY: riscv-harts.dtsi
-riscv-harts.dtsi:
+.PHONY: $(INCLUDE_DIR)/riscv-harts.dtsi
+$(INCLUDE_DIR)/riscv-harts.dtsi:
 	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP) $(CLOCK_FREQ)
 
-minimal.dtb: minimal.dts riscv-harts.dtsi
+$(BUILD_DIR)/minimal.dtb: $(SRC_DIR)/minimal.dts $(INCLUDE_DIR)/riscv-harts.dtsi
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
+	    -I$(INCLUDE_DIR) \
 	    $(DT_CFLAGS) \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
 	    | $(DTC) - > $@
 
-# Rules for downloading prebuilt Linux kernel image
-include mk/external.mk
-
-ext4.img:
+$(BUILD_DIR)/$(DISKIMG_FILE):
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
 	$(Q)$(MKFS_EXT4) -F $@
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
+.PHONY: download-artifacts
+download-artifacts:
+	$(Q)scripts/download-artifacts.sh Image $(BUILD_DIR)
+	$(Q)scripts/download-artifacts.sh rootfs $(BUILD_DIR)
+
+check: $(BIN) $(BUILD_DIR)/minimal.dtb $(BUILD_DIR)/$(DISKIMG_FILE) download-artifacts
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) -n $(NETDEV) $(OPTS)
+	$(Q)$(BIN) -k $(BUILD_DIR)/Image -c $(SMP) -b $(BUILD_DIR)/minimal.dtb -i $(BUILD_DIR)/rootfs.cpio -n $(NETDEV) $(OPTS)
 
 build-image:
 	scripts/build-image.sh
 
 clean:
-	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
-	$(Q)$(MAKE) -C mini-gdbstub clean
-	$(Q)$(MAKE) -C minislirp/src clean
+	$(Q)$(RM) $(BIN) $(objs) $(deps)
+	$(Q)$(MAKE) -C $(THIRDPARTY_DIR)/mini-gdbstub clean
+	$(Q)$(MAKE) -C $(THIRDPARTY_DIR)/minislirp/src clean
+	$(Q)$(MAKE) -C $(THIRDPARTY_DIR)/portaudio clean
 
 distclean: clean
-	$(Q)$(RM) riscv-harts.dtsi
-	$(Q)$(RM) minimal.dtb
-	$(Q)$(RM) Image rootfs.cpio
-	$(Q)$(RM) ext4.img
+	$(Q)$(RM) $(INCLUDE_DIR)/riscv-harts.dtsi
+	$(Q)$(RM) $(BUILD_DIR)/*
 
 -include $(deps)
