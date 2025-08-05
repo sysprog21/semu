@@ -41,6 +41,15 @@ ifeq ($(call has, VIRTIORNG), 1)
     OBJS_EXTRA += virtio-rng.o
 endif
 
+# virtio-fs
+ENABLE_VIRTIOFS ?= 1
+$(call set-feature, VIRTIOFS)
+SHARED_DIRECTORY ?= ./shared
+ifeq ($(call has, VIRTIOFS), 1)
+    OBJS_EXTRA += virtio-fs.o
+    OPTS += -s $(SHARED_DIRECTORY)
+endif
+
 NETDEV ?= tap
 # virtio-net
 ENABLE_VIRTIONET ?= 1
@@ -214,7 +223,14 @@ ext4.img:
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
 	$(Q)$(MKFS_EXT4) -F $@
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE)
+.PHONY: $(DIRECTORY)
+$(SHARED_DIRECTORY):
+	@if [ ! -d $@ ]; then \
+		echo "Creating mount directory: $@"; \
+		mkdir -p $@; \
+	fi
+
+check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE) $(SHARED_DIRECTORY)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
 	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) -n $(NETDEV) $(OPTS)
 
