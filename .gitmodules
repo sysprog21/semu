@@ -3,8 +3,8 @@
     url = https://github.com/RinHizakura/mini-gdbstub
     shallow = true
 [submodule "minislirp"]
-	path = minislirp
-	url = https://github.com/edubart/minislirp
+    path = minislirp
+    url = https://github.com/edubart/minislirp
     shallow = true
 [submodule "portaudio"]
     path = portaudio
