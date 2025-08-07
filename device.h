@@ -357,6 +357,70 @@ void virtio_snd_write(hart_t *core,
 bool virtio_snd_init(virtio_snd_state_t *vsnd);
 #endif /* SEMU_HAS(VIRTIOSND) */
 
+/* VirtIO-File-System */
+
+#if SEMU_HAS(VIRTIOFS)
+#define IRQ_VFS 6
+#define IRQ_VFS_BIT (1 << IRQ_VFS)
+
+typedef struct inode_map_entry {
+    uint64_t ino;
+    char *path;
+    struct inode_map_entry *next;
+} inode_map_entry;
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_fs_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_fs_queue_t queues[3];
+
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+
+    /* guest memory base */
+    uint32_t *ram;
+
+    char *mount_tag; /* guest sees this tag */
+    char *shared_dir;
+
+    inode_map_entry *inode_map;
+
+    /* optional implementation-specific */
+    void *priv;
+} virtio_fs_state_t;
+
+/* MMIO read/write */
+void virtio_fs_read(hart_t *core,
+                    virtio_fs_state_t *vfs,
+                    uint32_t addr,
+                    uint8_t width,
+                    uint32_t *value);
+
+void virtio_fs_write(hart_t *core,
+                     virtio_fs_state_t *vfs,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t value);
+
+bool virtio_fs_init(virtio_fs_state_t *vfs, char *mtag, char *dir);
+
+#endif /* SEMU_HAS(VIRTIOFS) */
+
 /* memory mapping */
 typedef struct {
     bool debug;
@@ -381,6 +445,9 @@ typedef struct {
     sswi_state_t sswi;
 #if SEMU_HAS(VIRTIOSND)
     virtio_snd_state_t vsnd;
+#endif
+#if SEMU_HAS(VIRTIOFS)
+    virtio_fs_state_t vfs;
 #endif
 
     uint32_t peripheral_update_ctr;
