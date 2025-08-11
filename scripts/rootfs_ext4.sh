@@ -11,6 +11,8 @@ echo "[*] Remove old rootfs directory..."
 rm -rf $DIR
 mkdir -p $DIR
 
+cp -r extra_packages/* $DIR 
+
 echo "[*] Extract CPIO"
 pushd $DIR
 cpio -idmv < ../$ROOTFS_CPIO 
