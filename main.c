@@ -113,6 +113,18 @@ static void emu_update_vsnd_interrupts(vm_t *vm)
 }
 #endif
 
+#if SEMU_HAS(VIRTIOFS)
+static void emu_update_vfs_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vfs.InterruptStatus)
+        data->plic.active |= IRQ_VFS_BIT;
+    else
+        data->plic.active &= ~IRQ_VFS_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void mem_load(hart_t *hart,
                      uint32_t addr,
                      uint8_t width,
@@ -173,6 +185,13 @@ static void mem_load(hart_t *hart,
         case 0x47: /* virtio-snd */
             virtio_snd_read(hart, &data->vsnd, addr & 0xFFFFF, width, value);
             emu_update_vsnd_interrupts(hart->vm);
+            return;
+#endif
+
+#if SEMU_HAS(VIRTIOFS)
+        case 0x48: /* virtio-fs */
+            virtio_fs_read(hart, &data->vfs, addr & 0xFFFFF, width, value);
+            emu_update_vfs_interrupts(hart->vm);
             return;
 #endif
         }
@@ -241,6 +260,13 @@ static void mem_store(hart_t *hart,
         case 0x47: /* virtio-snd */
             virtio_snd_write(hart, &data->vsnd, addr & 0xFFFFF, width, value);
             emu_update_vsnd_interrupts(hart->vm);
+            return;
+#endif
+
+#if SEMU_HAS(VIRTIOFS)
+        case 0x48: /* virtio-fs */
+            virtio_fs_write(hart, &data->vfs, addr & 0xFFFFF, width, value);
+            emu_update_vfs_interrupts(hart->vm);
             return;
 #endif
         }
@@ -508,10 +534,10 @@ static void map_file(char **ram_loc, const char *name)
 
 static void usage(const char *execpath)
 {
-    fprintf(
-        stderr,
-        "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d disk-image]\n",
-        execpath);
+    fprintf(stderr,
+            "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d "
+            "disk-image] [-s shared-directory]\n",
+            execpath);
 }
 
 static void handle_options(int argc,
@@ -522,20 +548,21 @@ static void handle_options(int argc,
                            char **disk_file,
                            char **net_dev,
                            int *hart_count,
-                           bool *debug)
+                           bool *debug,
+                           char **shared_dir)
 {
-    *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev = NULL;
+    *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev =
+        *shared_dir = NULL;
 
     int optidx = 0;
-    struct option opts[] = {
-        {"kernel", 1, NULL, 'k'},  {"dtb", 1, NULL, 'b'},
-        {"initrd", 1, NULL, 'i'},  {"disk", 1, NULL, 'd'},
-        {"netdev", 1, NULL, 'n'},  {"smp", 1, NULL, 'c'},
-        {"gdbstub", 0, NULL, 'g'}, {"help", 0, NULL, 'h'},
-    };
+    struct option opts[] = {{"kernel", 1, NULL, 'k'},    {"dtb", 1, NULL, 'b'},
+                            {"initrd", 1, NULL, 'i'},    {"disk", 1, NULL, 'd'},
+                            {"netdev", 1, NULL, 'n'},    {"smp", 1, NULL, 'c'},
+                            {"gdbstub", 0, NULL, 'g'},   {"help", 0, NULL, 'h'},
+                            {"shared_dir", 1, NULL, 's'}};
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:gh", opts, &optidx)) !=
+    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:s:gh", opts, &optidx)) !=
            -1) {
         switch (c) {
         case 'k':
@@ -555,6 +582,9 @@ static void handle_options(int argc,
             break;
         case 'c':
             *hart_count = atoi(optarg);
+            break;
+        case 's':
+            *shared_dir = optarg;
             break;
         case 'g':
             *debug = true;
@@ -603,11 +633,12 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     char *initrd_file;
     char *disk_file;
     char *netdev;
+    char *shared_dir;
     int hart_count = 1;
     bool debug = false;
     vm_t *vm = &emu->vm;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file, &netdev, &hart_count, &debug);
+                   &disk_file, &netdev, &hart_count, &debug, &shared_dir);
 
     /* Initialize the emulator */
     memset(emu, 0, sizeof(*emu));
@@ -691,6 +722,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
         fprintf(stderr, "No virtio-snd functioned\n");
     emu->vsnd.ram = emu->ram;
 #endif
+#if SEMU_HAS(VIRTIOFS)
+    emu->vfs.ram = emu->ram;
+    if (!virtio_fs_init(&(emu->vfs), "myfs", shared_dir))
+        fprintf(stderr, "No virtio-fs functioned\n");
+#endif
 
     emu->peripheral_update_ctr = 0;
     emu->debug = debug;
@@ -727,6 +763,11 @@ static int semu_step(emu_state_t *emu)
 #if SEMU_HAS(VIRTIOSND)
             if (emu->vsnd.InterruptStatus)
                 emu_update_vsnd_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOFS)
+            if (emu->vfs.InterruptStatus)
+                emu_update_vfs_interrupts(vm);
 #endif
         }
 
