@@ -46,7 +46,7 @@ def mtimer_irq_format(nums):
         s += f"<&cpu{i}_intc 7>, "    # 7 is the MTIMER interrupt number (Machine Timer Interrupt)
     return s[:-2]
 
-def dtsi_template (cpu_list: str, plic_list, sswi_list, mtimer_list, mswi_list, clock_freq):
+def dtsi_template (cpu_list: str, plic_list, sswi_list, mswi_list, mtimer_list, clock_freq):
     return f"""/{{
     cpus {{
         #address-cells = <1>;
