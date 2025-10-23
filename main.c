@@ -12,11 +12,16 @@
 #include <sys/time.h>
 #endif
 
+#include "coro.h"
 #include "device.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #include "riscv.h"
 #include "riscv_private.h"
 #define PRIV(x) ((emu_state_t *) x->priv)
+
+/* Forward declarations for coroutine support */
+static void wfi_handler(hart_t *hart);
+static void hart_exec_loop(void *arg);
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -688,10 +693,15 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
         INIT_HART(newhart, emu, i);
         newhart->x_regs[RV_R_A0] = i;
         newhart->x_regs[RV_R_A1] = dtb_addr;
-        if (i == 0)
+        if (i == 0) {
             newhart->hsm_status = SBI_HSM_STATE_STARTED;
+            /* Set initial PC for hart 0 to kernel entry point (semu RAM base at
+             * 0x0) */
+            newhart->pc = 0x00000000;
+        }
 
         newhart->vm = vm;
+        newhart->wfi = wfi_handler; /* Set WFI callback for coroutine support */
         vm->hart[i] = newhart;
     }
 
@@ -730,7 +740,95 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->peripheral_update_ctr = 0;
     emu->debug = debug;
 
+    /* Initialize coroutine system for SMP mode (n_hart > 1) */
+    if (vm->n_hart > 1) {
+        printf("DEBUG: Starting coroutine initialization for %u harts\n",
+               vm->n_hart);
+        fflush(stdout);
+        if (!coro_init(vm->n_hart)) {
+            fprintf(stderr, "Failed to initialize coroutine subsystem\n");
+            fflush(stderr);
+            return 1;
+        }
+        printf("Initialized %u hart coroutines\n", vm->n_hart);
+        fflush(stdout);
+
+        /* Create coroutine for each hart */
+        for (uint32_t i = 0; i < vm->n_hart; i++) {
+            if (!coro_create_hart(i, hart_exec_loop, vm->hart[i])) {
+                fprintf(stderr, "Failed to create coroutine for hart %u\n", i);
+                coro_cleanup();
+                return 1;
+            }
+        }
+    }
+
     return 0;
+}
+
+/* WFI callback for coroutine-based scheduling in SMP mode */
+static void wfi_handler(hart_t *hart)
+{
+    vm_t *vm = hart->vm;
+    /* Only yield in SMP mode (n_hart > 1) */
+    if (vm->n_hart > 1) {
+        /* Per RISC-V spec: WFI should return immediately if interrupt is
+         * pending. Only yield if no interrupt is currently pending.
+         */
+        if (!(hart->sip & hart->sie)) {
+            hart->in_wfi = true; /* Mark as waiting */
+            coro_yield();
+            hart->in_wfi = false; /* Resume execution */
+        }
+    }
+}
+
+/* Hart execution loop - each hart runs in its own coroutine */
+static void hart_exec_loop(void *arg)
+{
+    hart_t *hart = (hart_t *) arg;
+    emu_state_t *emu = PRIV(hart);
+
+    /* Run hart until stopped */
+    while (!emu->stopped) {
+        /* Check if hart is ready to execute (HSM state) */
+        if (hart->hsm_status != SBI_HSM_STATE_STARTED) {
+            /* Hart not started yet, yield and wait */
+            coro_yield();
+            continue;
+        }
+
+        /* Execute a batch of instructions before yielding */
+        for (int i = 0; i < 64; i++) {
+            /* Execute one instruction */
+            vm_step(hart);
+
+            /* Check for errors */
+            if (unlikely(hart->error)) {
+                if (hart->error == ERR_EXCEPTION &&
+                    hart->exc_cause == RV_EXC_ECALL_S) {
+                    handle_sbi_ecall(hart);
+                    continue;
+                }
+
+                /* CRITICAL FIX: Handle general exceptions via trap (same as
+                 * single-core) */
+                if (hart->error == ERR_EXCEPTION) {
+                    hart_trap(hart);
+                    continue;
+                }
+
+                vm_error_report(hart);
+                emu->stopped = true;
+                goto cleanup;
+            }
+        }
+
+        /* Yield after batch to allow scheduling */
+        coro_yield();
+    }
+cleanup:
+    return;
 }
 
 static int semu_step(emu_state_t *emu)
@@ -842,12 +940,83 @@ static void print_mmu_cache_stats(vm_t *vm)
 static int semu_run(emu_state_t *emu)
 {
     int ret;
+
+    vm_t *vm = &emu->vm;
+
 #ifdef MMU_CACHE_STATS
     struct timeval start_time, current_time;
     gettimeofday(&start_time, NULL);
 #endif
 
-    /* Emulate */
+    /* SMP mode: use coroutine-based scheduling */
+    if (vm->n_hart > 1) {
+        /* Update peripherals periodically */
+        while (!emu->stopped) {
+            /* Update peripherals every 64 instructions */
+            if (emu->peripheral_update_ctr-- == 0) {
+                emu->peripheral_update_ctr = 64;
+
+                u8250_check_ready(&emu->uart);
+                if (emu->uart.in_ready)
+                    emu_update_uart_interrupts(vm);
+
+#if SEMU_HAS(VIRTIONET)
+                virtio_net_refresh_queue(&emu->vnet);
+                if (emu->vnet.InterruptStatus)
+                    emu_update_vnet_interrupts(vm);
+#endif
+#if SEMU_HAS(VIRTIOBLK)
+                if (emu->vblk.InterruptStatus)
+                    emu_update_vblk_interrupts(vm);
+#endif
+#if SEMU_HAS(VIRTIOSND)
+                if (emu->vsnd.InterruptStatus)
+                    emu_update_vsnd_interrupts(vm);
+#endif
+#if SEMU_HAS(VIRTIOFS)
+                if (emu->vfs.InterruptStatus)
+                    emu_update_vfs_interrupts(vm);
+#endif
+            }
+
+            /* Update timer and software interrupts for all harts */
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                emu_update_timer_interrupt(vm->hart[i]);
+                emu_update_swi_interrupt(vm->hart[i]);
+            }
+
+            /* Resume each hart's coroutine in round-robin fashion */
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                coro_resume_hart(i);
+            }
+
+            /* CPU usage optimization: if all started harts are in WFI,
+             * sleep briefly to reduce busy-waiting
+             */
+            bool all_waiting = true;
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED &&
+                    !vm->hart[i]->in_wfi) {
+                    all_waiting = false;
+                    break;
+                }
+            }
+            if (all_waiting) {
+                /* All harts waiting for interrupt - sleep for 1ms
+                 * to reduce CPU usage while maintaining responsiveness
+                 */
+                usleep(1000);
+            }
+        }
+
+        /* Check if execution stopped due to error */
+        if (emu->stopped)
+            return 1;
+
+        return 0;
+    }
+
+    /* Single-hart mode: use original scheduling */
     while (!emu->stopped) {
 #if SEMU_HAS(VIRTIONET)
         int i = 0;

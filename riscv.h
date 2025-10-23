@@ -110,6 +110,9 @@ struct __hart_internal {
     bool sstatus_spp; /**< state saved at trap */
     bool sstatus_spie;
     uint32_t sepc;
+
+    /* WFI state tracking for CPU usage optimization */
+    bool in_wfi;
     uint32_t scause;
     uint32_t stval;
     bool sstatus_mxr; /**< alter MMU access rules */
@@ -128,6 +131,12 @@ struct __hart_internal {
     uint32_t mhartid;
 
     void *priv; /**< environment supplied */
+
+    /* WFI (Wait-For-Interrupt) callback for power management.
+     * If NULL, WFI becomes a no-op. If set, called when WFI instruction
+     * is executed. Used for coroutine-based scheduling in SMP mode.
+     */
+    void (*wfi)(hart_t *vm);
 
     /* Memory access sets the vm->error to indicate failure. On successful
      * access, it reads or writes the specified "value".

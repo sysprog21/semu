@@ -169,6 +169,7 @@ OBJS := \
 	uart.o \
 	main.o \
 	aclint.o \
+	coro.o \
 	$(OBJS_EXTRA)
 
 deps := $(OBJS:%.o=.%.o.d)
