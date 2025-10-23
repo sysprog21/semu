@@ -16,13 +16,12 @@ jobs:
       uses: actions/checkout@v4
     - name: install-dependencies
       run: |
-            sudo apt-get install build-essential device-tree-compiler expect
-            sudo apt-get install libasound2-dev libudev-dev
+            sudo apt-get update
+            sudo apt-get install -y build-essential device-tree-compiler expect libasound2-dev libudev-dev
     - name: install sound multiplexer ${{ matrix.dependency }}
       if: matrix.dependency != 'none'
       run: |
-            sudo apt-get update
-            sudo apt-get install ${{ matrix.dependency }}
+            sudo apt-get install -y ${{ matrix.dependency }}
     - name: default build
       run: make
       shell: bash
@@ -54,6 +53,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: coding convention
       run: |
+            sudo apt-get update
             sudo apt-get install -q -y clang-format-18
             .ci/check-format.sh
       shell: bash
