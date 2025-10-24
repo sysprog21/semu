@@ -205,8 +205,16 @@ S := $E $E
 CFLAGS += -D SEMU_BOOT_TARGET_TIME=10
 
 SMP ?= 1
+
+# Track SMP value changes to force DTB regeneration
+.smp_stamp: FORCE
+	@if [ ! -f .smp_stamp ] || [ "$$(cat .smp_stamp 2>/dev/null)" != "$(SMP)" ]; then \
+	    echo "$(SMP)" > .smp_stamp; \
+	    rm -f riscv-harts.dtsi minimal.dtb; \
+	fi
+
 .PHONY: riscv-harts.dtsi
-riscv-harts.dtsi:
+riscv-harts.dtsi: .smp_stamp
 	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP) $(CLOCK_FREQ)
 
 minimal.dtb: minimal.dts riscv-harts.dtsi
@@ -215,6 +223,9 @@ minimal.dtb: minimal.dts riscv-harts.dtsi
 	    $(DT_CFLAGS) \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
 	    | $(DTC) - > $@
+
+.PHONY: FORCE
+FORCE:
 
 # Rules for downloading prebuilt Linux kernel image
 include mk/external.mk
@@ -245,6 +256,7 @@ clean:
 distclean: clean
 	$(Q)$(RM) riscv-harts.dtsi
 	$(Q)$(RM) minimal.dtb
+	$(Q)$(RM) .smp_stamp
 	$(Q)$(RM) Image rootfs.cpio
 	$(Q)$(RM) ext4.img
 
