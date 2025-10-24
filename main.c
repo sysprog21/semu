@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,13 @@
 #include <unistd.h>
 #ifdef MMU_CACHE_STATS
 #include <sys/time.h>
+#endif
+
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
+#else
+#include <sys/timerfd.h>
 #endif
 
 #include "coro.h"
@@ -742,16 +750,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
 
     /* Initialize coroutine system for SMP mode (n_hart > 1) */
     if (vm->n_hart > 1) {
-        printf("DEBUG: Starting coroutine initialization for %u harts\n",
-               vm->n_hart);
-        fflush(stdout);
         if (!coro_init(vm->n_hart)) {
             fprintf(stderr, "Failed to initialize coroutine subsystem\n");
             fflush(stderr);
             return 1;
         }
-        printf("Initialized %u hart coroutines\n", vm->n_hart);
-        fflush(stdout);
 
         /* Create coroutine for each hart */
         for (uint32_t i = 0; i < vm->n_hart; i++) {
@@ -950,6 +953,46 @@ static int semu_run(emu_state_t *emu)
 
     /* SMP mode: use coroutine-based scheduling */
     if (vm->n_hart > 1) {
+#ifdef __APPLE__
+        /* macOS: create kqueue for timer and I/O events */
+        int kq = kqueue();
+        if (kq < 0) {
+            perror("kqueue");
+            return -1;
+        }
+
+        /* Add 1ms periodic timer */
+        struct kevent kev_timer;
+        EV_SET(&kev_timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 1, NULL);
+        if (kevent(kq, &kev_timer, 1, NULL, 0, NULL) < 0) {
+            perror("kevent timer setup");
+            close(kq);
+            return -1;
+        }
+
+        /* Note: UART input is polled via u8250_check_ready(), no need to
+         * monitor with kqueue. Timer events are sufficient to wake from WFI.
+         */
+#else
+        /* Linux: create timerfd for periodic wakeup */
+        int wfi_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+        if (wfi_timer_fd < 0) {
+            perror("timerfd_create");
+            return -1;
+        }
+
+        /* Configure 1ms periodic timer */
+        struct itimerspec its = {
+            .it_interval = {.tv_sec = 0, .tv_nsec = 1000000},
+            .it_value = {.tv_sec = 0, .tv_nsec = 1000000},
+        };
+        if (timerfd_settime(wfi_timer_fd, 0, &its, NULL) < 0) {
+            perror("timerfd_settime");
+            close(wfi_timer_fd);
+            return -1;
+        }
+#endif
+
         /* Update peripherals periodically */
         while (!emu->stopped) {
             /* Update peripherals every 64 instructions */
@@ -1002,12 +1045,40 @@ static int semu_run(emu_state_t *emu)
                 }
             }
             if (all_waiting) {
-                /* All harts waiting for interrupt - sleep for 1ms
+                /* All harts waiting for interrupt - use event-driven wait
                  * to reduce CPU usage while maintaining responsiveness
                  */
-                usleep(1000);
+#ifdef __APPLE__
+                /* macOS: wait for kqueue events (timer or UART) */
+                struct kevent events[2];
+                int nevents = kevent(kq, NULL, 0, events, 2, NULL);
+                /* Events are automatically handled - timer fires every 1ms,
+                 * UART triggers on input. No need to explicitly consume. */
+                (void) nevents;
+#else
+                /* Linux: poll on timerfd and UART */
+                struct pollfd pfds[2];
+                pfds[0] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
+                pfds[1] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
+                poll(pfds, 2, -1);
+
+                /* Consume timerfd event to prevent accumulation */
+                if (pfds[0].revents & POLLIN) {
+                    uint64_t expirations;
+                    ssize_t ret =
+                        read(wfi_timer_fd, &expirations, sizeof(expirations));
+                    (void) ret; /* Ignore read errors - timer will retry */
+                }
+#endif
             }
         }
+
+        /* Cleanup event resources */
+#ifdef __APPLE__
+        close(kq);
+#else
+        close(wfi_timer_fd);
+#endif
 
         /* Check if execution stopped due to error */
         if (emu->stopped)
