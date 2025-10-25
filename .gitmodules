@@ -4,7 +4,7 @@
     shallow = true
 [submodule "minislirp"]
     path = minislirp
-    url = https://github.com/edubart/minislirp
+    url = https://github.com/sysprog21/minislirp
     shallow = true
 [submodule "portaudio"]
     path = portaudio
