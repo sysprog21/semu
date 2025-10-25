@@ -111,20 +111,20 @@ jobs:
       run: |
         set -euo pipefail
 
-        # Get list of source files
-        SOURCES=$(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
+        # Get list of source files into array
+        mapfile -t SOURCES < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
         # Register cleanup function to restore files on exit
         cleanup_files() {
-          if [ -n "${SOURCES:-}" ]; then
+          if [ ${#SOURCES[@]} -gt 0 ]; then
             echo "Restoring files to original state..."
-            git checkout -- ${SOURCES} 2>/dev/null || true
+            git checkout -- "${SOURCES[@]}" 2>/dev/null || true
           fi
         }
         trap cleanup_files EXIT INT TERM
 
         # Apply clang-format in-place to generate diff
-        clang-format-18 -i ${SOURCES}
+        clang-format-18 -i "${SOURCES[@]}"
 
         # Generate diff and pipe to reviewdog
         # Note: reviewdog exit code doesn't affect cleanup due to trap

@@ -4,8 +4,8 @@
 set -euo pipefail
 
 # Detect platform
-MACHINE_TYPE=$(uname -m)
-OS_TYPE=$(uname -s)
+MACHINE_TYPE="$(uname -m)"
+OS_TYPE="$(uname -s)"
 
 # Cleanup function - kills all semu processes
 cleanup() {
@@ -22,14 +22,14 @@ ASSERT() {
     local exit_code
 
     set +e
-    cmd_output=$("$@" 2>&1)
+    cmd_output="$("$@" 2>&1)"
     exit_code=$?
     set -e
 
-    if [ $exit_code -ne 0 ]; then
+    if [ "$exit_code" -ne 0 ]; then
         echo "Assert failed: $*" >&2
         echo "Output: $cmd_output" >&2
-        exit $exit_code
+        exit "$exit_code"
     fi
 }
 
@@ -59,7 +59,7 @@ get_timeout() {
 }
 
 # Export TIMEOUT for use in scripts
-TIMEOUT=$(get_timeout)
+TIMEOUT="$(get_timeout)"
 export TIMEOUT
 
 # Color codes for output

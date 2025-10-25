@@ -20,7 +20,7 @@ esac
 
 # Test network device functionality
 TEST_NETDEV() {
-    local NETDEV=$1
+    local NETDEV="$1"
     local CMD_PREFIX=""
 
     if [ "$NETDEV" == "tap" ]; then
