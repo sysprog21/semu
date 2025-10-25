@@ -58,7 +58,7 @@ for NETDEV in "${NETWORK_DEVICES[@]}"; do
     TEST_NETDEV "$NETDEV"
 done
 
-ret=$?
+ret="$?"
 
 MESSAGES=("OK!" \
      "Fail to boot" \
@@ -67,10 +67,10 @@ MESSAGES=("OK!" \
      "Fail to transfer packet" \
 )
 
-if [ $ret -eq 0 ]; then
-    print_success "${MESSAGES[$ret]}"
+if [ "$ret" -eq 0 ]; then
+    print_success "${MESSAGES["$ret"]}"
 else
-    print_error "${MESSAGES[$ret]}"
+    print_error "${MESSAGES["$ret"]}"
 fi
 
-exit ${ret}
+exit "$ret"

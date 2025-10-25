@@ -12,7 +12,7 @@ expect "# " { send "uname -a\n" } timeout { exit 2 }
 expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
 DONE
 
-ret=$?
+ret="$?"
 
 MESSAGES=("OK!" \
      "Fail to boot" \
@@ -20,10 +20,10 @@ MESSAGES=("OK!" \
      "Fail to run commands" \
 )
 
-if [ $ret -eq 0 ]; then
-    print_success "${MESSAGES[$ret]}"
+if [ "$ret" -eq 0 ]; then
+    print_success "${MESSAGES["$ret"]}"
 else
-    print_error "${MESSAGES[$ret]}"
+    print_error "${MESSAGES["$ret"]}"
 fi
 
-exit ${ret}
+exit "$ret"
