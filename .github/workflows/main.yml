@@ -89,11 +89,52 @@ jobs:
 
   coding_style:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
     - uses: actions/checkout@v4
-    - name: coding convention
+    - name: Install clang-format
       run: |
             sudo apt-get update
             sudo apt-get install -q -y clang-format-18
-            .ci/check-format.sh
+      shell: bash
+    - name: Setup reviewdog
+      uses: reviewdog/action-setup@v1
+      if: github.event_name == 'pull_request'
+      with:
+        reviewdog_version: latest
+    - name: Run clang-format with reviewdog
+      if: github.event_name == 'pull_request'
+      env:
+        REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        # Get list of source files
+        SOURCES=$(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
+
+        # Register cleanup function to restore files on exit
+        cleanup_files() {
+          if [ -n "${SOURCES:-}" ]; then
+            echo "Restoring files to original state..."
+            git checkout -- ${SOURCES} 2>/dev/null || true
+          fi
+        }
+        trap cleanup_files EXIT INT TERM
+
+        # Apply clang-format in-place to generate diff
+        clang-format-18 -i ${SOURCES}
+
+        # Generate diff and pipe to reviewdog
+        # Note: reviewdog exit code doesn't affect cleanup due to trap
+        git diff -u --no-color | reviewdog -f=diff \
+          -name="clang-format" \
+          -reporter=github-pr-review \
+          -filter-mode=added \
+          -fail-on-error=false \
+          -level=warning || true
+      shell: bash
+    - name: Check formatting (fail on violations)
+      run: .ci/check-format.sh
       shell: bash
