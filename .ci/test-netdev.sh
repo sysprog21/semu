@@ -1,40 +1,36 @@
 #!/usr/bin/env bash
 
-function cleanup {
-    sleep 1
-    pkill -9 semu
-}
+# Source common functions and settings
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 
-function ASSERT {
-    $*
-    local RES=$?
-    if [ $RES -ne 0 ]; then
-        echo 'Assert failed: "' $* '"'
-        exit $RES
-    fi
-}
+# Override timeout for netdev tests
+# Network tests need different timeout: 30s for Linux, 600s for macOS
+case "${OS_TYPE}" in
+    Darwin)
+        TIMEOUT=600
+        ;;
+    Linux)
+        TIMEOUT=30
+        ;;
+    *)
+        TIMEOUT=30
+        ;;
+esac
 
+# Clean up any existing semu processes before starting tests
 cleanup
 
-# macOS needs more time to boot compared to Linux, so the timeout is set to
-# 600 seconds for macOS to handle the longer startup. For Linux, 90 seconds
-# is sufficient due to its faster boot process.
-UNAME_S=$(uname -s)
-if [[ ${UNAME_S} == "Darwin" ]]; then
-    TIMEOUT=600
-else # Linux
-    TIMEOUT=30
-fi
-
-function TEST_NETDEV {
-    local NETDEV=$1
+# Test network device functionality
+TEST_NETDEV() {
+    local NETDEV="$1"
     local CMD_PREFIX=""
 
-    if [ $NETDEV == tap ]; then
+    if [ "$NETDEV" = "tap" ]; then
         CMD_PREFIX="sudo "
     fi
 
-ASSERT expect <<DONE
+    ASSERT expect <<DONE
     set timeout ${TIMEOUT}
     spawn ${CMD_PREFIX}make check NETDEV=${NETDEV}
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
@@ -56,17 +52,16 @@ ASSERT expect <<DONE
 DONE
 }
 
-# Network devices
+# Network devices to test
 NETWORK_DEVICES=(tap user)
 
 for NETDEV in "${NETWORK_DEVICES[@]}"; do
     cleanup
     echo "Test network device: $NETDEV"
-    TEST_NETDEV $NETDEV
+    TEST_NETDEV "$NETDEV"
 done
 
-ret=$?
-cleanup
+ret="$?"
 
 MESSAGES=("OK!" \
      "Fail to boot" \
@@ -75,8 +70,10 @@ MESSAGES=("OK!" \
      "Fail to transfer packet" \
 )
 
-COLOR_G='\e[32;01m' # Green
-COLOR_N='\e[0m'
-printf "\n[ ${COLOR_G}${MESSAGES[$ret]}${COLOR_N} ]\n"
+if [ "$ret" -eq 0 ]; then
+    print_success "${MESSAGES["$ret"]}"
+else
+    print_error "${MESSAGES["$ret"]}"
+fi
 
-exit ${ret}
+exit "$ret"

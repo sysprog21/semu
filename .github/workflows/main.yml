@@ -2,10 +2,19 @@ name: CI
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   semu-linux:
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         dependency:
           - none
@@ -14,46 +23,150 @@ jobs:
     steps:
     - name: checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: cache external downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+        key: external-${{ hashFiles('mk/external.mk') }}
+        restore-keys: |
+          external-
+    - name: cache submodule builds
+      uses: actions/cache@v4
+      with:
+        path: |
+          mini-gdbstub/build
+          minislirp/src/*.a
+        key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
+        restore-keys: |
+          ${{ runner.os }}-submodules-
+    - name: cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/actions/setup-semu/action.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
     - name: install-dependencies
-      run: |
-            sudo apt-get update
-            sudo apt-get install -y build-essential device-tree-compiler expect libasound2-dev libudev-dev
+      uses: ./.github/actions/setup-semu
     - name: install sound multiplexer ${{ matrix.dependency }}
       if: matrix.dependency != 'none'
       run: |
             sudo apt-get install -y ${{ matrix.dependency }}
+      timeout-minutes: 5
     - name: default build
       run: make
       shell: bash
+      timeout-minutes: 5
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+      timeout-minutes: 10
     - name: netdev test
       run: .ci/test-netdev.sh
       shell: bash
-      if: ${{ success() }}
+      timeout-minutes: 10
 
   semu-macOS:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: cache external downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+        key: external-${{ hashFiles('mk/external.mk') }}
+        restore-keys: |
+          external-
+    - name: cache submodule builds
+      uses: actions/cache@v4
+      with:
+        path: |
+          mini-gdbstub/build
+          minislirp/src/*.a
+        key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
+        restore-keys: |
+          ${{ runner.os }}-submodules-
     - name: install-dependencies
-      run: |
-            brew install make dtc expect e2fsprogs
+      uses: ./.github/actions/setup-semu
     - name: default build
       run: make
       shell: bash
+      timeout-minutes: 20
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+      timeout-minutes: 15
 
   coding_style:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
     - uses: actions/checkout@v4
-    - name: coding convention
+    - name: cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-clang-format-18
+        restore-keys: |
+          ${{ runner.os }}-apt-
+    - name: Install clang-format
       run: |
             sudo apt-get update
             sudo apt-get install -q -y clang-format-18
-            .ci/check-format.sh
       shell: bash
+      timeout-minutes: 5
+    - name: Setup reviewdog
+      uses: reviewdog/action-setup@v1
+      if: github.event_name == 'pull_request'
+      with:
+        reviewdog_version: latest
+      timeout-minutes: 5
+    - name: Run clang-format with reviewdog
+      if: github.event_name == 'pull_request'
+      env:
+        REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        # Get list of source files into array (POSIX-compatible for macOS bash 3.2)
+        SOURCES=()
+        while IFS= read -r file; do
+            SOURCES+=("$file")
+        done < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
+
+        # Register cleanup function to restore files on exit
+        cleanup_files() {
+          if [ ${#SOURCES[@]} -gt 0 ]; then
+            echo "Restoring files to original state..."
+            git checkout -- "${SOURCES[@]}" 2>/dev/null || true
+          fi
+        }
+        trap cleanup_files EXIT INT TERM
+
+        # Apply clang-format in-place to generate diff
+        clang-format-18 -i "${SOURCES[@]}"
+
+        # Generate diff and pipe to reviewdog
+        # Note: reviewdog exit code doesn't affect cleanup due to trap
+        git diff -u --no-color | reviewdog -f=diff \
+          -name="clang-format" \
+          -reporter=github-pr-review \
+          -filter-mode=added \
+          -fail-on-error=false \
+          -level=warning || true
+      shell: bash
+      timeout-minutes: 5
+    - name: Check formatting (fail on violations)
+      run: .ci/check-format.sh
+      shell: bash
+      timeout-minutes: 5

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
-SOURCES=$(find $(git rev-parse --show-toplevel) | egrep "\.(c|cxx|cpp|h|hpp)\$")
+set -euo pipefail
 
-set -x
+# Get list of source files into array (POSIX-compatible for macOS bash 3.2)
+SOURCES=()
+while IFS= read -r file; do
+    SOURCES+=("$file")
+done < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
-for file in ${SOURCES};
-do
-    clang-format-18 ${file} > expected-format
-    diff -u -p --label="${file}" --label="expected coding style" ${file} expected-format
-done
-exit $(clang-format-18 --output-replacements-xml ${SOURCES} | egrep -c "</replacement>")
+# Use clang-format dry-run mode with --Werror to fail on format violations
+# This eliminates the need for temporary files and manual diff comparisons
+clang-format-18 -n --Werror "${SOURCES[@]}"
