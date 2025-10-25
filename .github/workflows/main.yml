@@ -17,6 +17,26 @@ jobs:
     steps:
     - name: checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: cache external downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+        key: external-${{ hashFiles('mk/external.mk') }}
+        restore-keys: |
+          external-
+    - name: cache submodule builds
+      uses: actions/cache@v4
+      with:
+        path: |
+          mini-gdbstub/build
+          minislirp/src/*.a
+        key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
+        restore-keys: |
+          ${{ runner.os }}-submodules-
     - name: install-dependencies
       run: |
             sudo apt-get update
@@ -40,6 +60,26 @@ jobs:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: cache external downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+        key: external-${{ hashFiles('mk/external.mk') }}
+        restore-keys: |
+          external-
+    - name: cache submodule builds
+      uses: actions/cache@v4
+      with:
+        path: |
+          mini-gdbstub/build
+          minislirp/src/*.a
+        key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
+        restore-keys: |
+          ${{ runner.os }}-submodules-
     - name: install-dependencies
       run: |
             brew install make dtc expect e2fsprogs
