@@ -31,10 +31,25 @@ typedef enum {
     ERR_USER,      /**< user-specific error */
 } vm_error_t;
 
+/* Instruction fetch cache: stores host memory pointers for direct access */
 typedef struct {
     uint32_t n_pages;
     uint32_t *page_addr;
-} mmu_cache_t;
+#ifdef MMU_CACHE_STATS
+    uint64_t hits;
+    uint64_t misses;
+#endif
+} mmu_fetch_cache_t;
+
+/* Load/store cache: stores physical page numbers (not pointers) */
+typedef struct {
+    uint32_t n_pages;
+    uint32_t phys_ppn; /* Physical page number */
+#ifdef MMU_CACHE_STATS
+    uint64_t hits;
+    uint64_t misses;
+#endif
+} mmu_addr_cache_t;
 
 /* To use the emulator, start by initializing a hart_t object with zero values,
  * invoke vm_init(), and set the required environment-supplied callbacks. You
@@ -85,7 +100,10 @@ struct __hart_internal {
      */
     uint32_t exc_cause, exc_val;
 
-    mmu_cache_t cache_fetch;
+    mmu_fetch_cache_t cache_fetch;
+    /* 2-entry direct-mapped with hash-based indexing */
+    mmu_addr_cache_t cache_load[2];
+    mmu_addr_cache_t cache_store;
 
     /* Supervisor state */
     bool s_mode;
@@ -160,3 +178,6 @@ void hart_trap(hart_t *vm);
 
 /* Return a readable description for a RISC-V exception cause */
 void vm_error_report(const hart_t *vm);
+
+/* Invalidate all MMU translation caches (fetch, load, store) */
+void mmu_invalidate(hart_t *vm);
