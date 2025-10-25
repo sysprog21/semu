@@ -607,11 +607,7 @@ static void handle_options(int argc,
 
     if (!*dtb_file)
         *dtb_file = "minimal.dtb";
-
-    if (!*net_dev)
-        *net_dev = "tap";
 }
-
 
 #define INIT_HART(hart, emu, id)                  \
     do {                                          \
