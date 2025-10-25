@@ -1,15 +1,18 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/uio.h>
+
+#if !defined(__APPLE__)
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+#endif
 
 #include "common.h"
 #include "device.h"
@@ -70,26 +73,25 @@ static void virtio_net_update_status(virtio_net_state_t *vnet, uint32_t status)
     vnet->priv = priv;
 }
 
-static bool vnet_iovec_write(struct iovec **vecs,
-                             size_t *nvecs,
-                             const uint8_t *src,
-                             size_t n)
+static int vnet_iovec_write(struct iovec **vecs,
+                            size_t *nvecs,
+                            const uint8_t *src,
+                            size_t n)
 {
-    while (n && *nvecs) {
-        if (n < (*vecs)->iov_len) {
-            memcpy((*vecs)->iov_base, src, n);
-            (*vecs)->iov_base = (void *) ((uintptr_t) (*vecs)->iov_base + n);
-            (*vecs)->iov_len -= n;
-            return true;
-        }
+    while (n > 0 && *nvecs > 0) {
+        size_t to_copy = MIN(n, (*vecs)->iov_len);
+        memcpy((*vecs)->iov_base, src, to_copy);
+        src += to_copy;
+        n -= to_copy;
+        (*vecs)->iov_base = (void *) ((uintptr_t) (*vecs)->iov_base + to_copy);
+        (*vecs)->iov_len -= to_copy;
 
-        memcpy((*vecs)->iov_base, src, (*vecs)->iov_len);
-        src += (*vecs)->iov_len;
-        n -= (*vecs)->iov_len;
-        (*vecs)++;
-        (*nvecs)--;
+        if ((*vecs)->iov_len == 0) {
+            (*vecs)++;
+            (*nvecs)--;
+        }
     }
-    return n && !*nvecs;
+    return n > 0;
 }
 
 static bool vnet_iovec_read(struct iovec **vecs,
@@ -102,7 +104,8 @@ static bool vnet_iovec_read(struct iovec **vecs,
             memcpy(dst, (*vecs)->iov_base, n);
             (*vecs)->iov_base = (void *) ((uintptr_t) (*vecs)->iov_base + n);
             (*vecs)->iov_len -= n;
-            return true;
+            /* Success: all data read, buffer has space left */
+            return false;
         }
         memcpy(dst, (*vecs)->iov_base, (*vecs)->iov_len);
         dst += (*vecs)->iov_len;
@@ -121,6 +124,32 @@ static ssize_t handle_read(netdev_t *netdev,
     ssize_t plen = 0;
 #define _(dev) NETDEV_IMPL_##dev
     switch (netdev->type) {
+#if defined(__APPLE__)
+    case _(vmnet): {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+        uint8_t buf[2048];
+
+        plen = net_vmnet_read(vmnet, buf, sizeof(buf));
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+        if (plen < 0) {
+            fprintf(stderr, "[VNET] could not read packet from vmnet\n");
+            return -1;
+        }
+
+        /* Copy to iovec */
+        struct iovec *vecs = iovs_cursor;
+        size_t nvecs = niovs;
+        const uint8_t *src = buf;
+        if (vnet_iovec_write(&vecs, &nvecs, src, plen)) {
+            fprintf(stderr, "[VNET] packet too large for iovec\n");
+            return -1;
+        }
+        break;
+    }
+#else
     case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         plen = readv(tap->tap_fd, iovs_cursor, niovs);
@@ -135,10 +164,12 @@ static ssize_t handle_read(netdev_t *netdev,
         }
         break;
     }
-    case _(user):
+#endif
+    case _(user): {
         net_user_options_t *usr = (net_user_options_t *) netdev->op;
 
-        plen = readv(usr->channel[SLIRP_READ_SIDE], iovs_cursor, niovs);
+        plen = readv(usr->guest_to_host_channel[SLIRP_READ_SIDE], iovs_cursor,
+                     niovs);
         if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
             queue->fd_ready = false;
             return -1;
@@ -151,6 +182,7 @@ static ssize_t handle_read(netdev_t *netdev,
         }
 
         break;
+    }
     default:
         break;
     }
@@ -166,6 +198,20 @@ static ssize_t handle_write(netdev_t *netdev,
     ssize_t plen = 0;
 #define _(dev) NETDEV_IMPL_##dev
     switch (netdev->type) {
+#if defined(__APPLE__)
+    case _(vmnet): {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+
+        /* Use zero-copy writev to avoid intermediate buffer */
+        ssize_t written = net_vmnet_writev(vmnet, iovs_cursor, niovs);
+        if (written < 0) {
+            queue->fd_ready = false;
+            return -1;
+        }
+        plen = written;
+        break;
+    }
+#else
     case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         plen = writev(tap->tap_fd, iovs_cursor, niovs);
@@ -180,7 +226,8 @@ static ssize_t handle_write(netdev_t *netdev,
         }
         break;
     }
-    case _(user):
+#endif
+    case _(user): {
         net_user_options_t *usr = (net_user_options_t *) netdev->op;
 
         uint8_t pkt[1514];
@@ -193,9 +240,15 @@ static ssize_t handle_write(netdev_t *netdev,
             plen += iovs_cursor[i].iov_len;
         }
 
-        slirp_input(usr->slirp, pkt, plen);
-
+        ssize_t written =
+            write(usr->host_to_guest_channel[SLIRP_WRITE_SIDE], pkt, plen);
+        if (written < 0) {
+            queue->fd_ready = false;
+            return -1;
+        }
+        plen = written;
         break;
+    }
     default:
         break;
     }
@@ -309,6 +362,22 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
     netdev_impl_t dev_type = vnet->peer.type;
 #define _(dev) NETDEV_IMPL_##dev
     switch (dev_type) {
+#if defined(__APPLE__)
+    case _(vmnet): {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) vnet->peer.op;
+        int fd = net_vmnet_get_fd(vmnet);
+        struct pollfd pfd = {fd, POLLIN, 0};
+        poll(&pfd, 1, 0);
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+        /* vmnet writes asynchronously; treat TX queue as always ready */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+        virtio_net_try_tx(vnet);
+        break;
+    }
+#else
     case _(tap): {
         net_tap_options_t *tap = (net_tap_options_t *) vnet->peer.op;
         struct pollfd pfd = {tap->tap_fd, POLLIN | POLLOUT, 0};
@@ -323,10 +392,27 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
         }
         break;
     }
-    case _(user):
-        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
-        virtio_net_try_tx(vnet);
+#endif
+    case _(user): {
+        net_user_options_t *usr = (net_user_options_t *) vnet->peer.op;
+        struct pollfd pfd[3] = {
+            {usr->guest_to_host_channel[SLIRP_READ_SIDE], POLLIN, 0},
+            {usr->host_to_guest_channel[SLIRP_READ_SIDE], POLLIN, 0},
+            {usr->host_to_guest_channel[SLIRP_WRITE_SIDE], POLLOUT, 0}};
+        poll(pfd, 3, 0);
+        if (pfd[0].revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+        if (pfd[1].revents & POLLIN) {
+            net_slirp_read(usr);
+        }
+        if (pfd[2].revents & POLLOUT) {
+            vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+            virtio_net_try_tx(vnet);
+        }
         break;
+    }
     default:
         break;
     }
@@ -554,6 +640,11 @@ bool virtio_net_init(virtio_net_state_t *vnet, const char *name)
         fprintf(stderr, "Fail to init net device %s\n", name);
         return false;
     }
+
+#if defined(__APPLE__)
+    if (vnet->peer.type == NETDEV_IMPL_vmnet)
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+#endif
 
     return true;
 }

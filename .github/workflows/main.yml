@@ -66,7 +66,7 @@ jobs:
       shell: bash
       timeout-minutes: 10
     - name: netdev test
-      run: .ci/test-netdev.sh
+      run: sudo .ci/test-netdev.sh
       shell: bash
       timeout-minutes: 10
 
@@ -104,6 +104,20 @@ jobs:
       run: .ci/autorun.sh
       shell: bash
       timeout-minutes: 15
+    - name: netdev test
+      # NOTE: vmnet requires sudo privileges which may not be available in GitHub Actions
+      # This test is conditional and will be skipped if sudo is not available
+      run: |
+            if sudo -n true 2>/dev/null; then
+              echo "sudo available, running netdev test"
+              sudo .ci/test-netdev.sh
+            else
+              echo "Skipping netdev test: sudo not available in GitHub Actions runner"
+              echo "vmnet.framework requires root privileges or com.apple.vm.networking entitlement"
+            fi
+      shell: bash
+      timeout-minutes: 20
+      if: ${{ success() }}
 
   coding_style:
     runs-on: ubuntu-24.04
@@ -112,6 +126,8 @@ jobs:
       pull-requests: write
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: cache apt packages
       uses: actions/cache@v4
       with:

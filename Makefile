@@ -53,14 +53,31 @@ endif
 NETDEV ?= tap
 # virtio-net
 ENABLE_VIRTIONET ?= 1
-ifneq ($(UNAME_S),Linux)
+ifeq ($(UNAME_S),Darwin)
+    # macOS: auto-select backend when using default TAP setting
+    ifeq ($(NETDEV),tap)
+        NETDEV :=
+    endif
+else ifneq ($(UNAME_S),Linux)
+    # Other platforms: disable virtio-net
     ENABLE_VIRTIONET := 0
 endif
+
 $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
     OBJS_EXTRA += virtio-net.o
     OBJS_EXTRA += netdev.o
-	OBJS_EXTRA += slirp.o
+
+    ifeq ($(UNAME_S),Darwin)
+        # macOS: support both vmnet and user (slirp) backends
+        OBJS_EXTRA += netdev-vmnet.o
+        OBJS_EXTRA += slirp.o
+        CFLAGS += -fblocks
+        LDFLAGS += -framework vmnet
+    else
+        # Linux: use tap/slirp backends
+        OBJS_EXTRA += slirp.o
+    endif
 endif
 
 # virtio-snd
@@ -168,10 +185,16 @@ ifeq ($(call has, VIRTIONET), 1)
 MINISLIRP_DIR := minislirp
 MINISLIRP_LIB := minislirp/src/libslirp.a
 LDFLAGS += $(MINISLIRP_LIB)
+# macOS: workaround for swab redefinition and add resolv library
+MINISLIRP_CFLAGS :=
+ifeq ($(UNAME_S),Darwin)
+    MINISLIRP_CFLAGS := MYCFLAGS="-D_DARWIN_C_SOURCE"
+    LDFLAGS += -lresolv
+endif
 $(MINISLIRP_DIR)/src/Makefile:
 	git submodule update --init $(MINISLIRP_DIR)
 $(MINISLIRP_LIB): $(MINISLIRP_DIR)/src/Makefile
-	$(MAKE) -C $(dir $<)
+	$(MAKE) -C $(dir $<) $(MINISLIRP_CFLAGS)
 $(OBJS): $(MINISLIRP_LIB)
 endif
 
@@ -243,7 +266,7 @@ $(SHARED_DIRECTORY):
 
 check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE) $(SHARED_DIRECTORY)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) -n $(NETDEV) $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(if $(NETDEV),-n $(NETDEV)) $(OPTS)
 
 build-image:
 	scripts/build-image.sh

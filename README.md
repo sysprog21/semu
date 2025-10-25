@@ -86,6 +86,8 @@ You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwar
 * `disk-image` is optional, as it specifies the path of a disk image in ext4 file system for the virtio-blk device.
 * `shared-directory` is optional, as it specifies the path of a directory on the host that will be shared with the guest operating system through virtio-fs, enabling file access from the guest via a virtual filesystem mount.
 
+For detailed networking guidance, see [`docs/networking.md`](docs/networking.md).
+
 ## Mount and unmount a directory in semu
 
 To mount the directory in semu:
