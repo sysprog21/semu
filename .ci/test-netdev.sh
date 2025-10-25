@@ -23,7 +23,7 @@ TEST_NETDEV() {
     local NETDEV="$1"
     local CMD_PREFIX=""
 
-    if [ "$NETDEV" == "tap" ]; then
+    if [ "$NETDEV" = "tap" ]; then
         CMD_PREFIX="sudo "
     fi
 
