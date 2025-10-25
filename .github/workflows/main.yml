@@ -41,6 +41,13 @@ jobs:
         key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
         restore-keys: |
           ${{ runner.os }}-submodules-
+    - name: cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/actions/setup-semu/action.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
     - name: install-dependencies
       uses: ./.github/actions/setup-semu
     - name: install sound multiplexer ${{ matrix.dependency }}
@@ -104,6 +111,13 @@ jobs:
       pull-requests: write
     steps:
     - uses: actions/checkout@v4
+    - name: cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-clang-format-18
+        restore-keys: |
+          ${{ runner.os }}-apt-
     - name: Install clang-format
       run: |
             sudo apt-get update
