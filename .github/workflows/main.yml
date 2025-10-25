@@ -8,11 +8,13 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   semu-linux:
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         dependency:
           - none
@@ -66,7 +68,6 @@ jobs:
     - name: netdev test
       run: .ci/test-netdev.sh
       shell: bash
-      if: ${{ success() }}
       timeout-minutes: 10
 
   semu-macOS:
@@ -137,8 +138,11 @@ jobs:
       run: |
         set -euo pipefail
 
-        # Get list of source files into array
-        mapfile -t SOURCES < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
+        # Get list of source files into array (POSIX-compatible for macOS bash 3.2)
+        SOURCES=()
+        while IFS= read -r file; do
+            SOURCES+=("$file")
+        done < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
         # Register cleanup function to restore files on exit
         cleanup_files() {

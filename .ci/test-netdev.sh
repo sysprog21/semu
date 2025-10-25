@@ -18,6 +18,9 @@ case "${OS_TYPE}" in
         ;;
 esac
 
+# Clean up any existing semu processes before starting tests
+cleanup
+
 # Test network device functionality
 TEST_NETDEV() {
     local NETDEV="$1"

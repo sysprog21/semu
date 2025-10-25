@@ -4,6 +4,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
+# Clean up any existing semu processes before starting tests
+cleanup
+
 ASSERT expect <<DONE
 set timeout ${TIMEOUT}
 spawn make check
