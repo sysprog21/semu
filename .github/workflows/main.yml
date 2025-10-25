@@ -47,16 +47,20 @@ jobs:
       if: matrix.dependency != 'none'
       run: |
             sudo apt-get install -y ${{ matrix.dependency }}
+      timeout-minutes: 5
     - name: default build
       run: make
       shell: bash
+      timeout-minutes: 5
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+      timeout-minutes: 10
     - name: netdev test
       run: .ci/test-netdev.sh
       shell: bash
       if: ${{ success() }}
+      timeout-minutes: 10
 
   semu-macOS:
     runs-on: macos-latest
@@ -87,9 +91,11 @@ jobs:
     - name: default build
       run: make
       shell: bash
+      timeout-minutes: 20
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
+      timeout-minutes: 15
 
   coding_style:
     runs-on: ubuntu-24.04
@@ -103,11 +109,13 @@ jobs:
             sudo apt-get update
             sudo apt-get install -q -y clang-format-18
       shell: bash
+      timeout-minutes: 5
     - name: Setup reviewdog
       uses: reviewdog/action-setup@v1
       if: github.event_name == 'pull_request'
       with:
         reviewdog_version: latest
+      timeout-minutes: 5
     - name: Run clang-format with reviewdog
       if: github.event_name == 'pull_request'
       env:
@@ -139,6 +147,8 @@ jobs:
           -fail-on-error=false \
           -level=warning || true
       shell: bash
+      timeout-minutes: 5
     - name: Check formatting (fail on violations)
       run: .ci/check-format.sh
       shell: bash
+      timeout-minutes: 5
