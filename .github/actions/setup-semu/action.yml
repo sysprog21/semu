@@ -1,0 +1,26 @@
+name: 'Setup semu dependencies'
+description: 'Install build dependencies for semu based on the runner OS'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          build-essential \
+          device-tree-compiler \
+          expect \
+          libasound2-dev \
+          libudev-dev
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: 1
+        HOMEBREW_NO_ANALYTICS: 1
+      run: |
+        brew install make dtc expect e2fsprogs

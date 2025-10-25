@@ -38,9 +38,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-submodules-
     - name: install-dependencies
-      run: |
-            sudo apt-get update
-            sudo apt-get install -y build-essential device-tree-compiler expect libasound2-dev libudev-dev
+      uses: ./.github/actions/setup-semu
     - name: install sound multiplexer ${{ matrix.dependency }}
       if: matrix.dependency != 'none'
       run: |
@@ -81,8 +79,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-submodules-
     - name: install-dependencies
-      run: |
-            brew install make dtc expect e2fsprogs
+      uses: ./.github/actions/setup-semu
     - name: default build
       run: make
       shell: bash

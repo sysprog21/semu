@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 SOURCES=$(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
-set -x
-
-for file in ${SOURCES};
-do
-    clang-format-18 ${file} > expected-format
-    diff -u -p --label="${file}" --label="expected coding style" ${file} expected-format
-done
-exit $(clang-format-18 --output-replacements-xml ${SOURCES} | egrep -c "</replacement>")
+# Use clang-format dry-run mode with --Werror to fail on format violations
+# This eliminates the need for temporary files and manual diff comparisons
+clang-format-18 -n --Werror ${SOURCES}
