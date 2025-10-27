@@ -8,6 +8,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef MMU_CACHE_STATS
+#include <sys/time.h>
+#endif
 
 #include "device.h"
 #include "mini-gdbstub/include/gdbstub.h"
@@ -395,11 +398,11 @@ static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
         hart_mask_base = (uint64_t) hart->x_regs[RV_R_A1];
         if (hart_mask_base == 0xFFFFFFFFFFFFFFFF) {
             for (uint32_t i = 0; i < hart->vm->n_hart; i++) {
-                hart->vm->hart[i]->cache_fetch.n_pages = 0xFFFFFFFF;
+                mmu_invalidate(hart->vm->hart[i]);
             }
         } else {
             for (int i = hart_mask_base; hart_mask; hart_mask >>= 1, i++) {
-                hart->vm->hart[i]->cache_fetch.n_pages = 0xFFFFFFFF;
+                mmu_invalidate(hart->vm->hart[i]);
             }
         }
         return (sbi_ret_t){SBI_SUCCESS, 0};
@@ -792,9 +795,57 @@ static int semu_step(emu_state_t *emu)
     return 0;
 }
 
+#ifdef MMU_CACHE_STATS
+static void print_mmu_cache_stats(vm_t *vm)
+{
+    fprintf(stderr, "\n=== MMU Cache Statistics ===\n");
+    for (uint32_t i = 0; i < vm->n_hart; i++) {
+        hart_t *hart = vm->hart[i];
+        uint64_t fetch_total =
+            hart->cache_fetch.hits + hart->cache_fetch.misses;
+
+        /* Combine 2-way load cache statistics */
+        uint64_t load_hits =
+            hart->cache_load[0].hits + hart->cache_load[1].hits;
+        uint64_t load_misses =
+            hart->cache_load[0].misses + hart->cache_load[1].misses;
+        uint64_t load_total = load_hits + load_misses;
+
+        uint64_t store_total =
+            hart->cache_store.hits + hart->cache_store.misses;
+
+        fprintf(stderr, "\nHart %u:\n", i);
+        fprintf(stderr, "  Fetch: %12llu hits, %12llu misses",
+                hart->cache_fetch.hits, hart->cache_fetch.misses);
+        if (fetch_total > 0)
+            fprintf(stderr, " (%.2f%% hit rate)",
+                    100.0 * hart->cache_fetch.hits / fetch_total);
+        fprintf(stderr, "\n");
+
+        fprintf(stderr, "  Load:  %12llu hits, %12llu misses (2-way)",
+                load_hits, load_misses);
+        if (load_total > 0)
+            fprintf(stderr, " (%.2f%% hit rate)",
+                    100.0 * load_hits / load_total);
+        fprintf(stderr, "\n");
+
+        fprintf(stderr, "  Store: %12llu hits, %12llu misses",
+                hart->cache_store.hits, hart->cache_store.misses);
+        if (store_total > 0)
+            fprintf(stderr, " (%.2f%% hit rate)",
+                    100.0 * hart->cache_store.hits / store_total);
+        fprintf(stderr, "\n");
+    }
+}
+#endif
+
 static int semu_run(emu_state_t *emu)
 {
     int ret;
+#ifdef MMU_CACHE_STATS
+    struct timeval start_time, current_time;
+    gettimeofday(&start_time, NULL);
+#endif
 
     /* Emulate */
     while (!emu->stopped) {
@@ -829,6 +880,23 @@ static int semu_run(emu_state_t *emu)
             ret = semu_step(emu);
             if (ret)
                 return ret;
+#ifdef MMU_CACHE_STATS
+            /* Exit after running for 15 seconds to collect statistics */
+            gettimeofday(&current_time, NULL);
+            long elapsed_sec = current_time.tv_sec - start_time.tv_sec;
+            long elapsed_usec = current_time.tv_usec - start_time.tv_usec;
+            if (elapsed_usec < 0) {
+                elapsed_sec--;
+                elapsed_usec += 1000000;
+            }
+            long elapsed = elapsed_sec + (elapsed_usec > 0 ? 1 : 0);
+            if (elapsed >= 15) {
+                fprintf(stderr,
+                        "\n[MMU_CACHE_STATS] Reached 15 second time limit, "
+                        "exiting...\n");
+                return 0;
+            }
+#endif
         }
     }
 
@@ -960,7 +1028,13 @@ int main(int argc, char **argv)
         return ret;
 
     if (emu.debug)
-        return semu_run_debug(&emu);
+        ret = semu_run_debug(&emu);
+    else
+        ret = semu_run(&emu);
 
-    return semu_run(&emu);
+#ifdef MMU_CACHE_STATS
+    print_mmu_cache_stats(&emu.vm);
+#endif
+
+    return ret;
 }

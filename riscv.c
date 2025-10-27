@@ -5,6 +5,19 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
+#if !defined(__GNUC__) && !defined(__clang__)
+/* Portable parity implementation for non-GCC/Clang compilers */
+static inline unsigned int __builtin_parity(unsigned int x)
+{
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x ^= x >> 2;
+    x ^= x >> 1;
+    return x & 1;
+}
+#endif
+
 /* Return the string representation of an error code identifier */
 static const char *vm_error_str(vm_error_t err)
 {
@@ -169,9 +182,12 @@ static inline uint32_t read_rs2(const hart_t *vm, uint32_t insn)
 
 /* virtual addressing */
 
-static void mmu_invalidate(hart_t *vm)
+void mmu_invalidate(hart_t *vm)
 {
     vm->cache_fetch.n_pages = 0xFFFFFFFF;
+    vm->cache_load[0].n_pages = 0xFFFFFFFF;
+    vm->cache_load[1].n_pages = 0xFFFFFFFF;
+    vm->cache_store.n_pages = 0xFFFFFFFF;
 }
 
 /* Pre-verify the root page table to minimize page table access during
@@ -284,6 +300,9 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
 {
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     if (unlikely(vpn != vm->cache_fetch.n_pages)) {
+#ifdef MMU_CACHE_STATS
+        vm->cache_fetch.misses++;
+#endif
         mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
                       RV_EXC_FETCH_PFAULT);
         if (vm->error)
@@ -295,6 +314,11 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
         vm->cache_fetch.n_pages = vpn;
         vm->cache_fetch.page_addr = page_addr;
     }
+#ifdef MMU_CACHE_STATS
+    else {
+        vm->cache_fetch.hits++;
+    }
+#endif
     *value = vm->cache_fetch.page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
 }
 
@@ -304,17 +328,41 @@ static void mmu_load(hart_t *vm,
                      uint32_t *value,
                      bool reserved)
 {
-    mmu_translate(vm, &addr, (1 << 1) | (vm->sstatus_mxr ? (1 << 3) : 0),
-                  (1 << 6), vm->sstatus_sum && vm->s_mode, RV_EXC_LOAD_FAULT,
-                  RV_EXC_LOAD_PFAULT);
-    if (vm->error)
-        return;
-    vm->mem_load(vm, addr, width, value);
+    uint32_t vpn = addr >> RV_PAGE_SHIFT;
+    uint32_t phys_addr;
+    /* 2-entry direct-mapped cache: use parity hash to select entry */
+    uint32_t index = __builtin_parity(vpn) & 0x1;
+
+    if (unlikely(vpn != vm->cache_load[index].n_pages)) {
+        /* Cache miss: do full translation */
+#ifdef MMU_CACHE_STATS
+        vm->cache_load[index].misses++;
+#endif
+        phys_addr = addr;
+        mmu_translate(vm, &phys_addr,
+                      (1 << 1) | (vm->sstatus_mxr ? (1 << 3) : 0), (1 << 6),
+                      vm->sstatus_sum && vm->s_mode, RV_EXC_LOAD_FAULT,
+                      RV_EXC_LOAD_PFAULT);
+        if (vm->error)
+            return;
+        /* Cache physical page number (not a pointer) */
+        vm->cache_load[index].n_pages = vpn;
+        vm->cache_load[index].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+    } else {
+        /* Cache hit: reconstruct physical address from cached PPN */
+#ifdef MMU_CACHE_STATS
+        vm->cache_load[index].hits++;
+#endif
+        phys_addr = (vm->cache_load[index].phys_ppn << RV_PAGE_SHIFT) |
+                    (addr & MASK(RV_PAGE_SHIFT));
+    }
+
+    vm->mem_load(vm, phys_addr, width, value);
     if (vm->error)
         return;
 
     if (unlikely(reserved))
-        vm->lr_reservation = addr | 1;
+        vm->lr_reservation = phys_addr | 1;
 }
 
 static bool mmu_store(hart_t *vm,
@@ -323,23 +371,43 @@ static bool mmu_store(hart_t *vm,
                       uint32_t value,
                       bool cond)
 {
-    mmu_translate(vm, &addr, (1 << 2), (1 << 6) | (1 << 7),
-                  vm->sstatus_sum && vm->s_mode, RV_EXC_STORE_FAULT,
-                  RV_EXC_STORE_PFAULT);
-    if (vm->error)
-        return false;
+    uint32_t vpn = addr >> RV_PAGE_SHIFT;
+    uint32_t phys_addr;
+
+    if (unlikely(vpn != vm->cache_store.n_pages)) {
+        /* Cache miss: do full translation */
+#ifdef MMU_CACHE_STATS
+        vm->cache_store.misses++;
+#endif
+        phys_addr = addr;
+        mmu_translate(vm, &phys_addr, (1 << 2), (1 << 6) | (1 << 7),
+                      vm->sstatus_sum && vm->s_mode, RV_EXC_STORE_FAULT,
+                      RV_EXC_STORE_PFAULT);
+        if (vm->error)
+            return false;
+        /* Cache physical page number (not a pointer) */
+        vm->cache_store.n_pages = vpn;
+        vm->cache_store.phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+    } else {
+        /* Cache hit: reconstruct physical address from cached PPN */
+#ifdef MMU_CACHE_STATS
+        vm->cache_store.hits++;
+#endif
+        phys_addr = (vm->cache_store.phys_ppn << RV_PAGE_SHIFT) |
+                    (addr & MASK(RV_PAGE_SHIFT));
+    }
 
     if (unlikely(cond)) {
-        if ((vm->lr_reservation != (addr | 1)))
+        if ((vm->lr_reservation != (phys_addr | 1)))
             return false;
     }
 
     for (uint32_t i = 0; i < vm->vm->n_hart; i++) {
         if (unlikely(vm->vm->hart[i]->lr_reservation & 1) &&
-            (vm->vm->hart[i]->lr_reservation & ~3) == (addr & ~3))
+            (vm->vm->hart[i]->lr_reservation & ~3) == (phys_addr & ~3))
             vm->vm->hart[i]->lr_reservation = 0;
     }
-    vm->mem_store(vm, addr, width, value);
+    vm->mem_store(vm, phys_addr, width, value);
     return true;
 }
 
@@ -513,13 +581,19 @@ static void csr_write(hart_t *vm, uint16_t addr, uint32_t value)
     }
 
     switch (addr) {
-    case RV_CSR_SSTATUS:
+    case RV_CSR_SSTATUS: {
+        bool old_sum = vm->sstatus_sum;
+        bool old_mxr = vm->sstatus_mxr;
         vm->sstatus_sie = (value & (1 << (1))) != 0;
         vm->sstatus_spie = (value & (1 << (5))) != 0;
         vm->sstatus_spp = (value & (1 << (8))) != 0;
         vm->sstatus_sum = (value & (1 << (18))) != 0;
         vm->sstatus_mxr = (value & (1 << (19))) != 0;
+        /* Invalidate load/store TLB if SUM or MXR changed */
+        if (vm->sstatus_sum != old_sum || vm->sstatus_mxr != old_mxr)
+            mmu_invalidate(vm);
         break;
+    }
     case RV_CSR_SIE:
         value &= SIE_MASK;
         vm->sie = value;
