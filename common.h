@@ -17,6 +17,8 @@ static inline int ilog2(int x)
     return 31 - __builtin_clz(x | 1);
 }
 
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 /* Range check
  * For any variable range checking:
  *     if (x >= minx && x <= maxx) ...

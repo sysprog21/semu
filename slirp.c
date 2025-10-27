@@ -1,5 +1,9 @@
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "netdev.h"
 
@@ -8,7 +12,7 @@ static ssize_t net_slirp_send_packet(const void *buf, size_t len, void *opaque)
 {
     net_user_options_t *usr = (net_user_options_t *) opaque;
 
-    return write(usr->channel[SLIRP_WRITE_SIDE], buf, len);
+    return write(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], buf, len);
 }
 
 /* Slirp callback: reports an error from the guest (current unused) */
@@ -152,6 +156,22 @@ int semu_slirp_add_poll_socket(slirp_os_socket fd, int events, void *opaque)
     }
 }
 
+int net_slirp_read(net_user_options_t *usr)
+{
+    uint8_t pkt[1514];
+    ssize_t plen =
+        read(usr->host_to_guest_channel[SLIRP_READ_SIDE], pkt, sizeof(pkt));
+    if (plen < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return 0;
+        fprintf(stderr, "[SLIRP] failed to read packet from virtio-net: %s\n",
+                strerror(errno));
+        return -1;
+    }
+    slirp_input(usr->slirp, pkt, plen);
+    return plen;
+}
+
 Slirp *slirp_create(net_user_options_t *usr, SlirpConfig *cfg)
 {
     /* Create a Slirp instance with special address. All
@@ -193,13 +213,31 @@ int net_slirp_init(net_user_options_t *usr)
         fprintf(stderr, "create slirp failed\n");
     }
 
-    usr->pfd = malloc(sizeof(struct pollfd));
+    if (pipe(usr->guest_to_host_channel) < 0)
+        return -1;
+    assert(
+        fcntl(usr->guest_to_host_channel[SLIRP_READ_SIDE], F_SETFL,
+              fcntl(usr->guest_to_host_channel[SLIRP_READ_SIDE], F_GETFL, 0) |
+                  O_NONBLOCK) >= 0);
+
+    if (pipe(usr->host_to_guest_channel) < 0)
+        return -1;
+    assert(
+        fcntl(usr->host_to_guest_channel[SLIRP_READ_SIDE], F_SETFL,
+              fcntl(usr->host_to_guest_channel[SLIRP_READ_SIDE], F_GETFL, 0) |
+                  O_NONBLOCK) >= 0);
+    assert(
+        fcntl(usr->host_to_guest_channel[SLIRP_WRITE_SIDE], F_SETFL,
+              fcntl(usr->host_to_guest_channel[SLIRP_WRITE_SIDE], F_GETFL, 0) |
+                  O_NONBLOCK) >= 0);
 
     /* Register the read end of the internal pipe (channel[SLIRP_READ_SIDE])
      * with slirp's poll system. This allows slirp to monitor it for incoming
      * data (POLL_IN) or hang-up event (POLL_HUP).
      */
-    semu_slirp_add_poll_socket(usr->channel[SLIRP_READ_SIDE],
+    semu_slirp_add_poll_socket(usr->guest_to_host_channel[SLIRP_READ_SIDE],
+                               SLIRP_POLL_IN | SLIRP_POLL_HUP, usr);
+    semu_slirp_add_poll_socket(usr->host_to_guest_channel[SLIRP_READ_SIDE],
                                SLIRP_POLL_IN | SLIRP_POLL_HUP, usr);
     return 0;
 }
