@@ -35,7 +35,7 @@ function do_buildroot
 {
     if [ ! -d buildroot ]; then
         echo "Cloning Buildroot..."
-        ASSERT git clone https://github.com/buildroot/buildroot -b 2024.11.1 --depth=1
+        ASSERT git clone https://github.com/buildroot/buildroot -b 2025.02.x --depth=1
     else
         echo "buildroot/ already exists, skipping clone"
     fi
