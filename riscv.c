@@ -244,10 +244,13 @@ static bool mmu_lookup(const hart_t *vm,
              if (unlikely((*ppn) & MASK(10))) /* misaligned superpage */
                  *pte = NULL;
              else *ppn |= vpn & MASK(10);)
+
     uint32_t *page_table = vm->mem_page_table(vm, (**pte) >> 10);
     if (!page_table)
         return false;
+
     PTE_ITER(page_table, vpn & MASK(10), )
+
     *pte = NULL;
     return true;
 }
@@ -266,7 +269,7 @@ static void mmu_translate(hart_t *vm,
         return;
 
     uint32_t *pte_ref;
-    uint32_t ppn;
+    uint32_t ppn = 0; /* Initialize to avoid undefined behavior */
     bool ok = mmu_lookup(vm, (*addr) >> RV_PAGE_SHIFT, &pte_ref, &ppn);
     if (unlikely(!ok)) {
         vm_set_exception(vm, fault, *addr);
@@ -484,7 +487,9 @@ static void op_privileged(hart_t *vm, uint32_t insn)
         op_sret(vm);
         break;
     case 0b000100000101: /* PRIV_WFI */
-                         /* TODO: Implement this */
+        /* Call the WFI callback if available */
+        if (vm->wfi)
+            vm->wfi(vm);
         break;
     default:
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);

@@ -1,4 +1,7 @@
+import os
 import sys
+import tempfile
+from pathlib import Path
 
 def cpu_template (id):
     return f"""cpu{id}: cpu@{id} {{
@@ -93,9 +96,24 @@ def dtsi_template (cpu_list: str, plic_list, sswi_list, mswi_list, mtimer_list, 
 }};
 """
 
-dtsi = sys.argv[1]
+dtsi = Path(sys.argv[1])
 harts = int(sys.argv[2])
 clock_freq = int(sys.argv[3])
 
-with open(dtsi, "w") as dts:
-    dts.write(dtsi_template(cpu_format(harts), plic_irq_format(harts), sswi_irq_format(harts), mswi_irq_format(harts), mtimer_irq_format(harts), clock_freq))
+content = dtsi_template(
+    cpu_format(harts),
+    plic_irq_format(harts),
+    sswi_irq_format(harts),
+    mswi_irq_format(harts),
+    mtimer_irq_format(harts),
+    clock_freq,
+)
+
+with tempfile.NamedTemporaryFile(
+    mode="w", dir=dtsi.parent, prefix=f".{dtsi.name}.", suffix=".tmp", delete=False
+) as tmp:
+    tmp.write(content)
+    tmp_path = Path(tmp.name)
+
+os.replace(tmp_path, dtsi)
+dtsi.chmod(0o644)

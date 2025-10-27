@@ -169,6 +169,7 @@ OBJS := \
 	uart.o \
 	main.o \
 	aclint.o \
+	coro.o \
 	$(OBJS_EXTRA)
 
 deps := $(OBJS:%.o=.%.o.d)
@@ -242,6 +243,7 @@ riscv-harts.dtsi: .smp_stamp
 
 minimal.dtb: minimal.dts riscv-harts.dtsi
 	$(VECHO) " DTC\t$@\n"
+	$(Q)$(RM) $@
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
 	    $(DT_CFLAGS) \
 	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \

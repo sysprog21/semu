@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,11 +13,23 @@
 #include <sys/time.h>
 #endif
 
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
+#else
+#include <sys/timerfd.h>
+#endif
+
+#include "coro.h"
 #include "device.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #include "riscv.h"
 #include "riscv_private.h"
 #define PRIV(x) ((emu_state_t *) x->priv)
+
+/* Forward declarations for coroutine support */
+static void wfi_handler(hart_t *hart);
+static void hart_exec_loop(void *arg);
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -127,6 +140,40 @@ static void emu_update_vfs_interrupts(vm_t *vm)
     plic_update_interrupts(vm, &data->plic);
 }
 #endif
+
+static inline void emu_tick_peripherals(emu_state_t *emu)
+{
+    vm_t *vm = &emu->vm;
+
+    if (emu->peripheral_update_ctr-- == 0) {
+        emu->peripheral_update_ctr = 64;
+
+        u8250_check_ready(&emu->uart);
+        if (emu->uart.in_ready)
+            emu_update_uart_interrupts(vm);
+
+#if SEMU_HAS(VIRTIONET)
+        virtio_net_refresh_queue(&emu->vnet);
+        if (emu->vnet.InterruptStatus)
+            emu_update_vnet_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOBLK)
+        if (emu->vblk.InterruptStatus)
+            emu_update_vblk_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOSND)
+        if (emu->vsnd.InterruptStatus)
+            emu_update_vsnd_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOFS)
+        if (emu->vfs.InterruptStatus)
+            emu_update_vfs_interrupts(vm);
+#endif
+    }
+}
 
 static void mem_load(hart_t *hart,
                      uint32_t addr,
@@ -688,10 +735,15 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
         INIT_HART(newhart, emu, i);
         newhart->x_regs[RV_R_A0] = i;
         newhart->x_regs[RV_R_A1] = dtb_addr;
-        if (i == 0)
+        if (i == 0) {
             newhart->hsm_status = SBI_HSM_STATE_STARTED;
+            /* Set initial PC for hart 0 to kernel entry point (semu RAM base at
+             * 0x0) */
+            newhart->pc = 0x00000000;
+        }
 
         newhart->vm = vm;
+        newhart->wfi = wfi_handler; /* Set WFI callback for coroutine support */
         vm->hart[i] = newhart;
     }
 
@@ -730,7 +782,96 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->peripheral_update_ctr = 0;
     emu->debug = debug;
 
+    /* Initialize coroutine system for SMP mode (n_hart > 1) */
+    if (vm->n_hart > 1) {
+        if (!coro_init(vm->n_hart)) {
+            fprintf(stderr, "Failed to initialize coroutine subsystem\n");
+            fflush(stderr);
+            return 1;
+        }
+
+        /* Create coroutine for each hart */
+        for (uint32_t i = 0; i < vm->n_hart; i++) {
+            if (!coro_create_hart(i, hart_exec_loop, vm->hart[i])) {
+                fprintf(stderr, "Failed to create coroutine for hart %u\n", i);
+                coro_cleanup();
+                return 1;
+            }
+        }
+    }
+
     return 0;
+}
+
+/* WFI callback for coroutine-based scheduling in SMP mode */
+static void wfi_handler(hart_t *hart)
+{
+    vm_t *vm = hart->vm;
+    /* Only yield in SMP mode (n_hart > 1) */
+    if (vm->n_hart > 1) {
+        /* Per RISC-V spec: WFI should return immediately if interrupt is
+         * pending. Only yield if no interrupt is currently pending.
+         */
+        if (!(hart->sip & hart->sie)) {
+            hart->in_wfi = true; /* Mark as waiting */
+            coro_yield();
+            hart->in_wfi = false; /* Resume execution */
+        }
+    }
+}
+
+/* Hart execution loop - each hart runs in its own coroutine */
+static void hart_exec_loop(void *arg)
+{
+    hart_t *hart = (hart_t *) arg;
+    emu_state_t *emu = PRIV(hart);
+
+    /* Run hart until stopped */
+    while (!emu->stopped) {
+        /* Check if hart is ready to execute (HSM state) */
+        if (hart->hsm_status != SBI_HSM_STATE_STARTED) {
+            emu_tick_peripherals(emu);
+            emu_update_timer_interrupt(hart);
+            emu_update_swi_interrupt(hart);
+            /* Hart not started yet, yield and wait */
+            coro_yield();
+            continue;
+        }
+
+        /* Execute a batch of instructions before yielding */
+        for (int i = 0; i < 64; i++) {
+            emu_tick_peripherals(emu);
+            emu_update_timer_interrupt(hart);
+            emu_update_swi_interrupt(hart);
+            /* Execute one instruction */
+            vm_step(hart);
+
+            /* Check for errors */
+            if (unlikely(hart->error)) {
+                if (hart->error == ERR_EXCEPTION &&
+                    hart->exc_cause == RV_EXC_ECALL_S) {
+                    handle_sbi_ecall(hart);
+                    continue;
+                }
+
+                /* CRITICAL FIX: Handle general exceptions via trap (same as
+                 * single-core) */
+                if (hart->error == ERR_EXCEPTION) {
+                    hart_trap(hart);
+                    continue;
+                }
+
+                vm_error_report(hart);
+                emu->stopped = true;
+                goto cleanup;
+            }
+        }
+
+        /* Yield after batch to allow scheduling */
+        coro_yield();
+    }
+cleanup:
+    return;
 }
 
 static int semu_step(emu_state_t *emu)
@@ -741,34 +882,7 @@ static int semu_step(emu_state_t *emu)
      * RFENCE extension is completely implemented.
      */
     for (uint32_t i = 0; i < vm->n_hart; i++) {
-        if (emu->peripheral_update_ctr-- == 0) {
-            emu->peripheral_update_ctr = 64;
-
-            u8250_check_ready(&emu->uart);
-            if (emu->uart.in_ready)
-                emu_update_uart_interrupts(vm);
-
-#if SEMU_HAS(VIRTIONET)
-            virtio_net_refresh_queue(&emu->vnet);
-            if (emu->vnet.InterruptStatus)
-                emu_update_vnet_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOBLK)
-            if (emu->vblk.InterruptStatus)
-                emu_update_vblk_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOSND)
-            if (emu->vsnd.InterruptStatus)
-                emu_update_vsnd_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOFS)
-            if (emu->vfs.InterruptStatus)
-                emu_update_vfs_interrupts(vm);
-#endif
-        }
+        emu_tick_peripherals(emu);
 
         emu_update_timer_interrupt(vm->hart[i]);
         emu_update_swi_interrupt(vm->hart[i]);
@@ -842,12 +956,117 @@ static void print_mmu_cache_stats(vm_t *vm)
 static int semu_run(emu_state_t *emu)
 {
     int ret;
+
+    vm_t *vm = &emu->vm;
+
 #ifdef MMU_CACHE_STATS
     struct timeval start_time, current_time;
     gettimeofday(&start_time, NULL);
 #endif
 
-    /* Emulate */
+    /* SMP mode: use coroutine-based scheduling */
+    if (vm->n_hart > 1) {
+#ifdef __APPLE__
+        /* macOS: create kqueue for timer and I/O events */
+        int kq = kqueue();
+        if (kq < 0) {
+            perror("kqueue");
+            return -1;
+        }
+
+        /* Add 1ms periodic timer */
+        struct kevent kev_timer;
+        EV_SET(&kev_timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 1, NULL);
+        if (kevent(kq, &kev_timer, 1, NULL, 0, NULL) < 0) {
+            perror("kevent timer setup");
+            close(kq);
+            return -1;
+        }
+
+        /* Note: UART input is polled via u8250_check_ready(), no need to
+         * monitor with kqueue. Timer events are sufficient to wake from WFI.
+         */
+#else
+        /* Linux: create timerfd for periodic wakeup */
+        int wfi_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+        if (wfi_timer_fd < 0) {
+            perror("timerfd_create");
+            return -1;
+        }
+
+        /* Configure 1ms periodic timer */
+        struct itimerspec its = {
+            .it_interval = {.tv_sec = 0, .tv_nsec = 1000000},
+            .it_value = {.tv_sec = 0, .tv_nsec = 1000000},
+        };
+        if (timerfd_settime(wfi_timer_fd, 0, &its, NULL) < 0) {
+            perror("timerfd_settime");
+            close(wfi_timer_fd);
+            return -1;
+        }
+#endif
+
+        while (!emu->stopped) {
+            /* Resume each hart's coroutine in round-robin fashion */
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                coro_resume_hart(i);
+            }
+
+            /* CPU usage optimization: if all started harts are in WFI,
+             * sleep briefly to reduce busy-waiting
+             */
+            bool all_waiting = true;
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED &&
+                    !vm->hart[i]->in_wfi) {
+                    all_waiting = false;
+                    break;
+                }
+            }
+            if (all_waiting) {
+                /* All harts waiting for interrupt - use event-driven wait
+                 * to reduce CPU usage while maintaining responsiveness
+                 */
+#ifdef __APPLE__
+                /* macOS: wait for kqueue events (timer or UART) */
+                struct kevent events[2];
+                int nevents = kevent(kq, NULL, 0, events, 2, NULL);
+                /* Events are automatically handled - timer fires every 1ms,
+                 * UART triggers on input. No need to explicitly consume. */
+                (void) nevents;
+#else
+                /* Linux: poll on timerfd and UART */
+                struct pollfd pfds[2];
+                pfds[0] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
+                pfds[1] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
+                poll(pfds, 2, -1);
+
+                /* Consume timerfd event to prevent accumulation */
+                if (pfds[0].revents & POLLIN) {
+                    uint64_t expirations;
+                    ssize_t ret =
+                        read(wfi_timer_fd, &expirations, sizeof(expirations));
+                    (void) ret; /* Ignore read errors - timer will retry */
+                }
+#endif
+            }
+        }
+
+        /* Cleanup event resources */
+#ifdef __APPLE__
+        close(kq);
+#else
+        close(wfi_timer_fd);
+#endif
+
+        /* Check if execution stopped due to error */
+        if (emu->stopped)
+            return 1;
+
+        return 0;
+    }
+
+    /* Single-hart mode: use original scheduling */
     while (!emu->stopped) {
 #if SEMU_HAS(VIRTIONET)
         int i = 0;
