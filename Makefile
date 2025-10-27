@@ -251,7 +251,9 @@ build-image:
 clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 	$(Q)$(MAKE) -C mini-gdbstub clean
-	$(Q)$(MAKE) -C minislirp/src clean
+	$(Q)if [ -n "$(MINISLIRP_DIR)" ] && [ -d "$(MINISLIRP_DIR)/src" ]; then \
+		$(MAKE) -C $(MINISLIRP_DIR)/src clean; \
+	fi
 
 distclean: clean
 	$(Q)$(RM) riscv-harts.dtsi
