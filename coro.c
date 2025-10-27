@@ -234,6 +234,13 @@ static __thread coro_t *tls_running_coro = NULL;
 static coro_t *tls_running_coro = NULL;
 #endif
 
+static inline void coro_clear_running_state(void)
+{
+    coro_state.current_hart = CORO_HART_ID_IDLE;
+    coro_state.running = NULL;
+    tls_running_coro = NULL;
+}
+
 /* Forward declarations */
 
 #ifdef CORO_USE_ASM
@@ -287,9 +294,7 @@ static void jump_into(coro_t *co)
 static void jump_out(coro_t *co)
 {
     coro_context_t *context = co->context;
-    coro_state.running = NULL;
-    tls_running_coro = NULL;
-    coro_state.current_hart = CORO_HART_ID_IDLE;
+    coro_clear_running_state();
     _coro_switch(&context->ctx, &context->back_ctx);
 }
 
@@ -350,9 +355,7 @@ static void jump_into(coro_t *co)
 static void jump_out(coro_t *co)
 {
     coro_context_t *context = co->context;
-    coro_state.running = NULL;
-    tls_running_coro = NULL;
-    coro_state.current_hart = CORO_HART_ID_IDLE;
+    coro_clear_running_state();
     swapcontext(&context->ctx, &context->back_ctx);
 }
 

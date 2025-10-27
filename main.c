@@ -141,6 +141,40 @@ static void emu_update_vfs_interrupts(vm_t *vm)
 }
 #endif
 
+static inline void emu_tick_peripherals(emu_state_t *emu)
+{
+    vm_t *vm = &emu->vm;
+
+    if (emu->peripheral_update_ctr-- == 0) {
+        emu->peripheral_update_ctr = 64;
+
+        u8250_check_ready(&emu->uart);
+        if (emu->uart.in_ready)
+            emu_update_uart_interrupts(vm);
+
+#if SEMU_HAS(VIRTIONET)
+        virtio_net_refresh_queue(&emu->vnet);
+        if (emu->vnet.InterruptStatus)
+            emu_update_vnet_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOBLK)
+        if (emu->vblk.InterruptStatus)
+            emu_update_vblk_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOSND)
+        if (emu->vsnd.InterruptStatus)
+            emu_update_vsnd_interrupts(vm);
+#endif
+
+#if SEMU_HAS(VIRTIOFS)
+        if (emu->vfs.InterruptStatus)
+            emu_update_vfs_interrupts(vm);
+#endif
+    }
+}
+
 static void mem_load(hart_t *hart,
                      uint32_t addr,
                      uint8_t width,
@@ -796,6 +830,9 @@ static void hart_exec_loop(void *arg)
     while (!emu->stopped) {
         /* Check if hart is ready to execute (HSM state) */
         if (hart->hsm_status != SBI_HSM_STATE_STARTED) {
+            emu_tick_peripherals(emu);
+            emu_update_timer_interrupt(hart);
+            emu_update_swi_interrupt(hart);
             /* Hart not started yet, yield and wait */
             coro_yield();
             continue;
@@ -803,6 +840,9 @@ static void hart_exec_loop(void *arg)
 
         /* Execute a batch of instructions before yielding */
         for (int i = 0; i < 64; i++) {
+            emu_tick_peripherals(emu);
+            emu_update_timer_interrupt(hart);
+            emu_update_swi_interrupt(hart);
             /* Execute one instruction */
             vm_step(hart);
 
@@ -842,34 +882,7 @@ static int semu_step(emu_state_t *emu)
      * RFENCE extension is completely implemented.
      */
     for (uint32_t i = 0; i < vm->n_hart; i++) {
-        if (emu->peripheral_update_ctr-- == 0) {
-            emu->peripheral_update_ctr = 64;
-
-            u8250_check_ready(&emu->uart);
-            if (emu->uart.in_ready)
-                emu_update_uart_interrupts(vm);
-
-#if SEMU_HAS(VIRTIONET)
-            virtio_net_refresh_queue(&emu->vnet);
-            if (emu->vnet.InterruptStatus)
-                emu_update_vnet_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOBLK)
-            if (emu->vblk.InterruptStatus)
-                emu_update_vblk_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOSND)
-            if (emu->vsnd.InterruptStatus)
-                emu_update_vsnd_interrupts(vm);
-#endif
-
-#if SEMU_HAS(VIRTIOFS)
-            if (emu->vfs.InterruptStatus)
-                emu_update_vfs_interrupts(vm);
-#endif
-        }
+        emu_tick_peripherals(emu);
 
         emu_update_timer_interrupt(vm->hart[i]);
         emu_update_swi_interrupt(vm->hart[i]);
@@ -993,41 +1006,7 @@ static int semu_run(emu_state_t *emu)
         }
 #endif
 
-        /* Update peripherals periodically */
         while (!emu->stopped) {
-            /* Update peripherals every 64 instructions */
-            if (emu->peripheral_update_ctr-- == 0) {
-                emu->peripheral_update_ctr = 64;
-
-                u8250_check_ready(&emu->uart);
-                if (emu->uart.in_ready)
-                    emu_update_uart_interrupts(vm);
-
-#if SEMU_HAS(VIRTIONET)
-                virtio_net_refresh_queue(&emu->vnet);
-                if (emu->vnet.InterruptStatus)
-                    emu_update_vnet_interrupts(vm);
-#endif
-#if SEMU_HAS(VIRTIOBLK)
-                if (emu->vblk.InterruptStatus)
-                    emu_update_vblk_interrupts(vm);
-#endif
-#if SEMU_HAS(VIRTIOSND)
-                if (emu->vsnd.InterruptStatus)
-                    emu_update_vsnd_interrupts(vm);
-#endif
-#if SEMU_HAS(VIRTIOFS)
-                if (emu->vfs.InterruptStatus)
-                    emu_update_vfs_interrupts(vm);
-#endif
-            }
-
-            /* Update timer and software interrupts for all harts */
-            for (uint32_t i = 0; i < vm->n_hart; i++) {
-                emu_update_timer_interrupt(vm->hart[i]);
-                emu_update_swi_interrupt(vm->hart[i]);
-            }
-
             /* Resume each hart's coroutine in round-robin fashion */
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 coro_resume_hart(i);
