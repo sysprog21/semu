@@ -75,7 +75,26 @@ typedef struct {
 typedef struct __hart_internal hart_t;
 typedef struct __vm_internel vm_t;
 
+#define IC_BLOCKS_SIZE 256
+#define IC_BLOCKS 256
+#define IC_SHIFT (__builtin_ctz((IC_BLOCKS_SIZE)))
+#define IC_INDEX_BITS (__builtin_ctz((IC_BLOCKS)))
+#define IC_INDEX_MASK (IC_BLOCKS - 1)
+#define IC_BLOCK_MASK (IC_BLOCKS_SIZE - 1)
+#define RV_PAGE_MASK (RV_PAGE_SIZE - 1)
+
+typedef struct {
+    uint32_t tag;
+    const uint8_t *base;
+    bool valid;
+} ic_block_t;
+
+typedef struct {
+    ic_block_t block[IC_BLOCKS];
+} ic_t;
+
 struct __hart_internal {
+    ic_t ic;
     uint32_t x_regs[32];
 
     /* LR reservation virtual address. last bit is 1 if valid */
