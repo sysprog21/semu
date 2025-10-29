@@ -75,7 +75,37 @@ typedef struct {
 typedef struct __hart_internal hart_t;
 typedef struct __vm_internel vm_t;
 
+/* ICACHE_BLOCKS_SIZE: Size of one instruction-cache block (line).
+ * ICACHE_BLOCKS: Number of blocks (lines) in the instruction cache.
+ *
+ * The cache address is decomposed into [ tag | index | offset ] fields:
+ *   - block-offset bits = log2(ICACHE_BLOCKS_SIZE)
+ *   - index bits        = log2(ICACHE_BLOCKS)
+ */
+#define ICACHE_BLOCKS_SIZE 256
+#define ICACHE_BLOCKS 256
+#define ICACHE_OFFSET_BITS 8
+#define ICACHE_INDEX_BITS 8
+
+/* For power-of-two sizes, (size - 1) sets all low bits to 1,
+ * allowing fast extraction of an address.
+ */
+#define ICACHE_INDEX_MASK (ICACHE_BLOCKS - 1)
+#define ICACHE_BLOCK_MASK (ICACHE_BLOCKS_SIZE - 1)
+#define RV_PAGE_MASK (RV_PAGE_SIZE - 1)
+
+typedef struct {
+    uint32_t tag;
+    const uint8_t *base;
+    bool valid;
+} icache_block_t;
+
+typedef struct {
+    icache_block_t block[ICACHE_BLOCKS];
+} icache_t;
+
 struct __hart_internal {
+    icache_t icache;
     uint32_t x_regs[32];
 
     /* LR reservation virtual address. last bit is 1 if valid */

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include "common.h"
 #include "device.h"
@@ -180,6 +181,11 @@ static inline uint32_t read_rs2(const hart_t *vm, uint32_t insn)
     return vm->x_regs[decode_rs2(insn)];
 }
 
+static inline void icache_invalidate_all(hart_t *vm)
+{
+    memset(&vm->icache, 0, sizeof(vm->icache));
+}
+
 /* virtual addressing */
 
 void mmu_invalidate(hart_t *vm)
@@ -198,6 +204,7 @@ void mmu_invalidate(hart_t *vm)
             vm->cache_store[set].ways[way].n_pages = 0xFFFFFFFF;
         vm->cache_store[set].lru = 0; /* Reset LRU to way 0 */
     }
+    icache_invalidate_all(vm);
 }
 
 /* Invalidate MMU caches for a specific virtual address range.
@@ -232,6 +239,18 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
         if (vm->cache_fetch[i].n_pages >= start_vpn &&
             vm->cache_fetch[i].n_pages <= end_vpn)
             vm->cache_fetch[i].n_pages = 0xFFFFFFFF;
+    }
+
+    /* Invalidate I-cache: 256 blocks */
+    for (int i = 0; i < ICACHE_BLOCKS; i++) {
+        icache_block_t *blk = &vm->icache.block[i];
+        if (!blk->valid)
+            continue;
+
+        uint32_t icache_vpn = (blk->tag << ICACHE_INDEX_BITS) | i;
+        icache_vpn >>= (RV_PAGE_SHIFT - ICACHE_OFFSET_BITS);
+        if (icache_vpn >= start_vpn && icache_vpn <= end_vpn)
+            blk->valid = false;
     }
 
     /* Invalidate load cache: 8 sets × 2 ways */
@@ -364,8 +383,21 @@ static void mmu_fence(hart_t *vm, uint32_t insn UNUSED)
 
 static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
 {
+    uint32_t idx = (addr >> ICACHE_OFFSET_BITS) & ICACHE_INDEX_MASK;
+    uint32_t tag = addr >> (ICACHE_OFFSET_BITS + ICACHE_INDEX_BITS);
+    icache_block_t *blk = &vm->icache.block[idx];
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t index = __builtin_parity(vpn) & 0x1;
+
+    if (likely(blk->valid && blk->tag == tag)) {
+#ifdef MMU_CACHE_STATS
+        vm->cache_fetch[index].hits++;
+#endif
+        uint32_t ofs = addr & ICACHE_BLOCK_MASK;
+        *value = *(const uint32_t *) (blk->base + ofs);
+        return;
+    }
+
     if (unlikely(vpn != vm->cache_fetch[index].n_pages)) {
 #ifdef MMU_CACHE_STATS
         vm->cache_fetch[index].misses++;
@@ -381,13 +413,14 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
         vm->cache_fetch[index].n_pages = vpn;
         vm->cache_fetch[index].page_addr = page_addr;
     }
-#ifdef MMU_CACHE_STATS
-    else {
-        vm->cache_fetch[index].hits++;
-    }
-#endif
     *value =
         vm->cache_fetch[index].page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
+
+    /* fill into the cache */
+    uint32_t block_off = (addr & RV_PAGE_MASK) & ~ICACHE_BLOCK_MASK;
+    blk->base = (const uint8_t *) vm->cache_fetch[index].page_addr + block_off;
+    blk->tag = tag;
+    blk->valid = true;
 }
 
 static void mmu_load(hart_t *vm,
