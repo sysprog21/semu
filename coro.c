@@ -222,6 +222,9 @@ static struct {
 /* Stack size for each hart coroutine (1MB - increased for complex execution) */
 #define CORO_STACK_SIZE (1024 * 1024)
 
+/* Stack canary value for overflow detection */
+#define STACK_CANARY_VALUE 0xDEADBEEFCAFEBABEULL
+
 /* Sentinel value for current_hart when no coroutine is running */
 #define CORO_HART_ID_IDLE UINT32_MAX
 
@@ -239,6 +242,26 @@ static inline void coro_clear_running_state(void)
     coro_state.current_hart = CORO_HART_ID_IDLE;
     coro_state.running = NULL;
     tls_running_coro = NULL;
+}
+
+/* Get pointer to stack canary (placed at bottom of stack buffer) */
+static inline uint64_t *coro_get_canary_ptr(coro_t *co)
+{
+    return (uint64_t *) co->stack_base;
+}
+
+/* Check for stack overflow by verifying the canary value in stack buffer */
+static inline void coro_check_stack(coro_t *co)
+{
+    uint64_t *canary_ptr = coro_get_canary_ptr(co);
+    if (*canary_ptr != STACK_CANARY_VALUE) {
+        fprintf(stderr,
+                "FATAL: Stack overflow detected in coroutine! "
+                "Expected canary=0x%llx, got=0x%llx at %p\n",
+                (unsigned long long) STACK_CANARY_VALUE,
+                (unsigned long long) *canary_ptr, (void *) canary_ptr);
+        abort();
+    }
 }
 
 /* Forward declarations */
@@ -483,12 +506,22 @@ bool coro_create_hart(uint32_t hart_id, void (*func)(void *), void *hart)
         return false;
     }
 
-    /* Initialize context */
+    /* Place canary at bottom of stack buffer (first 8 bytes)
+     * Stack grows downward from top, so overflow will hit canary first */
+    uint64_t *canary_ptr = coro_get_canary_ptr(co);
+    *canary_ptr = STACK_CANARY_VALUE;
+
+    /* Adjust usable stack to skip canary area
+     * Stack starts after the canary (bottom + sizeof(uint64_t)) */
+    void *usable_stack_base = (uint8_t *) co->stack_base + sizeof(uint64_t);
+    size_t usable_stack_size = co->stack_size - sizeof(uint64_t);
+
+    /* Initialize context with adjusted stack bounds */
 #ifdef CORO_USE_ASM
-    make_context(co, &co->context->ctx, co->stack_base, co->stack_size);
+    make_context(co, &co->context->ctx, usable_stack_base, usable_stack_size);
 #else
-    if (make_context(co, &co->context->ctx, co->stack_base, co->stack_size) !=
-        0) {
+    if (make_context(co, &co->context->ctx, usable_stack_base,
+                     usable_stack_size) != 0) {
         free(co->stack_base);
         free(co->context);
         free(co);
@@ -520,9 +553,15 @@ void coro_resume_hart(uint32_t hart_id)
         return;
     }
 
+    /* Check for stack overflow before resuming */
+    coro_check_stack(co);
+
     coro_state.current_hart = hart_id;
     co->state = CORO_STATE_RUNNING;
     jump_into(co);
+
+    /* Check for stack overflow after returning from coroutine */
+    coro_check_stack(co);
 }
 
 void coro_yield(void)
