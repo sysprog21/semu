@@ -359,6 +359,10 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
         (vnet->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET))
         return;
 
+    /* Skip if peer network device is not initialized */
+    if (!vnet->peer.op)
+        return;
+
     netdev_impl_t dev_type = vnet->peer.type;
 #define _(dev) NETDEV_IMPL_##dev
     switch (dev_type) {

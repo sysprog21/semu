@@ -770,12 +770,15 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
+    /* Always set ram pointer, even if netdev is not configured.
+     * Device tree may still expose the device to guest.
+     */
+    emu->vnet.ram = emu->ram;
     if (netdev) {
         if (!virtio_net_init(&emu->vnet, netdev)) {
             fprintf(stderr, "Failed to initialize virtio-net device.\n");
             return 1;
         }
-        emu->vnet.ram = emu->ram;
         netdev_ready = true;
     }
 #endif
