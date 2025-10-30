@@ -1170,9 +1170,6 @@ static int semu_run(emu_state_t *emu)
                 pfd_count++;
             }
 #endif
-#ifdef __APPLE__
-            (void) timer_index;
-#endif
 
             /* Add UART input fd (stdin for keyboard input) */
             if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity) {
@@ -1207,16 +1204,24 @@ static int semu_run(emu_state_t *emu)
             if (pfd_count > 0) {
                 int nevents = poll(pfds, pfd_count, poll_timeout);
                 if (nevents > 0) {
-#ifndef __APPLE__
-                    /* Consume timer expiration event on Linux (timerfd) */
+                    /* Consume timer expiration events to prevent fd staying
+                     * readable
+                     */
                     if (timer_index >= 0 &&
                         (pfds[timer_index].revents & POLLIN)) {
+#ifdef __APPLE__
+                        /* drain kqueue events with non-blocking kevent */
+                        struct kevent events[32];
+                        struct timespec timeout_zero = {0, 0};
+                        kevent(kq, NULL, 0, events, 32, &timeout_zero);
+#else
+                        /* Linux: read timerfd to consume expiration count */
                         uint64_t expirations;
                         ssize_t ret_read = read(wfi_timer_fd, &expirations,
                                                 sizeof(expirations));
                         (void) ret_read;
-                    }
 #endif
+                    }
                 } else if (nevents < 0 && errno != EINTR) {
                     perror("poll");
                 }
