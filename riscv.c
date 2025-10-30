@@ -318,9 +318,9 @@ static void mmu_fence(hart_t *vm, uint32_t insn UNUSED)
 static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
 {
     /* cache hit */
-    uint32_t idx = (addr >> IC_SHIFT) & IC_INDEX_MASK;
-    uint32_t tag = addr >> (IC_SHIFT + IC_INDEX_BITS);
-    ic_block_t *blk = &vm->ic.block[idx];
+    uint32_t idx = (addr >> IC_OFFSET_BITS) & IC_INDEX_MASK;
+    uint32_t tag = addr >> (IC_OFFSET_BITS + IC_INDEX_BITS);
+    icache_block_t *blk = &vm->ic.block[idx];
 
     if (likely(blk->valid && blk->tag == tag)) {
 #ifdef MMU_CACHE_STATS
@@ -355,7 +355,7 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
     /* fill into the cache */
     uint32_t block_off = (addr & RV_PAGE_MASK) & ~IC_BLOCK_MASK;
     blk->base = (const uint8_t *) vm->cache_fetch.page_addr + block_off;
-    blk->tag = addr >> (IC_SHIFT + IC_INDEX_BITS);
+    blk->tag = tag;
     blk->valid = true;
 }
 

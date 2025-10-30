@@ -75,10 +75,25 @@ typedef struct {
 typedef struct __hart_internal hart_t;
 typedef struct __vm_internel vm_t;
 
+/* IC_BLOCKS_SIZE: Size of one instruction-cache block (line).
+ * IC_BLOCKS: Number of blocks (lines) in the instruction cache.
+ *
+ * The cache address is decomposed into [ tag | index | offset ] fields:
+ *   - block-offset bits = log2(IC_BLOCKS_SIZE)
+ *   - index bits        = log2(IC_BLOCKS)
+ *
+ * For power-of-two values, log2(x) equals the number of trailing zero bits in
+ * x. Therefore, we use __builtin_ctz(x) (count trailing zeros) to compute these
+ * log2 values at compile time.
+ */
 #define IC_BLOCKS_SIZE 256
 #define IC_BLOCKS 256
-#define IC_SHIFT (__builtin_ctz((IC_BLOCKS_SIZE)))
+#define IC_OFFSET_BITS (__builtin_ctz((IC_BLOCKS_SIZE)))
 #define IC_INDEX_BITS (__builtin_ctz((IC_BLOCKS)))
+
+/* For power-of-two sizes, (size - 1) sets all low bits to 1,
+ * allowing fast extraction of an address.
+ */
 #define IC_INDEX_MASK (IC_BLOCKS - 1)
 #define IC_BLOCK_MASK (IC_BLOCKS_SIZE - 1)
 #define RV_PAGE_MASK (RV_PAGE_SIZE - 1)
@@ -87,14 +102,14 @@ typedef struct {
     uint32_t tag;
     const uint8_t *base;
     bool valid;
-} ic_block_t;
+} icache_block_t;
 
 typedef struct {
-    ic_block_t block[IC_BLOCKS];
-} ic_t;
+    icache_block_t block[IC_BLOCKS];
+} icache_t;
 
 struct __hart_internal {
-    ic_t ic;
+    icache_t ic;
     uint32_t x_regs[32];
 
     /* LR reservation virtual address. last bit is 1 if valid */
