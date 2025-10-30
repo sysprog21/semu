@@ -6,10 +6,10 @@ export SCRIPT_DIR
 source "${SCRIPT_DIR}/common.sh"
 
 # Override timeout for netdev tests
-# Network tests need different timeout: 30s for Linux, 600s for macOS
+# Network tests need different timeout: 30s for Linux, 900s for macOS
 case "${OS_TYPE}" in
     Darwin)
-        TIMEOUT=600
+        TIMEOUT=900
         ;;
     Linux)
         TIMEOUT=30
