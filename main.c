@@ -993,6 +993,9 @@ static void print_mmu_cache_stats(vm_t *vm)
  */
 static uint64_t calc_ns_until_next_interrupt(emu_state_t *emu)
 {
+    /* Cap at 100ms to maintain responsiveness for UART and other events */
+    const uint64_t MAX_WAIT_NS = 100000000ULL; /* 100ms */
+
     /* During boot, use fixed short timeout to avoid fake timer / real-time
      * mismatch. The fake timer advances slowly (incremental), but host OS
      * timers use wall clock time, which can cause large delays if we calculate
@@ -1004,20 +1007,42 @@ static uint64_t calc_ns_until_next_interrupt(emu_state_t *emu)
     uint64_t current_time = semu_timer_get(&emu->mtimer.mtime);
     uint64_t next_int = emu->mtimer.next_interrupt_at;
 
-    /* If interrupt is already due or very close, return immediately */
+    /* If timer is disabled (next_interrupt_at == UINT64_MAX), use maximum
+     * timeout to avoid arithmetic overflow.
+     */
+    if (next_int == UINT64_MAX)
+        return MAX_WAIT_NS;
+
+    /* If interrupt is already due, return immediately. This must be checked
+     * before any subtraction to avoid unsigned underflow.
+     */
     if (current_time >= next_int)
         return 0;
 
     /* Calculate ticks until interrupt */
     uint64_t ticks_remaining = next_int - current_time;
 
-    /* Convert RISC-V timer ticks to nanoseconds:
-     * ns = ticks * (1e9 / CLOCK_FREQ)
+    /* If there's an unreasonably large gap, cap at maximum timeout to avoid
+     * arithmetic overflow in the nanosecond conversion below.
      */
-    uint64_t ns = (ticks_remaining * 1000000000ULL) / emu->mtimer.mtime.freq;
+    if (ticks_remaining > UINT64_MAX / 1000)
+        return MAX_WAIT_NS;
 
-    /* Cap at 100ms to maintain responsiveness for UART and other events */
-    const uint64_t MAX_WAIT_NS = 100000000ULL; /* 100ms */
+    /* Convert RISC-V timer ticks to nanoseconds using overflow-safe arithmetic:
+     * ns = ticks * (1e9 / CLOCK_FREQ)
+     *
+     * To avoid overflow in (ticks_remaining * 1000000000ULL), we check if
+     * ticks_remaining would overflow. If it does, cap at MAX_WAIT_NS.
+     */
+    uint64_t freq = emu->mtimer.mtime.freq;
+    if (ticks_remaining > UINT64_MAX / 1000000000ULL) {
+        /* Would overflow - cap at maximum timeout */
+        return MAX_WAIT_NS;
+    }
+
+    uint64_t ns = (ticks_remaining * 1000000000ULL) / freq;
+
+    /* Cap at maximum timeout */
     if (ns > MAX_WAIT_NS)
         ns = MAX_WAIT_NS;
 
