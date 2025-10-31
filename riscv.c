@@ -190,6 +190,54 @@ void mmu_invalidate(hart_t *vm)
     vm->cache_store.n_pages = 0xFFFFFFFF;
 }
 
+/* Invalidate MMU caches for a specific virtual address range.
+ * If size is 0 or -1, invalidate all caches (equivalent to mmu_invalidate()).
+ * Otherwise, only invalidate cache entries whose VPN falls within
+ * [start_addr >> PAGE_SHIFT, (start_addr + size - 1) >> PAGE_SHIFT].
+ */
+void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
+{
+    /* SBI spec: size == 0 or size == -1 means flush entire address space */
+    if (size == 0 || size == (uint32_t) -1) {
+        mmu_invalidate(vm);
+        return;
+    }
+
+    /* Calculate VPN range: [start_vpn, end_vpn] inclusive.
+     * Use 64-bit arithmetic to prevent overflow when (start_addr + size - 1)
+     * exceeds UINT32_MAX. For example:
+     *   start_addr = 0xFFF00000, size = 0x00200000
+     *   32-bit: 0xFFF00000 + 0x00200000 - 1 = 0x000FFFFF (wraps)
+     *   64-bit: 0xFFF00000 + 0x00200000 - 1 = 0x100FFFFF (correct)
+     * Clamp to RV32 address space maximum before calculating end_vpn.
+     */
+    uint32_t start_vpn = start_addr >> RV_PAGE_SHIFT;
+    uint64_t end_addr = (uint64_t) start_addr + size - 1;
+    if (end_addr > UINT32_MAX)
+        end_addr = UINT32_MAX;
+    uint32_t end_vpn = (uint32_t) end_addr >> RV_PAGE_SHIFT;
+
+    /* Check each cache entry and invalidate if in range.
+     * Since we only have 4 cache entries total (fetch: 1, load: 2, store: 1),
+     * simple sequential checks are sufficient.
+     */
+    if (vm->cache_fetch.n_pages >= start_vpn &&
+        vm->cache_fetch.n_pages <= end_vpn)
+        vm->cache_fetch.n_pages = 0xFFFFFFFF;
+
+    if (vm->cache_load[0].n_pages >= start_vpn &&
+        vm->cache_load[0].n_pages <= end_vpn)
+        vm->cache_load[0].n_pages = 0xFFFFFFFF;
+
+    if (vm->cache_load[1].n_pages >= start_vpn &&
+        vm->cache_load[1].n_pages <= end_vpn)
+        vm->cache_load[1].n_pages = 0xFFFFFFFF;
+
+    if (vm->cache_store.n_pages >= start_vpn &&
+        vm->cache_store.n_pages <= end_vpn)
+        vm->cache_store.n_pages = 0xFFFFFFFF;
+}
+
 /* Pre-verify the root page table to minimize page table access during
  * translation time.
  */
