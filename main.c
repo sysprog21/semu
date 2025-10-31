@@ -911,15 +911,15 @@ static int semu_step(emu_state_t *emu)
 
 #ifdef MMU_CACHE_STATS
 static vm_t *global_vm_for_signal = NULL;
+static volatile sig_atomic_t signal_received = 0;
 
 /* Forward declaration */
 static void print_mmu_cache_stats(vm_t *vm);
 
+/* Async-signal-safe handler: only set flag, defer printing */
 static void signal_handler_stats(int sig UNUSED)
 {
-    if (global_vm_for_signal)
-        print_mmu_cache_stats(global_vm_for_signal);
-    exit(0);
+    signal_received = 1;
 }
 
 static void print_mmu_cache_stats(vm_t *vm)
@@ -1029,6 +1029,13 @@ static int semu_run(emu_state_t *emu)
 #endif
 
         while (!emu->stopped) {
+#ifdef MMU_CACHE_STATS
+            /* Check if signal received (SIGINT/SIGTERM) */
+            if (signal_received) {
+                print_mmu_cache_stats(&emu->vm);
+                return 0;
+            }
+#endif
             /* Resume each hart's coroutine in round-robin fashion */
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 coro_resume_hart(i);
@@ -1122,6 +1129,11 @@ static int semu_run(emu_state_t *emu)
             if (ret)
                 return ret;
 #ifdef MMU_CACHE_STATS
+            /* Check if signal received (SIGINT/SIGTERM) */
+            if (signal_received) {
+                print_mmu_cache_stats(&emu->vm);
+                return 0;
+            }
             /* Exit after running for 15 seconds to collect statistics */
             gettimeofday(&current_time, NULL);
             long elapsed_sec = current_time.tv_sec - start_time.tv_sec;
