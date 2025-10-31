@@ -25,6 +25,7 @@
 #include "mini-gdbstub/include/gdbstub.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "utils.h"
 #define PRIV(x) ((emu_state_t *) x->priv)
 
 /* Forward declarations for coroutine support */
@@ -986,9 +987,20 @@ static void print_mmu_cache_stats(vm_t *vm)
 
 /* Calculate nanoseconds until next timer interrupt.
  * Returns 0 if interrupt is already due, or capped at 100ms maximum.
+ *
+ * During boot (when using fake incremental timer), use conservative 1ms timeout
+ * to avoid mismatch between emulator time and host OS timer.
  */
 static uint64_t calc_ns_until_next_interrupt(emu_state_t *emu)
 {
+    /* During boot, use fixed short timeout to avoid fake timer / real-time
+     * mismatch. The fake timer advances slowly (incremental), but host OS
+     * timers use wall clock time, which can cause large delays if we calculate
+     * based on fake timer values.
+     */
+    if (!boot_complete)
+        return 1000000ULL; /* 1ms - conservative but safe during boot */
+
     uint64_t current_time = semu_timer_get(&emu->mtimer.mtime);
     uint64_t next_int = emu->mtimer.next_interrupt_at;
 
