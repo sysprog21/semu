@@ -105,9 +105,33 @@ static void emu_update_timer_interrupt(hart_t *hart)
 {
     emu_state_t *data = PRIV(hart);
 
-    /* Sync global timer with local timer */
+    /* Lazy timer checking. Only check timer interrupts when the current time
+     * has reached the earliest scheduled interrupt time. This avoids expensive
+     * semu_timer_get() calls and interrupt checks.
+     *
+     * Fast path: Skip if current time < next interrupt time
+     * Slow path: Check all harts' timers and recalculate next interrupt time
+     */
+    uint64_t current_time = semu_timer_get(&data->mtimer.mtime);
+    if (current_time < data->mtimer.next_interrupt_at) {
+        /* Fast path: No timer interrupt can fire yet, skip checking.
+         * Still sync the timer for correctness (hart->time is used by CSR
+         * reads).
+         */
+        hart->time = data->mtimer.mtime;
+        return;
+    }
+
+    /* Slow path: At least one timer might fire, check this hart */
     hart->time = data->mtimer.mtime;
     aclint_mtimer_update_interrupts(hart, &data->mtimer);
+
+    /* Recalculate next interrupt time after potential interrupt delivery.
+     * The kernel likely updated mtimecmp in the interrupt handler, which
+     * already called recalc, but we call it again to be safe in case
+     * multiple harts share the same mtimecmp value.
+     */
+    aclint_mtimer_recalc_next_interrupt(&data->mtimer);
 }
 
 static void emu_update_swi_interrupt(hart_t *hart)
@@ -342,6 +366,8 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(hart_t *hart, int32_t fid)
             (((uint64_t) hart->x_regs[RV_R_A1]) << 32) |
             (uint64_t) (hart->x_regs[RV_R_A0]);
         hart->sip &= ~RV_INT_STI_BIT;
+        /* Recalculate next interrupt time for lazy timer checking */
+        aclint_mtimer_recalc_next_interrupt(&data->mtimer);
         return (sbi_ret_t){SBI_SUCCESS, 0};
     default:
         return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
@@ -766,6 +792,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     /* Set up ACLINT */
     semu_timer_init(&emu->mtimer.mtime, CLOCK_FREQ, hart_count);
     emu->mtimer.mtimecmp = calloc(vm->n_hart, sizeof(uint64_t));
+    emu->mtimer.n_harts = vm->n_hart;
+    /* mtimecmp is initialized to 0 by calloc, so next_interrupt_at starts at 0.
+     * It will be updated when the kernel writes mtimecmp via SBI or MMIO.
+     */
+    emu->mtimer.next_interrupt_at = 0;
     emu->mswi.msip = calloc(vm->n_hart, sizeof(uint32_t));
     emu->sswi.ssip = calloc(vm->n_hart, sizeof(uint32_t));
 #if SEMU_HAS(VIRTIOSND)
@@ -953,6 +984,34 @@ static void print_mmu_cache_stats(vm_t *vm)
 }
 #endif
 
+/* Calculate nanoseconds until next timer interrupt.
+ * Returns 0 if interrupt is already due, or capped at 100ms maximum.
+ */
+static uint64_t calc_ns_until_next_interrupt(emu_state_t *emu)
+{
+    uint64_t current_time = semu_timer_get(&emu->mtimer.mtime);
+    uint64_t next_int = emu->mtimer.next_interrupt_at;
+
+    /* If interrupt is already due or very close, return immediately */
+    if (current_time >= next_int)
+        return 0;
+
+    /* Calculate ticks until interrupt */
+    uint64_t ticks_remaining = next_int - current_time;
+
+    /* Convert RISC-V timer ticks to nanoseconds:
+     * ns = ticks * (1e9 / CLOCK_FREQ)
+     */
+    uint64_t ns = (ticks_remaining * 1000000000ULL) / emu->mtimer.mtime.freq;
+
+    /* Cap at 100ms to maintain responsiveness for UART and other events */
+    const uint64_t MAX_WAIT_NS = 100000000ULL; /* 100ms */
+    if (ns > MAX_WAIT_NS)
+        ns = MAX_WAIT_NS;
+
+    return ns;
+}
+
 static int semu_run(emu_state_t *emu)
 {
     int ret;
@@ -974,36 +1033,20 @@ static int semu_run(emu_state_t *emu)
             return -1;
         }
 
-        /* Add 1ms periodic timer */
-        struct kevent kev_timer;
-        EV_SET(&kev_timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 1, NULL);
-        if (kevent(kq, &kev_timer, 1, NULL, 0, NULL) < 0) {
-            perror("kevent timer setup");
-            close(kq);
-            return -1;
-        }
-
-        /* Note: UART input is polled via u8250_check_ready(), no need to
-         * monitor with kqueue. Timer events are sufficient to wake from WFI.
+        /* Note: Timer is configured dynamically in the event loop based on
+         * next_interrupt_at. UART input is polled via u8250_check_ready().
          */
 #else
-        /* Linux: create timerfd for periodic wakeup */
+        /* Linux: create timerfd for dynamic timer wakeup */
         int wfi_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
         if (wfi_timer_fd < 0) {
             perror("timerfd_create");
             return -1;
         }
 
-        /* Configure 1ms periodic timer */
-        struct itimerspec its = {
-            .it_interval = {.tv_sec = 0, .tv_nsec = 1000000},
-            .it_value = {.tv_sec = 0, .tv_nsec = 1000000},
-        };
-        if (timerfd_settime(wfi_timer_fd, 0, &its, NULL) < 0) {
-            perror("timerfd_settime");
-            close(wfi_timer_fd);
-            return -1;
-        }
+        /* Timer is configured dynamically in the event loop based on
+         * next_interrupt_at to minimize unnecessary wakeups.
+         */
 #endif
 
         while (!emu->stopped) {
@@ -1025,30 +1068,61 @@ static int semu_run(emu_state_t *emu)
             }
             if (all_waiting) {
                 /* All harts waiting for interrupt - use event-driven wait
-                 * to reduce CPU usage while maintaining responsiveness
+                 * to reduce CPU usage while maintaining responsiveness.
+                 * Dynamically adjust timer based on next_interrupt_at.
                  */
-#ifdef __APPLE__
-                /* macOS: wait for kqueue events (timer or UART) */
-                struct kevent events[2];
-                int nevents = kevent(kq, NULL, 0, events, 2, NULL);
-                /* Events are automatically handled - timer fires every 1ms,
-                 * UART triggers on input. No need to explicitly consume. */
-                (void) nevents;
-#else
-                /* Linux: poll on timerfd and UART */
-                struct pollfd pfds[2];
-                pfds[0] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
-                pfds[1] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
-                poll(pfds, 2, -1);
 
-                /* Consume timerfd event to prevent accumulation */
-                if (pfds[0].revents & POLLIN) {
-                    uint64_t expirations;
-                    ssize_t ret =
-                        read(wfi_timer_fd, &expirations, sizeof(expirations));
-                    (void) ret; /* Ignore read errors - timer will retry */
-                }
+                /* Calculate how long to wait until next timer interrupt */
+                uint64_t wait_ns = calc_ns_until_next_interrupt(emu);
+
+                /* If interrupt is already due, don't wait - continue
+                 * immediately
+                 */
+                if (wait_ns > 0) {
+#ifdef __APPLE__
+                    /* configure one-shot kqueue timer with dynamic timeout */
+                    struct kevent kev_timer;
+                    /* NOTE_USECONDS for microseconds, wait_ns/1000 converts
+                     * ns to us
+                     */
+                    EV_SET(&kev_timer, 1, EVFILT_TIMER,
+                           EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_USECONDS,
+                           wait_ns / 1000, NULL);
+
+                    struct kevent events[2];
+                    int nevents = kevent(kq, &kev_timer, 1, events, 2, NULL);
+                    /* Events are automatically handled. Wakeup occurs on:
+                     * - Timer expiration (wait_ns elapsed)
+                     * - UART input (if monitored)
+                     */
+                    (void) nevents;
+#else
+                    /* Linux: configure timerfd with dynamic one-shot timeout */
+                    struct itimerspec its = {
+                        .it_interval = {0, 0}, /* One-shot, no repeat */
+                        .it_value = {wait_ns / 1000000000,
+                                     wait_ns % 1000000000},
+                    };
+                    if (timerfd_settime(wfi_timer_fd, 0, &its, NULL) < 0) {
+                        perror("timerfd_settime");
+                        /* Continue anyway - will retry next iteration */
+                    }
+
+                    /* Poll on timerfd and UART */
+                    struct pollfd pfds[2];
+                    pfds[0] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
+                    pfds[1] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
+                    poll(pfds, 2, -1);
+
+                    /* Consume timerfd event to prevent accumulation */
+                    if (pfds[0].revents & POLLIN) {
+                        uint64_t expirations;
+                        ssize_t ret = read(wfi_timer_fd, &expirations,
+                                           sizeof(expirations));
+                        (void) ret; /* Ignore read errors - timer will retry */
+                    }
 #endif
+                }
             }
         }
 
