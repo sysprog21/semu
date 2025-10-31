@@ -1,9 +1,10 @@
 /* Lightweight coroutine for multi-hart execution */
 
-#include "coro.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "coro.h"
 
 /* Platform detection */
 
@@ -601,4 +602,68 @@ bool coro_is_suspended(uint32_t hart_id)
 uint32_t coro_current_hart_id(void)
 {
     return coro_state.current_hart;
+}
+
+/* Debug-related coroutine functions for GDB integration */
+
+void coro_suspend_hart_debug(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.n_hart || !coro_state.initialized)
+        return;
+
+    /* Mark the hart as suspended for debugging.
+     * The scheduler should skip this hart until resumed.
+     */
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (co && co->state != CORO_STATE_DEAD)
+        co->state = CORO_STATE_SUSPENDED;
+}
+
+void coro_resume_hart_debug(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.n_hart || !coro_state.initialized)
+        return;
+
+    /* Resume the hart from debug suspension by delegating to coro_resume_hart.
+     * This ensures proper state transition and actually jumps into the
+     * coroutine, rather than just setting the state flag which would cause the
+     * scheduler to refuse resumption on the next iteration.
+     */
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (co && co->state == CORO_STATE_SUSPENDED)
+        coro_resume_hart(hart_id);
+}
+
+bool coro_is_debug_suspended(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.n_hart || !coro_state.initialized)
+        return false;
+
+    coro_t *co = coro_state.coroutines[hart_id];
+    return (co && co->state == CORO_STATE_SUSPENDED);
+}
+
+bool coro_step_hart(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.n_hart || !coro_state.initialized)
+        return false;
+
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (!co)
+        return false;
+
+    /* Only allow stepping if hart is currently suspended */
+    if (co->state != CORO_STATE_SUSPENDED)
+        return false;
+
+    /* Resume the coroutine for one instruction.
+     * DO NOT manually set state to RUNNING before calling coro_resume_hart(),
+     * as that function requires SUSPENDED state and will handle the transition.
+     * The hart coroutine should check single_step_mode and yield after one
+     * instruction.
+     */
+    coro_resume_hart(hart_id);
+
+    /* It should have yielded after one instruction and be suspended again */
+    return true;
 }
