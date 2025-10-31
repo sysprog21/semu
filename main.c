@@ -910,6 +910,18 @@ static int semu_step(emu_state_t *emu)
 }
 
 #ifdef MMU_CACHE_STATS
+static vm_t *global_vm_for_signal = NULL;
+
+/* Forward declaration */
+static void print_mmu_cache_stats(vm_t *vm);
+
+static void signal_handler_stats(int sig UNUSED)
+{
+    if (global_vm_for_signal)
+        print_mmu_cache_stats(global_vm_for_signal);
+    exit(0);
+}
+
 static void print_mmu_cache_stats(vm_t *vm)
 {
     fprintf(stderr, "\n=== MMU Cache Statistics ===\n");
@@ -918,15 +930,25 @@ static void print_mmu_cache_stats(vm_t *vm)
         uint64_t fetch_total =
             hart->cache_fetch.hits + hart->cache_fetch.misses;
 
-        /* Combine 2-way load cache statistics */
-        uint64_t load_hits =
-            hart->cache_load[0].hits + hart->cache_load[1].hits;
-        uint64_t load_misses =
-            hart->cache_load[0].misses + hart->cache_load[1].misses;
+        /* Combine 8-set × 2-way load cache statistics */
+        uint64_t load_hits = 0, load_misses = 0;
+        for (int set = 0; set < 8; set++) {
+            for (int way = 0; way < 2; way++) {
+                load_hits += hart->cache_load[set].ways[way].hits;
+                load_misses += hart->cache_load[set].ways[way].misses;
+            }
+        }
         uint64_t load_total = load_hits + load_misses;
 
-        uint64_t store_total =
-            hart->cache_store.hits + hart->cache_store.misses;
+        /* Combine 8-set × 2-way store cache statistics */
+        uint64_t store_hits = 0, store_misses = 0;
+        for (int set = 0; set < 8; set++) {
+            for (int way = 0; way < 2; way++) {
+                store_hits += hart->cache_store[set].ways[way].hits;
+                store_misses += hart->cache_store[set].ways[way].misses;
+            }
+        }
+        uint64_t store_total = store_hits + store_misses;
 
         fprintf(stderr, "\nHart %u:\n", i);
         fprintf(stderr, "  Fetch: %12llu hits, %12llu misses",
@@ -936,18 +958,18 @@ static void print_mmu_cache_stats(vm_t *vm)
                     100.0 * hart->cache_fetch.hits / fetch_total);
         fprintf(stderr, "\n");
 
-        fprintf(stderr, "  Load:  %12llu hits, %12llu misses (2-way)",
-                load_hits, load_misses);
+        fprintf(stderr, "  Load:  %12llu hits, %12llu misses (8x2)", load_hits,
+                load_misses);
         if (load_total > 0)
             fprintf(stderr, " (%.2f%% hit rate)",
                     100.0 * load_hits / load_total);
         fprintf(stderr, "\n");
 
-        fprintf(stderr, "  Store: %12llu hits, %12llu misses",
-                hart->cache_store.hits, hart->cache_store.misses);
+        fprintf(stderr, "  Store: %12llu hits, %12llu misses (8x2)", store_hits,
+                store_misses);
         if (store_total > 0)
             fprintf(stderr, " (%.2f%% hit rate)",
-                    100.0 * hart->cache_store.hits / store_total);
+                    100.0 * store_hits / store_total);
         fprintf(stderr, "\n");
     }
 }
@@ -1245,6 +1267,12 @@ int main(int argc, char **argv)
     ret = semu_init(&emu, argc, argv);
     if (ret)
         return ret;
+
+#ifdef MMU_CACHE_STATS
+    global_vm_for_signal = &emu.vm;
+    signal(SIGINT, signal_handler_stats);
+    signal(SIGTERM, signal_handler_stats);
+#endif
 
     if (emu.debug)
         ret = semu_run_debug(&emu);
