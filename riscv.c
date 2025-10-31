@@ -184,7 +184,8 @@ static inline uint32_t read_rs2(const hart_t *vm, uint32_t insn)
 
 void mmu_invalidate(hart_t *vm)
 {
-    vm->cache_fetch.n_pages = 0xFFFFFFFF;
+    vm->cache_fetch[0].n_pages = 0xFFFFFFFF;
+    vm->cache_fetch[1].n_pages = 0xFFFFFFFF;
     /* Invalidate all 8 sets × 2 ways for load cache */
     for (int set = 0; set < 8; set++) {
         for (int way = 0; way < 2; way++)
@@ -226,10 +227,12 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
         end_addr = UINT32_MAX;
     uint32_t end_vpn = (uint32_t) end_addr >> RV_PAGE_SHIFT;
 
-    /* Cache invalidation for fetch cache */
-    if (vm->cache_fetch.n_pages >= start_vpn &&
-        vm->cache_fetch.n_pages <= end_vpn)
-        vm->cache_fetch.n_pages = 0xFFFFFFFF;
+    /* Invalidate fetch cache: 2 entry */
+    for (int i = 0; i < 2; i++) {
+        if (vm->cache_fetch[i].n_pages >= start_vpn &&
+            vm->cache_fetch[i].n_pages <= end_vpn)
+            vm->cache_fetch[i].n_pages = 0xFFFFFFFF;
+    }
 
     /* Invalidate load cache: 8 sets × 2 ways */
     for (int set = 0; set < 8; set++) {
@@ -362,9 +365,10 @@ static void mmu_fence(hart_t *vm, uint32_t insn UNUSED)
 static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
 {
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
-    if (unlikely(vpn != vm->cache_fetch.n_pages)) {
+    uint32_t index = __builtin_parity(vpn) & 0x1;
+    if (unlikely(vpn != vm->cache_fetch[index].n_pages)) {
 #ifdef MMU_CACHE_STATS
-        vm->cache_fetch.misses++;
+        vm->cache_fetch[index].misses++;
 #endif
         mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
                       RV_EXC_FETCH_PFAULT);
@@ -374,15 +378,16 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
         vm->mem_fetch(vm, addr >> RV_PAGE_SHIFT, &page_addr);
         if (vm->error)
             return;
-        vm->cache_fetch.n_pages = vpn;
-        vm->cache_fetch.page_addr = page_addr;
+        vm->cache_fetch[index].n_pages = vpn;
+        vm->cache_fetch[index].page_addr = page_addr;
     }
 #ifdef MMU_CACHE_STATS
     else {
-        vm->cache_fetch.hits++;
+        vm->cache_fetch[index].hits++;
     }
 #endif
-    *value = vm->cache_fetch.page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
+    *value =
+        vm->cache_fetch[index].page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
 }
 
 static void mmu_load(hart_t *vm,

@@ -106,7 +106,8 @@ struct __hart_internal {
      */
     uint32_t exc_cause, exc_val;
 
-    mmu_fetch_cache_t cache_fetch;
+    /* 2-entry direct-mapped with hash-based indexing */
+    mmu_fetch_cache_t cache_fetch[2];
     /* 8-set × 2-way set-associative cache with 3-bit parity hash indexing */
     mmu_cache_set_t cache_load[8];
     /* 8-set × 2-way set-associative cache for store operations */

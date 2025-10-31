@@ -1024,8 +1024,11 @@ static void print_mmu_cache_stats(vm_t *vm)
     fprintf(stderr, "\n=== MMU Cache Statistics ===\n");
     for (uint32_t i = 0; i < vm->n_hart; i++) {
         hart_t *hart = vm->hart[i];
-        uint64_t fetch_total =
-            hart->cache_fetch.hits + hart->cache_fetch.misses;
+        uint64_t fetch_hits = 0, fetch_misses = 0;
+        fetch_hits = hart->cache_fetch[0].hits + hart->cache_fetch[1].hits;
+        fetch_misses =
+            hart->cache_fetch[0].misses + hart->cache_fetch[1].misses;
+        uint64_t fetch_total = fetch_hits + fetch_misses;
 
         /* Combine 8-set × 2-way load cache statistics */
         uint64_t load_hits = 0, load_misses = 0;
@@ -1048,11 +1051,11 @@ static void print_mmu_cache_stats(vm_t *vm)
         uint64_t store_total = store_hits + store_misses;
 
         fprintf(stderr, "\nHart %u:\n", i);
-        fprintf(stderr, "  Fetch: %12llu hits, %12llu misses",
-                hart->cache_fetch.hits, hart->cache_fetch.misses);
+        fprintf(stderr, "  Fetch: %12llu hits, %12llu misses", fetch_hits,
+                fetch_misses);
         if (fetch_total > 0)
             fprintf(stderr, " (%.2f%% hit rate)",
-                    100.0 * hart->cache_fetch.hits / fetch_total);
+                    100.0 * fetch_hits / fetch_total);
         fprintf(stderr, "\n");
 
         fprintf(stderr, "  Load:  %12llu hits, %12llu misses (8x2)", load_hits,
