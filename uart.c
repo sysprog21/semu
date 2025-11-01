@@ -6,6 +6,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "coro.h"
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -86,12 +87,45 @@ static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
         fprintf(stderr, "failed to write UART output: %s\n", strerror(errno));
 }
 
+/* Wait for UART input using coroutine yield (SMP mode only)
+ * This function allows a hart to yield when no UART input is available,
+ * preventing CPU spinning when waiting for stdin. The hart will be resumed
+ * by the event loop when stdin becomes readable.
+ */
+static void u8250_wait_for_input(u8250_state_t *uart)
+{
+    /* Only yield in SMP mode - single-core mode doesn't use coroutines */
+    uint32_t hart_id = coro_current_hart_id();
+    if (hart_id == UINT32_MAX)
+        return; /* Not in a coroutine, skip yielding */
+
+    /* Mark this hart as waiting for UART input */
+    uart->waiting_hart_id = hart_id;
+    uart->has_waiting_hart = true;
+
+    /* Yield until stdin has data available. The event loop will resume this
+     * hart when poll() detects POLLIN on stdin fd.
+     */
+    coro_yield();
+
+    /* Resumed - clear waiting state */
+    uart->has_waiting_hart = false;
+    uart->waiting_hart_id = UINT32_MAX;
+}
+
 static uint8_t u8250_handle_in(u8250_state_t *uart)
 {
     uint8_t value = 0;
     u8250_check_ready(uart);
-    if (!uart->in_ready)
-        return value;
+
+    /* If no data available, yield and wait for stdin to become readable */
+    if (!uart->in_ready) {
+        u8250_wait_for_input(uart);
+        /* After resume, re-check if data is now available */
+        u8250_check_ready(uart);
+        if (!uart->in_ready)
+            return value; /* Spurious wakeup - still no data */
+    }
 
     if (read(uart->in_fd, &value, 1) < 0)
         fprintf(stderr, "failed to read UART input: %s\n", strerror(errno));

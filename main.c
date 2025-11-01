@@ -768,6 +768,8 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
 
     /* Set up peripherals */
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
+    emu->uart.waiting_hart_id = UINT32_MAX;
+    emu->uart.has_waiting_hart = false;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
     /* Always set ram pointer, even if netdev is not configured.
@@ -1177,29 +1179,42 @@ static int semu_run(emu_state_t *emu)
                 pfd_count++;
             }
 
-            /* Determine poll timeout based on hart WFI states:
+            /* Determine poll timeout based on hart states BEFORE resuming them.
+             * This check must happen before coro_resume_hart() modifies flags.
+             *
              * - If no harts are STARTED, block indefinitely (wait for IPI)
-             * - If all STARTED harts are in WFI, block indefinitely
+             * - If all STARTED harts are idle (WFI or UART waiting), block
              * - Otherwise, use non-blocking poll (timeout=0)
              */
             int poll_timeout = 0;
             uint32_t started_harts = 0;
-            uint32_t wfi_harts = 0;
+            uint32_t idle_harts = 0;
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
                     started_harts++;
-                    if (vm->hart[i]->in_wfi)
-                        wfi_harts++;
+                    /* Count hart as idle if it's in WFI or waiting for UART */
+                    if (vm->hart[i]->in_wfi ||
+                        (emu->uart.has_waiting_hart &&
+                         emu->uart.waiting_hart_id == i)) {
+                        idle_harts++;
+                    }
                 }
             }
-            /* Block if no harts running or all running harts are waiting */
+
+            /* Set poll timeout based on current idle state.
+             * Block if no harts running or all running harts are idle.
+             */
             if (pfd_count > 0 &&
-                (started_harts == 0 || wfi_harts == started_harts))
-                poll_timeout = -1;
+                (started_harts == 0 || idle_harts == started_harts)) {
+                poll_timeout = -1; /* Blocking poll - wait for events */
+            } else {
+                poll_timeout = 0; /* Non-blocking poll - harts have work */
+            }
 
             /* Execute poll() to wait for I/O events.
-             * - timeout=0: non-blocking poll when harts are running
-             * - timeout=-1: blocking poll when all harts in WFI (idle state)
+             * - timeout=0: non-blocking poll when harts are active
+             * - timeout=-1: blocking poll when all harts idle (WFI or UART
+             * wait)
              */
             if (pfd_count > 0) {
                 int nevents = poll(pfds, pfd_count, poll_timeout);
@@ -1231,6 +1246,11 @@ static int semu_run(emu_state_t *emu)
              * Each hart executes a batch of instructions, then yields back.
              * Harts in WFI will clear their in_wfi flag when resuming from
              * coro_yield() in wfi_handler().
+             *
+             * Note: We must always resume harts after poll() returns, even if
+             * all harts appear idle. The in_wfi flag is only cleared during
+             * resume, so skipping resume would cause a deadlock where harts
+             * remain stuck waiting even after events arrive.
              */
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 coro_resume_hart(i);
