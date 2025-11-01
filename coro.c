@@ -607,5 +607,9 @@ bool coro_is_suspended(uint32_t slot_id)
 
 uint32_t coro_current_hart_id(void)
 {
+    /* Return sentinel value if coroutine subsystem not initialized */
+    if (!coro_state.initialized)
+        return UINT32_MAX;
+
     return coro_state.current_hart;
 }

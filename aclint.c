@@ -6,10 +6,13 @@
 /* ACLINT MTIMER */
 void aclint_mtimer_update_interrupts(hart_t *hart, mtimer_state_t *mtimer)
 {
-    if (semu_timer_get(&mtimer->mtime) >= mtimer->mtimecmp[hart->mhartid])
+    if (semu_timer_get(&mtimer->mtime) >= mtimer->mtimecmp[hart->mhartid]) {
         hart->sip |= RV_INT_STI_BIT; /* Set Supervisor Timer Interrupt */
-    else
+        /* Clear WFI flag when interrupt is injected - wakes the hart */
+        hart->in_wfi = false;
+    } else {
         hart->sip &= ~RV_INT_STI_BIT; /* Clear Supervisor Timer Interrupt */
+    }
 }
 
 static bool aclint_mtimer_reg_read(mtimer_state_t *mtimer,
@@ -106,10 +109,13 @@ void aclint_mtimer_write(hart_t *hart,
 /* ACLINT MSWI */
 void aclint_mswi_update_interrupts(hart_t *hart, mswi_state_t *mswi)
 {
-    if (mswi->msip[hart->mhartid])
+    if (mswi->msip[hart->mhartid]) {
         hart->sip |= RV_INT_SSI_BIT; /* Set Machine Software Interrupt */
-    else
+        /* Clear WFI flag when interrupt is injected */
+        hart->in_wfi = false;
+    } else {
         hart->sip &= ~RV_INT_SSI_BIT; /* Clear Machine Software Interrupt */
+    }
 }
 
 static bool aclint_mswi_reg_read(mswi_state_t *mswi,
@@ -165,10 +171,13 @@ void aclint_mswi_write(hart_t *hart,
 /* ACLINT SSWI */
 void aclint_sswi_update_interrupts(hart_t *hart, sswi_state_t *sswi)
 {
-    if (sswi->ssip[hart->mhartid])
+    if (sswi->ssip[hart->mhartid]) {
         hart->sip |= RV_INT_SSI_BIT; /* Set Supervisor Software Interrupt */
-    else
+        /* Clear WFI flag when interrupt is injected */
+        hart->in_wfi = false;
+    } else {
         hart->sip &= ~RV_INT_SSI_BIT; /* Clear Supervisor Software Interrupt */
+    }
 }
 
 static bool aclint_sswi_reg_read(__attribute__((unused)) sswi_state_t *sswi,

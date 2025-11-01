@@ -768,6 +768,8 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
 
     /* Set up peripherals */
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
+    emu->uart.waiting_hart_id = UINT32_MAX;
+    emu->uart.has_waiting_hart = false;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
     /* Always set ram pointer, even if netdev is not configured.
@@ -809,7 +811,7 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->peripheral_update_ctr = 0;
     emu->debug = debug;
 
-    /* Initialize coroutine system for SMP mode (n_hart > 1) */
+    /* Initialize coroutine system for multi-hart mode (SMP > 1) */
     if (vm->n_hart > 1) {
         uint32_t total_slots = vm->n_hart;
 #if SEMU_HAS(VIRTIONET)
@@ -853,17 +855,29 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
  */
 static void wfi_handler(hart_t *hart)
 {
-    vm_t *vm = hart->vm;
-    /* Only yield in SMP mode (n_hart > 1) */
-    if (vm->n_hart > 1) {
-        /* Per RISC-V spec: WFI returns immediately if interrupt is pending.
-         * Only yield to scheduler if no interrupt is currently pending.
+    /* Per RISC-V spec: WFI returns immediately if interrupt is pending.
+     * We check if any interrupt is actually pending (sip & sie != 0).
+     */
+    bool interrupt_pending = (hart->sip & hart->sie) != 0;
+
+    if (!interrupt_pending) {
+        emu_state_t *emu = PRIV(hart);
+        vm_t *vm = &emu->vm;
+
+        /* Only use coroutine yielding in multi-hart mode where the coroutine
+         * scheduler loop is active. In single-hart mode, WFI is a no-op since
+         * there's no scheduler to resume execution after yield.
          */
-        if (!(hart->sip & hart->sie)) {
-            hart->in_wfi = true;  /* Mark as waiting for interrupt */
-            coro_yield();         /* Suspend until scheduler resumes us */
-            hart->in_wfi = false; /* Resumed - no longer waiting */
+        if (vm->n_hart > 1) {
+            hart->in_wfi = true; /* Mark as waiting for interrupt */
+            coro_yield();        /* Suspend until scheduler resumes us */
+            /* NOTE: Do NOT clear in_wfi here to avoid race condition.
+             * The scheduler needs to see this flag to detect idle state.
+             * The flag will be cleared when an interrupt is actually injected.
+             */
         }
+    } else {
+        hart->in_wfi = false; /* Clear if interrupt already pending */
     }
 }
 
@@ -1150,87 +1164,150 @@ static int semu_run(emu_state_t *emu)
                 poll_capacity = needed;
             }
 
+            /* Determine poll timeout based on hart states BEFORE setting up
+             * poll fds. This check must happen before coro_resume_hart()
+             * modifies flags.
+             *
+             * - If no harts are STARTED, block indefinitely (wait for IPI)
+             * - If all STARTED harts are idle (WFI or UART waiting), block
+             * - Otherwise, use non-blocking poll (timeout=0)
+             */
+            int poll_timeout = 0;
+            uint32_t started_harts = 0;
+            uint32_t idle_harts = 0;
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
+                    started_harts++;
+                    /* Count hart as idle if it's in WFI or waiting for UART */
+                    if (vm->hart[i]->in_wfi ||
+                        (emu->uart.has_waiting_hart &&
+                         emu->uart.waiting_hart_id == i)) {
+                        idle_harts++;
+                    }
+                }
+            }
+
             /* Collect file descriptors for poll() */
             size_t pfd_count = 0;
             int timer_index = -1;
 
-            /* Add periodic timer fd (1ms interval for guest timer emulation) */
+            /* Add periodic timer fd (1ms interval for guest timer emulation).
+             * Only add timer when ALL harts are active (none idle) to allow
+             * poll() to sleep when any harts are in WFI. When harts are idle,
+             * timer updates can be deferred until they wake up.
+             *
+             * During SMP boot (started_harts < vm->n_hart), always include the
+             * timer to ensure secondary harts can complete initialization. Only
+             * apply conditional exclusion after all harts have started.
+             *
+             * For single-hart configurations (n_hart == 1), disable
+             * optimization entirely to avoid boot issues, as the first hart
+             * starts immediately.
+             */
+            bool all_harts_started = (started_harts >= vm->n_hart);
+            bool harts_active =
+                (vm->n_hart == 1) || !all_harts_started || (idle_harts == 0);
 #ifdef __APPLE__
             /* macOS: use kqueue with EVFILT_TIMER */
-            if (kq >= 0 && pfd_count < poll_capacity) {
+            if (kq >= 0 && pfd_count < poll_capacity && harts_active) {
                 pfds[pfd_count] = (struct pollfd){kq, POLLIN, 0};
                 timer_index = (int) pfd_count;
                 pfd_count++;
             }
 #else
             /* Linux: use timerfd */
-            if (wfi_timer_fd >= 0 && pfd_count < poll_capacity) {
+            if (wfi_timer_fd >= 0 && pfd_count < poll_capacity &&
+                harts_active) {
                 pfds[pfd_count] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
                 timer_index = (int) pfd_count;
                 pfd_count++;
             }
 #endif
 
-            /* Add UART input fd (stdin for keyboard input) */
-            if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity) {
+            /* Add UART input fd (stdin for keyboard input).
+             * Only add UART when:
+             * 1. Single-hart configuration (n_hart == 1), OR
+             * 2. Not all harts started (!all_harts_started), OR
+             * 3. All harts are active (idle_harts == 0), OR
+             * 4. A hart is actively waiting for UART input
+             *
+             * This prevents UART (which is always "readable" on TTY) from
+             * preventing poll() sleep when harts are idle. Trade-off: user
+             * input (Ctrl+A x) may be delayed by up to poll_timeout (10ms)
+             * when harts are idle, which is acceptable for an emulator.
+             */
+            bool need_uart = (vm->n_hart == 1) || !all_harts_started ||
+                             (idle_harts == 0) || emu->uart.has_waiting_hart;
+            if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity &&
+                need_uart) {
                 pfds[pfd_count] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
                 pfd_count++;
             }
 
-            /* Determine poll timeout based on hart WFI states:
-             * - If no harts are STARTED, block indefinitely (wait for IPI)
-             * - If all STARTED harts are in WFI, block indefinitely
-             * - Otherwise, use non-blocking poll (timeout=0)
+            /* Set poll timeout based on current idle state (adaptive timeout).
+             * Three-tier strategy:
+             * 1. Blocking (-1): All harts idle + have fds → wait for events
+             * 2. Short sleep (10ms): Some harts idle → reduce CPU usage
+             * 3. Non-blocking (0): All harts active → maximum responsiveness
+             *
+             * SAFETY: Never use blocking timeout when pfd_count==0, as
+             * poll(0,-1) would hang indefinitely. Always use 10ms timeout as
+             * fallback.
              */
-            int poll_timeout = 0;
-            uint32_t started_harts = 0;
-            uint32_t wfi_harts = 0;
-            for (uint32_t i = 0; i < vm->n_hart; i++) {
-                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
-                    started_harts++;
-                    if (vm->hart[i]->in_wfi)
-                        wfi_harts++;
-                }
-            }
-            /* Block if no harts running or all running harts are waiting */
             if (pfd_count > 0 &&
-                (started_harts == 0 || wfi_harts == started_harts))
+                (started_harts == 0 || idle_harts == started_harts)) {
+                /* All harts idle + have fds: block until event */
                 poll_timeout = -1;
+            } else if (idle_harts > 0) {
+                /* Some/all harts idle (or all idle but no fds): 10ms sleep */
+                poll_timeout = 10;
+            } else {
+                /* All harts active: non-blocking */
+                poll_timeout = 0;
+            }
 
             /* Execute poll() to wait for I/O events.
-             * - timeout=0: non-blocking poll when harts are running
-             * - timeout=-1: blocking poll when all harts in WFI (idle state)
+             * - timeout=0: non-blocking poll when harts are active
+             * - timeout=10: short sleep when some harts idle
+             * - timeout=-1: blocking poll when all harts idle (WFI or UART
+             *   wait)
+             *
+             * When pfd_count==0, poll() acts as a pure sleep mechanism.
              */
-            if (pfd_count > 0) {
-                int nevents = poll(pfds, pfd_count, poll_timeout);
-                if (nevents > 0) {
-                    /* Consume timer expiration events to prevent fd staying
-                     * readable
-                     */
-                    if (timer_index >= 0 &&
-                        (pfds[timer_index].revents & POLLIN)) {
+            int nevents = poll(pfds, pfd_count, poll_timeout);
+
+            if (pfd_count > 0 && nevents > 0) {
+                /* Consume timer expiration events to prevent fd staying
+                 * readable
+                 */
+                if (timer_index >= 0 && (pfds[timer_index].revents & POLLIN)) {
 #ifdef __APPLE__
-                        /* drain kqueue events with non-blocking kevent */
-                        struct kevent events[32];
-                        struct timespec timeout_zero = {0, 0};
-                        kevent(kq, NULL, 0, events, 32, &timeout_zero);
+                    /* drain kqueue events with non-blocking kevent */
+                    struct kevent events[32];
+                    struct timespec timeout_zero = {0, 0};
+                    kevent(kq, NULL, 0, events, 32, &timeout_zero);
 #else
-                        /* Linux: read timerfd to consume expiration count */
-                        uint64_t expirations;
-                        ssize_t ret_read = read(wfi_timer_fd, &expirations,
-                                                sizeof(expirations));
-                        (void) ret_read;
+                    /* Linux: read timerfd to consume expiration count */
+                    uint64_t expirations;
+                    ssize_t ret_read =
+                        read(wfi_timer_fd, &expirations, sizeof(expirations));
+                    (void) ret_read;
 #endif
-                    }
-                } else if (nevents < 0 && errno != EINTR) {
-                    perror("poll");
                 }
+            } else if (nevents < 0 && errno != EINTR) {
+                perror("poll");
             }
 
             /* Resume all hart coroutines (round-robin scheduling).
              * Each hart executes a batch of instructions, then yields back.
-             * Harts in WFI will clear their in_wfi flag when resuming from
-             * coro_yield() in wfi_handler().
+             * Harts in WFI will have their in_wfi flag cleared by interrupt
+             * handlers (ACLINT, PLIC, UART) when interrupts are injected.
+             *
+             * Note: We must always resume harts after poll() returns, even if
+             * all harts appear idle. The in_wfi flag is only cleared when
+             * interrupt sources inject interrupts, so skipping resume would
+             * cause a deadlock where harts remain stuck waiting even after
+             * events arrive.
              */
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 coro_resume_hart(i);

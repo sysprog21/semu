@@ -11,10 +11,13 @@ void plic_update_interrupts(vm_t *vm, plic_state_t *plic)
     plic->masked |= plic->active;
     /* Send interrupt to target */
     for (uint32_t i = 0; i < vm->n_hart; i++) {
-        if (plic->ip & plic->ie[i])
+        if (plic->ip & plic->ie[i]) {
             vm->hart[i]->sip |= RV_INT_SEI_BIT;
-        else
+            /* Clear WFI flag when external interrupt is injected */
+            vm->hart[i]->in_wfi = false;
+        } else {
             vm->hart[i]->sip &= ~RV_INT_SEI_BIT;
+        }
     }
 }
 
