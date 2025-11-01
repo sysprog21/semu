@@ -163,6 +163,11 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
             emu_update_vblk_interrupts(vm);
 #endif
 
+#if SEMU_HAS(VIRTIORNG)
+        if (emu->vrng.InterruptStatus)
+            emu_update_vrng_interrupts(vm);
+#endif
+
 #if SEMU_HAS(VIRTIOSND)
         if (emu->vsnd.InterruptStatus)
             emu_update_vsnd_interrupts(vm);
@@ -193,7 +198,6 @@ static void mem_load(hart_t *hart,
         case 0x0:
         case 0x2: /* PLIC (0 - 0x3F) */
             plic_read(hart, &data->plic, addr & 0x3FFFFFF, width, value);
-            plic_update_interrupts(hart->vm, &data->plic);
             return;
         case 0x40: /* UART */
             u8250_read(hart, &data->uart, addr & 0xFFFFF, width, value);
@@ -202,46 +206,38 @@ static void mem_load(hart_t *hart,
 #if SEMU_HAS(VIRTIONET)
         case 0x41: /* virtio-net */
             virtio_net_read(hart, &data->vnet, addr & 0xFFFFF, width, value);
-            emu_update_vnet_interrupts(hart->vm);
             return;
 #endif
 #if SEMU_HAS(VIRTIOBLK)
         case 0x42: /* virtio-blk */
             virtio_blk_read(hart, &data->vblk, addr & 0xFFFFF, width, value);
-            emu_update_vblk_interrupts(hart->vm);
             return;
 #endif
         case 0x43: /* mtimer */
             aclint_mtimer_read(hart, &data->mtimer, addr & 0xFFFFF, width,
                                value);
-            aclint_mtimer_update_interrupts(hart, &data->mtimer);
             return;
         case 0x44: /* mswi */
             aclint_mswi_read(hart, &data->mswi, addr & 0xFFFFF, width, value);
-            aclint_mswi_update_interrupts(hart, &data->mswi);
             return;
         case 0x45: /* sswi */
             aclint_sswi_read(hart, &data->sswi, addr & 0xFFFFF, width, value);
-            aclint_sswi_update_interrupts(hart, &data->sswi);
             return;
 #if SEMU_HAS(VIRTIORNG)
         case 0x46: /* virtio-rng */
             virtio_rng_read(hart, &data->vrng, addr & 0xFFFFF, width, value);
-            emu_update_vrng_interrupts(hart->vm);
             return;
 #endif
 
 #if SEMU_HAS(VIRTIOSND)
         case 0x47: /* virtio-snd */
             virtio_snd_read(hart, &data->vsnd, addr & 0xFFFFF, width, value);
-            emu_update_vsnd_interrupts(hart->vm);
             return;
 #endif
 
 #if SEMU_HAS(VIRTIOFS)
         case 0x48: /* virtio-fs */
             virtio_fs_read(hart, &data->vfs, addr & 0xFFFFF, width, value);
-            emu_update_vfs_interrupts(hart->vm);
             return;
 #endif
         }
