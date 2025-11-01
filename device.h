@@ -60,6 +60,9 @@ typedef struct {
     /* I/O handling */
     int in_fd, out_fd;
     bool in_ready;
+    /* Coroutine support for input waiting (SMP mode) */
+    uint32_t waiting_hart_id; /**< Hart ID waiting for input */
+    bool has_waiting_hart;    /**< true if a hart is yielding for input */
 } u8250_state_t;
 
 void u8250_update_interrupts(u8250_state_t *uart);
