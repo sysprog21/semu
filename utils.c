@@ -1,4 +1,6 @@
+#include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <time.h>
 
 #include "utils.h"
@@ -23,6 +25,10 @@
 bool boot_complete = false;
 static double ticks_increment;
 static double boot_ticks;
+
+/* Timer calibration statistics */
+static uint64_t timer_call_count = 0;
+static int timer_n_harts = 1;
 
 /* Calculate "x * n / d" without unnecessary overflow or loss of precision.
  *
@@ -88,6 +94,7 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
     static bool first_switch = true;
 
     if (!boot_complete) {
+        timer_call_count++;
         boot_ticks += ticks_increment;
         return (uint64_t) boot_ticks;
     }
@@ -98,6 +105,34 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
 
         /* Calculate the offset between the real time and the emulator time */
         offset = (int64_t) (real_ticks - boot_ticks);
+
+#ifdef SEMU_TIMER_STATS
+        /* Output timer calibration statistics (only when SEMU_TIMER_STATS is
+         * defined) */
+        double actual_coefficient = (double) timer_call_count / timer_n_harts;
+        double current_coefficient = 1.744e8;
+        double recommended_coefficient = actual_coefficient;
+
+        fprintf(stderr, "\n[Timer Calibration Statistics]\n");
+        fprintf(stderr, "  Boot completed after %llu timer calls\n",
+                (unsigned long long) timer_call_count);
+        fprintf(stderr, "  Number of harts: %d\n", timer_n_harts);
+        fprintf(stderr, "  Actual coefficient: %.3e (%.2f calls per hart)\n",
+                actual_coefficient, actual_coefficient);
+        fprintf(stderr, "  Current coefficient: %.3e\n", current_coefficient);
+        fprintf(stderr, "  Difference: %.2f%% %s\n",
+                fabs(actual_coefficient - current_coefficient) /
+                    current_coefficient * 100.0,
+                actual_coefficient > current_coefficient ? "(more calls)"
+                                                         : "(fewer calls)");
+        fprintf(stderr, "\n[Recommendation]\n");
+        fprintf(stderr, "  Update utils.c line 121 to:\n");
+        fprintf(stderr,
+                "  ticks_increment = (SEMU_BOOT_TARGET_TIME * CLOCK_FREQ) / "
+                "(%.3e * n_harts);\n",
+                recommended_coefficient);
+        fprintf(stderr, "\n");
+#endif
     }
     return (uint64_t) ((int64_t) real_ticks - offset);
 }
@@ -108,14 +143,28 @@ void semu_timer_init(semu_timer_t *timer, uint64_t freq, int n_harts)
     timer->begin = mult_frac(host_time_ns(), timer->freq, 1e9);
     boot_ticks = timer->begin; /* Initialize the fake ticks for boot process */
 
+    /* Store n_harts for calibration statistics */
+    timer_n_harts = n_harts;
+
     /* According to statistics, the number of times 'semu_timer_clocksource'
-     * called is approximately 'SMP count * 2.15 * 1e8'. By the time the boot
+     * called is approximately 'SMP count * 1.744 * 1e8'. By the time the boot
      * process is completed, the emulator will have a total of 'boot seconds *
-     * frequency' ticks. Therefore, each time, '(boot seconds * frequency) /
-     * (2.15 * 1e8 * SMP count)' ticks need to be added.
+     * frequency' ticks. Therefore, each time, (boot seconds * frequency) /
+     * (1.744 * 1e8 * SMP count) ticks need to be added.
+     *
+     * Note: This coefficient was recalibrated after MMU cache optimization
+     * (8×2 set-associative with 99%+ hit rate). The original coefficient
+     * (2.15 * 1e8) was based on measurements before the optimization. With
+     * faster CPU execution, fewer timer calls are needed to complete boot.
+     *
+     * Calibration history:
+     * - Original (pre-MMU cache): 2.15 × 10^8
+     * - After MMU cache (measured): 1.696 × 10^8 (-21.1%)
+     * - Verification measurement: 1.744 × 10^8 (error: 2.85%)
+     * - Final coefficient: 1.744 × 10^8 (based on verification)
      */
     ticks_increment =
-        (SEMU_BOOT_TARGET_TIME * CLOCK_FREQ) / (2.15 * 1e8 * n_harts);
+        (SEMU_BOOT_TARGET_TIME * CLOCK_FREQ) / (1.744 * 1e8 * n_harts);
 }
 
 uint64_t semu_timer_get(semu_timer_t *timer)

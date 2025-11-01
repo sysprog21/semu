@@ -185,9 +185,18 @@ static inline uint32_t read_rs2(const hart_t *vm, uint32_t insn)
 void mmu_invalidate(hart_t *vm)
 {
     vm->cache_fetch.n_pages = 0xFFFFFFFF;
-    vm->cache_load[0].n_pages = 0xFFFFFFFF;
-    vm->cache_load[1].n_pages = 0xFFFFFFFF;
-    vm->cache_store.n_pages = 0xFFFFFFFF;
+    /* Invalidate all 8 sets × 2 ways for load cache */
+    for (int set = 0; set < 8; set++) {
+        for (int way = 0; way < 2; way++)
+            vm->cache_load[set].ways[way].n_pages = 0xFFFFFFFF;
+        vm->cache_load[set].lru = 0; /* Reset LRU to way 0 */
+    }
+    /* Invalidate all 8 sets × 2 ways for store cache */
+    for (int set = 0; set < 8; set++) {
+        for (int way = 0; way < 2; way++)
+            vm->cache_store[set].ways[way].n_pages = 0xFFFFFFFF;
+        vm->cache_store[set].lru = 0; /* Reset LRU to way 0 */
+    }
 }
 
 /* Pre-verify the root page table to minimize page table access during
@@ -333,13 +342,36 @@ static void mmu_load(hart_t *vm,
 {
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t phys_addr;
-    /* 2-entry direct-mapped cache: use parity hash to select entry */
-    uint32_t index = __builtin_parity(vpn) & 0x1;
+    /* 8-set × 2-way set-associative cache: use 3-bit parity hash */
+    uint32_t set_idx = (__builtin_parity(vpn & 0xAAAAAAAA) << 2) |
+                       (__builtin_parity(vpn & 0x55555555) << 1) |
+                       __builtin_parity(vpn & 0xCCCCCCCC);
 
-    if (unlikely(vpn != vm->cache_load[index].n_pages)) {
-        /* Cache miss: do full translation */
+    mmu_cache_set_t *set = &vm->cache_load[set_idx];
+
+    /* Check both ways in the set */
+    int hit_way = -1;
+    for (int way = 0; way < 2; way++) {
+        if (likely(set->ways[way].n_pages == vpn)) {
+            hit_way = way;
+            break;
+        }
+    }
+
+    if (likely(hit_way >= 0)) {
+        /* Cache hit: reconstruct physical address from cached PPN */
 #ifdef MMU_CACHE_STATS
-        vm->cache_load[index].misses++;
+        set->ways[hit_way].hits++;
+#endif
+        phys_addr = (set->ways[hit_way].phys_ppn << RV_PAGE_SHIFT) |
+                    (addr & MASK(RV_PAGE_SHIFT));
+        /* Update LRU: mark the other way as replacement candidate */
+        set->lru = 1 - hit_way;
+    } else {
+        /* Cache miss: do full translation */
+        int victim_way = set->lru; /* Use LRU bit to select victim */
+#ifdef MMU_CACHE_STATS
+        set->ways[victim_way].misses++;
 #endif
         phys_addr = addr;
         mmu_translate(vm, &phys_addr,
@@ -348,16 +380,11 @@ static void mmu_load(hart_t *vm,
                       RV_EXC_LOAD_PFAULT);
         if (vm->error)
             return;
-        /* Cache physical page number (not a pointer) */
-        vm->cache_load[index].n_pages = vpn;
-        vm->cache_load[index].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
-    } else {
-        /* Cache hit: reconstruct physical address from cached PPN */
-#ifdef MMU_CACHE_STATS
-        vm->cache_load[index].hits++;
-#endif
-        phys_addr = (vm->cache_load[index].phys_ppn << RV_PAGE_SHIFT) |
-                    (addr & MASK(RV_PAGE_SHIFT));
+        /* Replace victim way with new translation */
+        set->ways[victim_way].n_pages = vpn;
+        set->ways[victim_way].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+        /* Update LRU: mark the other way for next eviction */
+        set->lru = 1 - victim_way;
     }
 
     vm->mem_load(vm, phys_addr, width, value);
@@ -376,11 +403,36 @@ static bool mmu_store(hart_t *vm,
 {
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t phys_addr;
+    /* 8-set × 2-way set-associative cache: use 3-bit parity hash */
+    uint32_t set_idx = (__builtin_parity(vpn & 0xAAAAAAAA) << 2) |
+                       (__builtin_parity(vpn & 0x55555555) << 1) |
+                       __builtin_parity(vpn & 0xCCCCCCCC);
 
-    if (unlikely(vpn != vm->cache_store.n_pages)) {
-        /* Cache miss: do full translation */
+    mmu_cache_set_t *set = &vm->cache_store[set_idx];
+
+    /* Check both ways in the set */
+    int hit_way = -1;
+    for (int way = 0; way < 2; way++) {
+        if (likely(set->ways[way].n_pages == vpn)) {
+            hit_way = way;
+            break;
+        }
+    }
+
+    if (likely(hit_way >= 0)) {
+        /* Cache hit: reconstruct physical address from cached PPN */
 #ifdef MMU_CACHE_STATS
-        vm->cache_store.misses++;
+        set->ways[hit_way].hits++;
+#endif
+        phys_addr = (set->ways[hit_way].phys_ppn << RV_PAGE_SHIFT) |
+                    (addr & MASK(RV_PAGE_SHIFT));
+        /* Update LRU: mark the other way as replacement candidate */
+        set->lru = 1 - hit_way;
+    } else {
+        /* Cache miss: do full translation */
+        int victim_way = set->lru; /* Use LRU bit to select victim */
+#ifdef MMU_CACHE_STATS
+        set->ways[victim_way].misses++;
 #endif
         phys_addr = addr;
         mmu_translate(vm, &phys_addr, (1 << 2), (1 << 6) | (1 << 7),
@@ -388,16 +440,11 @@ static bool mmu_store(hart_t *vm,
                       RV_EXC_STORE_PFAULT);
         if (vm->error)
             return false;
-        /* Cache physical page number (not a pointer) */
-        vm->cache_store.n_pages = vpn;
-        vm->cache_store.phys_ppn = phys_addr >> RV_PAGE_SHIFT;
-    } else {
-        /* Cache hit: reconstruct physical address from cached PPN */
-#ifdef MMU_CACHE_STATS
-        vm->cache_store.hits++;
-#endif
-        phys_addr = (vm->cache_store.phys_ppn << RV_PAGE_SHIFT) |
-                    (addr & MASK(RV_PAGE_SHIFT));
+        /* Replace victim way with new translation */
+        set->ways[victim_way].n_pages = vpn;
+        set->ways[victim_way].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+        /* Update LRU: mark the other way for next eviction */
+        set->lru = 1 - victim_way;
     }
 
     if (unlikely(cond)) {

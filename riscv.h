@@ -51,6 +51,12 @@ typedef struct {
 #endif
 } mmu_addr_cache_t;
 
+/* Set-associative cache structure for load operations */
+typedef struct {
+    mmu_addr_cache_t ways[2]; /* 2-way associative */
+    uint8_t lru;              /* LRU bit: 0 or 1 (which way to replace) */
+} mmu_cache_set_t;
+
 /* To use the emulator, start by initializing a hart_t object with zero values,
  * invoke vm_init(), and set the required environment-supplied callbacks. You
  * may also set other necessary fields such as argument registers and s_mode,
@@ -101,9 +107,10 @@ struct __hart_internal {
     uint32_t exc_cause, exc_val;
 
     mmu_fetch_cache_t cache_fetch;
-    /* 2-entry direct-mapped with hash-based indexing */
-    mmu_addr_cache_t cache_load[2];
-    mmu_addr_cache_t cache_store;
+    /* 8-set × 2-way set-associative cache with 3-bit parity hash indexing */
+    mmu_cache_set_t cache_load[8];
+    /* 8-set × 2-way set-associative cache for store operations */
+    mmu_cache_set_t cache_store[8];
 
     /* Supervisor state */
     bool s_mode;
