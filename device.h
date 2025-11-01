@@ -242,9 +242,19 @@ typedef struct {
      */
     uint64_t *mtimecmp;
     semu_timer_t mtime;
+
+    /* Cache the earliest interrupt time to avoid checking every instruction.
+     * Updated when:
+     * 1. Any mtimecmp register is written (recalculate min of all harts)
+     * 2. After an interrupt fires (kernel updates mtimecmp)
+     * 3. Initialization (set to min of all initial mtimecmp values)
+     */
+    uint64_t next_interrupt_at;
+    uint32_t n_harts; /* Number of harts, needed for min() calculation */
 } mtimer_state_t;
 
 void aclint_mtimer_update_interrupts(hart_t *hart, mtimer_state_t *mtimer);
+void aclint_mtimer_recalc_next_interrupt(mtimer_state_t *mtimer);
 void aclint_mtimer_read(hart_t *hart,
                         mtimer_state_t *mtimer,
                         uint32_t addr,

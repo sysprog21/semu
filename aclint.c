@@ -4,6 +4,20 @@
 #include "riscv_private.h"
 
 /* ACLINT MTIMER */
+
+/* Recalculate the next interrupt time by finding the minimum mtimecmp
+ * across all harts. This is called whenever mtimecmp is written.
+ */
+void aclint_mtimer_recalc_next_interrupt(mtimer_state_t *mtimer)
+{
+    uint64_t min_cmp = UINT64_MAX;
+    for (uint32_t i = 0; i < mtimer->n_harts; i++) {
+        if (mtimer->mtimecmp[i] < min_cmp)
+            min_cmp = mtimer->mtimecmp[i];
+    }
+    mtimer->next_interrupt_at = min_cmp;
+}
+
 void aclint_mtimer_update_interrupts(hart_t *hart, mtimer_state_t *mtimer)
 {
     if (semu_timer_get(&mtimer->mtime) >= mtimer->mtimecmp[hart->mhartid])
@@ -63,6 +77,11 @@ static bool aclint_mtimer_reg_write(mtimer_state_t *mtimer,
             cmp_val = (cmp_val & 0xFFFFFFFF00000000ULL) | value;
 
         mtimer->mtimecmp[addr >> 3] = cmp_val;
+
+        /* Recalculate next interrupt time when mtimecmp is updated.
+         * This is critical for lazy timer checking optimization.
+         */
+        aclint_mtimer_recalc_next_interrupt(mtimer);
         return true;
     }
 
