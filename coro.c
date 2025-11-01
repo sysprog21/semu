@@ -201,6 +201,7 @@ typedef struct {
 /* Internal coroutine structure */
 
 typedef struct {
+    uint32_t id;             /* Coroutine identifier */
     void (*func)(void *);    /* Entry point function (user-provided) */
     void *user_data;         /* User data (hart pointer) */
     coro_state_t state;      /* Current state */
@@ -213,7 +214,8 @@ typedef struct {
 
 static struct {
     coro_t **coroutines;   /* Array of coroutine pointers */
-    uint32_t n_hart;       /* Number of harts */
+    uint32_t total_slots;  /* Total number of coroutine slots */
+    uint32_t hart_slots;   /* Number of slots reserved for harts */
     uint32_t current_hart; /* Currently executing hart ID */
     bool initialized;      /* True if subsystem initialized */
     coro_t *running;       /* Currently running coroutine */
@@ -399,25 +401,27 @@ static void coro_entry_wrapper(void *arg)
 
 /* Public API implementation */
 
-bool coro_init(uint32_t n_hart)
+bool coro_init(uint32_t total_slots, uint32_t hart_slots)
 {
     if (coro_state.initialized) {
         fprintf(stderr, "coro_init: already initialized\n");
         return false;
     }
 
-    if (n_hart == 0 || n_hart > 32) {
-        fprintf(stderr, "coro_init: invalid n_hart=%u\n", n_hart);
+    if (total_slots == 0 || total_slots > 256 || hart_slots > total_slots) {
+        fprintf(stderr, "coro_init: invalid slots (total=%u, hart=%u)\n",
+                total_slots, hart_slots);
         return false;
     }
 
-    coro_state.coroutines = calloc(n_hart, sizeof(coro_t *));
+    coro_state.coroutines = calloc(total_slots, sizeof(coro_t *));
     if (!coro_state.coroutines) {
         fprintf(stderr, "coro_init: failed to allocate coroutines array\n");
         return false;
     }
 
-    coro_state.n_hart = n_hart;
+    coro_state.total_slots = total_slots;
+    coro_state.hart_slots = hart_slots;
     coro_state.current_hart = CORO_HART_ID_IDLE;
     coro_state.initialized = true;
     coro_state.running = NULL;
@@ -430,7 +434,7 @@ void coro_cleanup(void)
     if (!coro_state.initialized)
         return;
 
-    for (uint32_t i = 0; i < coro_state.n_hart; i++) {
+    for (uint32_t i = 0; i < coro_state.total_slots; i++) {
         if (coro_state.coroutines[i]) {
             coro_t *co = coro_state.coroutines[i];
             if (co->context) {
@@ -446,22 +450,23 @@ void coro_cleanup(void)
 
     free(coro_state.coroutines);
     coro_state.coroutines = NULL;
-    coro_state.n_hart = 0;
+    coro_state.total_slots = 0;
+    coro_state.hart_slots = 0;
     coro_state.current_hart = CORO_HART_ID_IDLE; /* Reset to idle state */
     coro_state.initialized = false;
     coro_state.running = NULL;
     tls_running_coro = NULL; /* Reset TLS as well */
 }
 
-bool coro_create_hart(uint32_t hart_id, void (*func)(void *), void *hart)
+bool coro_create_hart(uint32_t slot_id, void (*func)(void *), void *arg)
 {
     if (!coro_state.initialized) {
         fprintf(stderr, "coro_create_hart: not initialized\n");
         return false;
     }
 
-    if (hart_id >= coro_state.n_hart) {
-        fprintf(stderr, "coro_create_hart: invalid hart_id=%u\n", hart_id);
+    if (slot_id >= coro_state.total_slots) {
+        fprintf(stderr, "coro_create_hart: invalid slot_id=%u\n", slot_id);
         return false;
     }
 
@@ -470,9 +475,9 @@ bool coro_create_hart(uint32_t hart_id, void (*func)(void *), void *hart)
         return false;
     }
 
-    if (coro_state.coroutines[hart_id]) {
-        fprintf(stderr, "coro_create_hart: hart %u already has coroutine\n",
-                hart_id);
+    if (coro_state.coroutines[slot_id]) {
+        fprintf(stderr, "coro_create_hart: slot %u already has coroutine\n",
+                slot_id);
         return false;
     }
 
@@ -484,8 +489,9 @@ bool coro_create_hart(uint32_t hart_id, void (*func)(void *), void *hart)
     }
 
     /* Store user function and data */
+    co->id = slot_id;
     co->func = func;
-    co->user_data = hart;
+    co->user_data = arg;
     co->state = CORO_STATE_SUSPENDED;
 
     /* Allocate context */
@@ -529,34 +535,35 @@ bool coro_create_hart(uint32_t hart_id, void (*func)(void *), void *hart)
     }
 #endif
 
-    coro_state.coroutines[hart_id] = co;
+    coro_state.coroutines[slot_id] = co;
     return true;
 }
 
-void coro_resume_hart(uint32_t hart_id)
+void coro_resume_hart(uint32_t slot_id)
 {
-    if (!coro_state.initialized || hart_id >= coro_state.n_hart) {
-        fprintf(stderr, "coro_resume_hart: invalid hart_id=%u\n", hart_id);
+    if (!coro_state.initialized || slot_id >= coro_state.total_slots) {
+        fprintf(stderr, "coro_resume_hart: invalid slot_id=%u\n", slot_id);
         return;
     }
 
-    coro_t *co = coro_state.coroutines[hart_id];
+    coro_t *co = coro_state.coroutines[slot_id];
     if (!co || !co->context) {
-        fprintf(stderr, "coro_resume_hart: hart %u has no coroutine\n",
-                hart_id);
+        fprintf(stderr, "coro_resume_hart: slot %u has no coroutine\n",
+                slot_id);
         return;
     }
 
     if (co->state != CORO_STATE_SUSPENDED) {
-        fprintf(stderr, "coro_resume_hart: hart %u not suspended (state=%d)\n",
-                hart_id, co->state);
+        /* This may happen if a coroutine is waiting on I/O and the main loop
+         * tries to resume it. It is not a fatal error.
+         */
         return;
     }
 
     /* Check for stack overflow before resuming */
     coro_check_stack(co);
 
-    coro_state.current_hart = hart_id;
+    coro_state.current_hart = slot_id;
     co->state = CORO_STATE_RUNNING;
     jump_into(co);
 
@@ -586,12 +593,12 @@ void coro_yield(void)
     jump_out(co);
 }
 
-bool coro_is_suspended(uint32_t hart_id)
+bool coro_is_suspended(uint32_t slot_id)
 {
-    if (!coro_state.initialized || hart_id >= coro_state.n_hart)
+    if (!coro_state.initialized || slot_id >= coro_state.hart_slots)
         return false;
 
-    coro_t *co = coro_state.coroutines[hart_id];
+    coro_t *co = coro_state.coroutines[slot_id];
     if (!co || !co->context)
         return false;
 

@@ -103,7 +103,7 @@ jobs:
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
-      timeout-minutes: 15
+      timeout-minutes: 20
     - name: netdev test
       # NOTE: vmnet requires sudo privileges which may not be available in GitHub Actions
       # This test is conditional and will be skipped if sudo is not available

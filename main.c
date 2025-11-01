@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <inttypes.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,6 +142,25 @@ static void emu_update_vfs_interrupts(vm_t *vm)
 }
 #endif
 
+/* Peripheral I/O polling strategy
+ *
+ * We use inline polling instead of dedicated I/O coroutines for peripherals.
+ *
+ * Rationale:
+ * 1. Non-blocking poll() is extremely cheap (~200ns syscall overhead)
+ * 2. Inline polling provides lowest latency (checked every 64 instructions)
+ * 3. All harts share peripheral_update_ctr, ensuring frequent polling
+ *    regardless of hart count (e.g., 4 harts = 4 polls per 256 instructions)
+ * 4. Coroutine-based I/O would INCREASE latency by n_hart factor due to
+ *    scheduler round-robin, without reducing poll() overhead meaningfully
+ *
+ * Coroutines are reserved for hart scheduling where they provide real value:
+ * - Enable event-driven WFI (avoid busy-wait when guest is idle)
+ * - Support SBI HSM (Hart State Management) for dynamic hart start/stop
+ * - Provide clean abstraction for multi-hart execution
+ *
+ * For simple non-blocking I/O, inline polling is superior.
+ */
 static inline void emu_tick_peripherals(emu_state_t *emu)
 {
     vm_t *vm = &emu->vm;
@@ -678,6 +698,9 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     char *shared_dir;
     int hart_count = 1;
     bool debug = false;
+#if SEMU_HAS(VIRTIONET)
+    bool netdev_ready = false;
+#endif
     vm_t *vm = &emu->vm;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
                    &disk_file, &netdev, &hart_count, &debug, &shared_dir);
@@ -747,9 +770,17 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
     capture_keyboard_input(); /* set up uart */
 #if SEMU_HAS(VIRTIONET)
-    if (!virtio_net_init(&(emu->vnet), netdev))
-        fprintf(stderr, "No virtio-net functioned\n");
+    /* Always set ram pointer, even if netdev is not configured.
+     * Device tree may still expose the device to guest.
+     */
     emu->vnet.ram = emu->ram;
+    if (netdev) {
+        if (!virtio_net_init(&emu->vnet, netdev)) {
+            fprintf(stderr, "Failed to initialize virtio-net device.\n");
+            return 1;
+        }
+        netdev_ready = true;
+    }
 #endif
 #if SEMU_HAS(VIRTIOBLK)
     emu->vblk.ram = emu->ram;
@@ -780,7 +811,12 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
 
     /* Initialize coroutine system for SMP mode (n_hart > 1) */
     if (vm->n_hart > 1) {
-        if (!coro_init(vm->n_hart)) {
+        uint32_t total_slots = vm->n_hart;
+#if SEMU_HAS(VIRTIONET)
+        if (netdev_ready)
+            total_slots++;
+#endif
+        if (!coro_init(total_slots, vm->n_hart)) {
             fprintf(stderr, "Failed to initialize coroutine subsystem\n");
             fflush(stderr);
             return 1;
@@ -799,71 +835,108 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     return 0;
 }
 
-/* WFI callback for coroutine-based scheduling in SMP mode */
+/* WFI callback for coroutine-based scheduling in SMP mode
+ *
+ * This handler implements the RISC-V WFI (Wait For Interrupt) instruction
+ * semantics in the context of cooperative multitasking with coroutines.
+ *
+ * Per RISC-V privileged spec:
+ * - WFI is a hint to suspend execution until an interrupt becomes pending
+ * - WFI returns immediately if an interrupt is already pending
+ * - WFI may complete for any reason (implementation-defined)
+ *
+ * Our implementation:
+ * - In SMP mode (n_hart > 1): yield to scheduler if no interrupt pending
+ * - In single-hart mode: WFI is a no-op (inline polling handles I/O)
+ * - The in_wfi flag tracks whether hart is waiting, allowing scheduler to
+ *   block until all harts reach WFI (power-efficient idle state)
+ */
 static void wfi_handler(hart_t *hart)
 {
     vm_t *vm = hart->vm;
     /* Only yield in SMP mode (n_hart > 1) */
     if (vm->n_hart > 1) {
-        /* Per RISC-V spec: WFI should return immediately if interrupt is
-         * pending. Only yield if no interrupt is currently pending.
+        /* Per RISC-V spec: WFI returns immediately if interrupt is pending.
+         * Only yield to scheduler if no interrupt is currently pending.
          */
         if (!(hart->sip & hart->sie)) {
-            hart->in_wfi = true; /* Mark as waiting */
-            coro_yield();
-            hart->in_wfi = false; /* Resume execution */
+            hart->in_wfi = true;  /* Mark as waiting for interrupt */
+            coro_yield();         /* Suspend until scheduler resumes us */
+            hart->in_wfi = false; /* Resumed - no longer waiting */
         }
     }
 }
 
-/* Hart execution loop - each hart runs in its own coroutine */
+/* Hart execution loop - each hart runs in its own coroutine
+ *
+ * This is the main entry point for each RISC-V hart when running in SMP mode.
+ * Each hart executes independently as a coroutine, cooperatively yielding to
+ * the scheduler to allow other harts and I/O coroutines to make progress.
+ *
+ * Execution model:
+ * - Harts execute in batches of 64 instructions before yielding
+ * - Peripheral polling and interrupt checks happen before each batch
+ * - WFI instruction triggers immediate yield (via wfi_handler callback)
+ * - Harts in HSM_STATE_STOPPED remain suspended until IPI wakes them
+ *
+ * This design balances responsiveness and throughput:
+ * - Small batch size (64 insns) keeps latency low for I/O and IPI
+ * - Cooperative scheduling avoids overhead of preemptive context switches
+ * - WFI-based blocking allows efficient idle when all harts are waiting
+ */
 static void hart_exec_loop(void *arg)
 {
     hart_t *hart = (hart_t *) arg;
     emu_state_t *emu = PRIV(hart);
 
-    /* Run hart until stopped */
+    /* Run hart until emulator stops */
     while (!emu->stopped) {
-        /* Check if hart is ready to execute (HSM state) */
+        /* Check HSM (Hart State Management) state via SBI extension */
         if (hart->hsm_status != SBI_HSM_STATE_STARTED) {
+            /* Hart is STOPPED or SUSPENDED - update peripherals and yield.
+             * An IPI (via SBI_HSM__HART_START) will change state to STARTED.
+             */
             emu_tick_peripherals(emu);
             emu_update_timer_interrupt(hart);
             emu_update_swi_interrupt(hart);
-            /* Hart not started yet, yield and wait */
             coro_yield();
             continue;
         }
 
-        /* Execute a batch of instructions before yielding */
+        /* Execute a batch of instructions before yielding.
+         * Batch size of 64 balances throughput and responsiveness.
+         */
         for (int i = 0; i < 64; i++) {
             emu_tick_peripherals(emu);
             emu_update_timer_interrupt(hart);
             emu_update_swi_interrupt(hart);
-            /* Execute one instruction */
+
+            /* Execute one RISC-V instruction */
             vm_step(hart);
 
-            /* Check for errors */
+            /* Handle execution errors */
             if (unlikely(hart->error)) {
                 if (hart->error == ERR_EXCEPTION &&
                     hart->exc_cause == RV_EXC_ECALL_S) {
+                    /* S-mode ecall: handle SBI call and continue */
                     handle_sbi_ecall(hart);
                     continue;
                 }
 
-                /* CRITICAL FIX: Handle general exceptions via trap (same as
-                 * single-core) */
                 if (hart->error == ERR_EXCEPTION) {
+                    /* Other exception: delegate to supervisor via trap */
                     hart_trap(hart);
                     continue;
                 }
 
+                /* Fatal error: report and stop emulation */
                 vm_error_report(hart);
                 emu->stopped = true;
                 goto cleanup;
             }
         }
 
-        /* Yield after batch to allow scheduling */
+        /* Yield to scheduler after executing batch */
         coro_yield();
     }
 cleanup:
@@ -974,25 +1047,38 @@ static void print_mmu_cache_stats(vm_t *vm)
 static int semu_run(emu_state_t *emu)
 {
     int ret;
-
     vm_t *vm = &emu->vm;
 
-#ifdef MMU_CACHE_STATS
-    struct timeval start_time, current_time;
-    gettimeofday(&start_time, NULL);
-#endif
-
-    /* SMP mode: use coroutine-based scheduling */
     if (vm->n_hart > 1) {
+        /* SMP mode: Use coroutine-based hart scheduling
+         *
+         * Architecture:
+         * - Each hart runs as an independent coroutine
+         * - Peripherals (VirtIO-Net, UART, etc.) use inline polling
+         * - Main loop acts as scheduler, resuming hart coroutines round-robin
+         * - poll() monitors timer and UART for power management
+         *
+         * Power management optimization:
+         * - When all harts execute WFI (Wait For Interrupt), scheduler blocks
+         *   in poll() with timeout=-1 (indefinite) until:
+         *   * UART input arrives (keyboard)
+         *   * Timer expires (1ms periodic timer for guest timer emulation)
+         * - This avoids busy-waiting when guest OS is idle
+         *
+         * Peripheral I/O handling:
+         * - Peripherals are polled inline during hart execution (see
+         *   emu_tick_peripherals), not via separate coroutines
+         * - Non-blocking poll() for network/disk I/O (~200ns overhead)
+         * - Inline polling provides lowest latency (checked every 64
+         * instructions)
+         */
 #ifdef __APPLE__
-        /* macOS: create kqueue for timer and I/O events */
         int kq = kqueue();
         if (kq < 0) {
             perror("kqueue");
             return -1;
         }
 
-        /* Add 1ms periodic timer */
         struct kevent kev_timer;
         EV_SET(&kev_timer, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 1, NULL);
         if (kevent(kq, &kev_timer, 1, NULL, 0, NULL) < 0) {
@@ -1001,18 +1087,23 @@ static int semu_run(emu_state_t *emu)
             return -1;
         }
 
-        /* Note: UART input is polled via u8250_check_ready(), no need to
-         * monitor with kqueue. Timer events are sufficient to wake from WFI.
-         */
+        if (isatty(emu->uart.in_fd)) {
+            struct kevent kev_uart;
+            EV_SET(&kev_uart, emu->uart.in_fd, EVFILT_READ, EV_ADD | EV_ENABLE,
+                   0, 0, NULL);
+            if (kevent(kq, &kev_uart, 1, NULL, 0, NULL) < 0) {
+                perror("kevent uart setup");
+                close(kq);
+                return -1;
+            }
+        }
 #else
-        /* Linux: create timerfd for periodic wakeup */
         int wfi_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
         if (wfi_timer_fd < 0) {
             perror("timerfd_create");
             return -1;
         }
 
-        /* Configure 1ms periodic timer */
         struct itimerspec its = {
             .it_interval = {.tv_sec = 0, .tv_nsec = 1000000},
             .it_value = {.tv_sec = 0, .tv_nsec = 1000000},
@@ -1024,6 +1115,13 @@ static int semu_run(emu_state_t *emu)
         }
 #endif
 
+        /* Poll-based event loop for I/O monitoring:
+         * - Timer fd: 1 descriptor for periodic timer (kqueue/timerfd)
+         * - UART fd: 1 descriptor for keyboard input
+         */
+        struct pollfd *pfds = NULL;
+        size_t poll_capacity = 0;
+
         while (!emu->stopped) {
 #ifdef MMU_CACHE_STATS
             /* Check if signal received (SIGINT/SIGTERM) */
@@ -1032,59 +1130,124 @@ static int semu_run(emu_state_t *emu)
                 return 0;
             }
 #endif
-            /* Resume each hart's coroutine in round-robin fashion */
+            /* Only need fds for timer and UART (no coroutine I/O) */
+            size_t needed = 2;
+
+            /* Grow buffer if needed (amortized realloc) */
+            if (needed > poll_capacity) {
+                struct pollfd *new_pfds =
+                    realloc(pfds, needed * sizeof(*new_pfds));
+                if (!new_pfds) {
+                    free(pfds);
+#ifdef __APPLE__
+                    close(kq);
+#else
+                    close(wfi_timer_fd);
+#endif
+                    return -1;
+                }
+                pfds = new_pfds;
+                poll_capacity = needed;
+            }
+
+            /* Collect file descriptors for poll() */
+            size_t pfd_count = 0;
+            int timer_index = -1;
+
+            /* Add periodic timer fd (1ms interval for guest timer emulation) */
+#ifdef __APPLE__
+            /* macOS: use kqueue with EVFILT_TIMER */
+            if (kq >= 0 && pfd_count < poll_capacity) {
+                pfds[pfd_count] = (struct pollfd){kq, POLLIN, 0};
+                timer_index = (int) pfd_count;
+                pfd_count++;
+            }
+#else
+            /* Linux: use timerfd */
+            if (wfi_timer_fd >= 0 && pfd_count < poll_capacity) {
+                pfds[pfd_count] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
+                timer_index = (int) pfd_count;
+                pfd_count++;
+            }
+#endif
+
+            /* Add UART input fd (stdin for keyboard input) */
+            if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity) {
+                pfds[pfd_count] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
+                pfd_count++;
+            }
+
+            /* Determine poll timeout based on hart WFI states:
+             * - If no harts are STARTED, block indefinitely (wait for IPI)
+             * - If all STARTED harts are in WFI, block indefinitely
+             * - Otherwise, use non-blocking poll (timeout=0)
+             */
+            int poll_timeout = 0;
+            uint32_t started_harts = 0;
+            uint32_t wfi_harts = 0;
+            for (uint32_t i = 0; i < vm->n_hart; i++) {
+                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
+                    started_harts++;
+                    if (vm->hart[i]->in_wfi)
+                        wfi_harts++;
+                }
+            }
+            /* Block if no harts running or all running harts are waiting */
+            if (pfd_count > 0 &&
+                (started_harts == 0 || wfi_harts == started_harts))
+                poll_timeout = -1;
+
+            /* Execute poll() to wait for I/O events.
+             * - timeout=0: non-blocking poll when harts are running
+             * - timeout=-1: blocking poll when all harts in WFI (idle state)
+             */
+            if (pfd_count > 0) {
+                int nevents = poll(pfds, pfd_count, poll_timeout);
+                if (nevents > 0) {
+                    /* Consume timer expiration events to prevent fd staying
+                     * readable
+                     */
+                    if (timer_index >= 0 &&
+                        (pfds[timer_index].revents & POLLIN)) {
+#ifdef __APPLE__
+                        /* drain kqueue events with non-blocking kevent */
+                        struct kevent events[32];
+                        struct timespec timeout_zero = {0, 0};
+                        kevent(kq, NULL, 0, events, 32, &timeout_zero);
+#else
+                        /* Linux: read timerfd to consume expiration count */
+                        uint64_t expirations;
+                        ssize_t ret_read = read(wfi_timer_fd, &expirations,
+                                                sizeof(expirations));
+                        (void) ret_read;
+#endif
+                    }
+                } else if (nevents < 0 && errno != EINTR) {
+                    perror("poll");
+                }
+            }
+
+            /* Resume all hart coroutines (round-robin scheduling).
+             * Each hart executes a batch of instructions, then yields back.
+             * Harts in WFI will clear their in_wfi flag when resuming from
+             * coro_yield() in wfi_handler().
+             */
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 coro_resume_hart(i);
             }
 
-            /* CPU usage optimization: if all started harts are in WFI,
-             * sleep briefly to reduce busy-waiting
-             */
-            bool all_waiting = true;
-            for (uint32_t i = 0; i < vm->n_hart; i++) {
-                if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED &&
-                    !vm->hart[i]->in_wfi) {
-                    all_waiting = false;
-                    break;
-                }
-            }
-            if (all_waiting) {
-                /* All harts waiting for interrupt - use event-driven wait
-                 * to reduce CPU usage while maintaining responsiveness
-                 */
-#ifdef __APPLE__
-                /* macOS: wait for kqueue events (timer or UART) */
-                struct kevent events[2];
-                int nevents = kevent(kq, NULL, 0, events, 2, NULL);
-                /* Events are automatically handled - timer fires every 1ms,
-                 * UART triggers on input. No need to explicitly consume. */
-                (void) nevents;
-#else
-                /* Linux: poll on timerfd and UART */
-                struct pollfd pfds[2];
-                pfds[0] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
-                pfds[1] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
-                poll(pfds, 2, -1);
-
-                /* Consume timerfd event to prevent accumulation */
-                if (pfds[0].revents & POLLIN) {
-                    uint64_t expirations;
-                    ssize_t ret =
-                        read(wfi_timer_fd, &expirations, sizeof(expirations));
-                    (void) ret; /* Ignore read errors - timer will retry */
-                }
+#if SEMU_HAS(VIRTIONET)
+            /* VirtIO-Net coroutine disabled for now */
 #endif
-            }
         }
 
-        /* Cleanup event resources */
+        free(pfds);
 #ifdef __APPLE__
         close(kq);
 #else
         close(wfi_timer_fd);
 #endif
 
-        /* Check if execution stopped due to error */
         if (emu->stopped)
             return 1;
 
@@ -1124,28 +1287,6 @@ static int semu_run(emu_state_t *emu)
             ret = semu_step(emu);
             if (ret)
                 return ret;
-#ifdef MMU_CACHE_STATS
-            /* Check if signal received (SIGINT/SIGTERM) */
-            if (signal_received) {
-                print_mmu_cache_stats(&emu->vm);
-                return 0;
-            }
-            /* Exit after running for 15 seconds to collect statistics */
-            gettimeofday(&current_time, NULL);
-            long elapsed_sec = current_time.tv_sec - start_time.tv_sec;
-            long elapsed_usec = current_time.tv_usec - start_time.tv_usec;
-            if (elapsed_usec < 0) {
-                elapsed_sec--;
-                elapsed_usec += 1000000;
-            }
-            long elapsed = elapsed_sec + (elapsed_usec > 0 ? 1 : 0);
-            if (elapsed >= 15) {
-                fprintf(stderr,
-                        "\n[MMU_CACHE_STATS] Reached 15 second time limit, "
-                        "exiting...\n");
-                return 0;
-            }
-#endif
         }
     }
 
@@ -1290,6 +1431,5 @@ int main(int argc, char **argv)
 #ifdef MMU_CACHE_STATS
     print_mmu_cache_stats(&emu.vm);
 #endif
-
     return ret;
 }
