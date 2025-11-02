@@ -1191,22 +1191,20 @@ static int semu_run(emu_state_t *emu)
             size_t pfd_count = 0;
             int timer_index = -1;
 
-            /* Add periodic timer fd (1ms interval for guest timer emulation).
-             * Only add timer when ALL harts are active (none idle) to allow
-             * poll() to sleep when any harts are in WFI. When harts are idle,
-             * timer updates can be deferred until they wake up.
-             *
-             * During SMP boot (started_harts < vm->n_hart), always include the
-             * timer to ensure secondary harts can complete initialization. Only
-             * apply conditional exclusion after all harts have started.
-             *
-             * For single-hart configurations (n_hart == 1), disable
-             * optimization entirely to avoid boot issues, as the first hart
-             * starts immediately.
+            /* Add periodic timer fd (1ms interval). Excluded when harts are
+             * idle to allow poll() sleep, but always included during:
+             * 1. Single-hart mode (n_hart == 1)
+             * 2. Boot phase (!boot_complete) - prevents deadlock when kernel
+             *    briefly puts all harts in WFI while waiting for timer IRQ
+             * 3. Active execution (idle_harts == 0)
              */
             bool all_harts_started = (started_harts >= vm->n_hart);
+            const uint64_t BOOT_SETTLE_ITERATIONS = 5000;
+            bool boot_complete =
+                all_harts_started &&
+                (emu->peripheral_update_ctr > BOOT_SETTLE_ITERATIONS);
             bool harts_active =
-                (vm->n_hart == 1) || !all_harts_started || (idle_harts == 0);
+                (vm->n_hart == 1) || !boot_complete || (idle_harts == 0);
 #ifdef __APPLE__
             /* macOS: use kqueue with EVFILT_TIMER */
             if (kq >= 0 && pfd_count < poll_capacity && harts_active) {
@@ -1227,7 +1225,7 @@ static int semu_run(emu_state_t *emu)
             /* Add UART input fd (stdin for keyboard input).
              * Only add UART when:
              * 1. Single-hart configuration (n_hart == 1), OR
-             * 2. Not all harts started (!all_harts_started), OR
+             * 2. Boot not complete (!boot_complete), OR
              * 3. All harts are active (idle_harts == 0), OR
              * 4. A hart is actively waiting for UART input
              *
@@ -1236,7 +1234,7 @@ static int semu_run(emu_state_t *emu)
              * input (Ctrl+A x) may be delayed by up to poll_timeout (10ms)
              * when harts are idle, which is acceptable for an emulator.
              */
-            bool need_uart = (vm->n_hart == 1) || !all_harts_started ||
+            bool need_uart = (vm->n_hart == 1) || !boot_complete ||
                              (idle_harts == 0) || emu->uart.has_waiting_hart;
             if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity &&
                 need_uart) {
