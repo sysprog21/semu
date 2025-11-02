@@ -226,25 +226,28 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
         end_addr = UINT32_MAX;
     uint32_t end_vpn = (uint32_t) end_addr >> RV_PAGE_SHIFT;
 
-    /* Check each cache entry and invalidate if in range.
-     * Since we only have 4 cache entries total (fetch: 1, load: 2, store: 1),
-     * simple sequential checks are sufficient.
-     */
+    /* Cache invalidation for fetch cache */
     if (vm->cache_fetch.n_pages >= start_vpn &&
         vm->cache_fetch.n_pages <= end_vpn)
         vm->cache_fetch.n_pages = 0xFFFFFFFF;
 
-    if (vm->cache_load[0].n_pages >= start_vpn &&
-        vm->cache_load[0].n_pages <= end_vpn)
-        vm->cache_load[0].n_pages = 0xFFFFFFFF;
+    /* Invalidate load cache: 8 sets × 2 ways */
+    for (int set = 0; set < 8; set++) {
+        for (int way = 0; way < 2; way++) {
+            if (vm->cache_load[set].ways[way].n_pages >= start_vpn &&
+                vm->cache_load[set].ways[way].n_pages <= end_vpn)
+                vm->cache_load[set].ways[way].n_pages = 0xFFFFFFFF;
+        }
+    }
 
-    if (vm->cache_load[1].n_pages >= start_vpn &&
-        vm->cache_load[1].n_pages <= end_vpn)
-        vm->cache_load[1].n_pages = 0xFFFFFFFF;
-
-    if (vm->cache_store.n_pages >= start_vpn &&
-        vm->cache_store.n_pages <= end_vpn)
-        vm->cache_store.n_pages = 0xFFFFFFFF;
+    /* Invalidate store cache: 8 sets × 2 ways */
+    for (int set = 0; set < 8; set++) {
+        for (int way = 0; way < 2; way++) {
+            if (vm->cache_store[set].ways[way].n_pages >= start_vpn &&
+                vm->cache_store[set].ways[way].n_pages <= end_vpn)
+                vm->cache_store[set].ways[way].n_pages = 0xFFFFFFFF;
+        }
+    }
 }
 
 /* Pre-verify the root page table to minimize page table access during
