@@ -197,3 +197,6 @@ void vm_error_report(const hart_t *vm);
 
 /* Invalidate all MMU translation caches (fetch, load, store) */
 void mmu_invalidate(hart_t *vm);
+
+/* Invalidate MMU caches for a specific virtual address range */
+void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size);
