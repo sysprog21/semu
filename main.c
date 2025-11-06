@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1007,7 +1008,6 @@ static int semu_step(emu_state_t *emu)
 }
 
 #ifdef MMU_CACHE_STATS
-static vm_t *global_vm_for_signal = NULL;
 static volatile sig_atomic_t signal_received = 0;
 
 /* Forward declaration */
@@ -1152,11 +1152,11 @@ static int semu_run(emu_state_t *emu)
 
         while (!emu->stopped) {
 #ifdef MMU_CACHE_STATS
-            /* Check if signal received (SIGINT/SIGTERM) */
-            if (signal_received) {
-                print_mmu_cache_stats(&emu->vm);
-                return 0;
-            }
+            /* Check if signal received (SIGINT/SIGTERM).
+             * Break to cleanup resources, stats printed at end of main().
+             */
+            if (signal_received)
+                break;
 #endif
             /* Only need fds for timer and UART (no coroutine I/O) */
             size_t needed = 2;
@@ -1345,6 +1345,13 @@ static int semu_run(emu_state_t *emu)
 
     /* Single-hart mode: use original scheduling */
     while (!emu->stopped) {
+#ifdef MMU_CACHE_STATS
+        /* Check if signal received (SIGINT/SIGTERM).
+         * Break to exit loop, stats printed at end of main().
+         */
+        if (signal_received)
+            break;
+#endif
 #if SEMU_HAS(VIRTIONET)
         int i = 0;
         if (emu->vnet.peer.type == NETDEV_IMPL_user && boot_complete) {
@@ -1422,6 +1429,13 @@ static gdb_action_t semu_cont(void *args)
 {
     emu_state_t *emu = (emu_state_t *) args;
     while (!semu_is_interrupt(emu)) {
+#ifdef MMU_CACHE_STATS
+        /* Check if signal received (SIGINT/SIGTERM).
+         * Break to return control to gdbstub, stats printed at end of main().
+         */
+        if (signal_received)
+            break;
+#endif
         semu_step(emu);
     }
 
@@ -1507,7 +1521,6 @@ int main(int argc, char **argv)
         return ret;
 
 #ifdef MMU_CACHE_STATS
-    global_vm_for_signal = &emu.vm;
     signal(SIGINT, signal_handler_stats);
     signal(SIGTERM, signal_handler_stats);
 #endif
