@@ -31,6 +31,21 @@ typedef enum {
     ERR_USER,      /**< user-specific error */
 } vm_error_t;
 
+/* Hart debugging state for GDB integration */
+typedef enum {
+    HART_STATE_RUNNING,     /**< Normal execution */
+    HART_STATE_DEBUG_BREAK, /**< Paused for debugging (breakpoint or Ctrl-C) */
+    HART_STATE_DEBUG_STEP,  /**< Single-stepping mode */
+    HART_STATE_WFI,         /**< In WFI (Wait-For-Interrupt) */
+} hart_state_t;
+
+/* Debugging information for a single hart */
+typedef struct {
+    hart_state_t state;      /**< Current debug state */
+    bool single_step_mode;   /**< True if single-stepping */
+    bool breakpoint_pending; /**< Breakpoint check needed */
+} hart_debug_info_t;
+
 /* Instruction fetch cache: stores host memory pointers for direct access */
 typedef struct {
     uint32_t n_pages;
@@ -167,11 +182,31 @@ struct __hart_internal {
     bool hsm_resume_is_ret;
     int32_t hsm_resume_pc;
     int32_t hsm_resume_opaque;
+
+    /* Debug state for GDB integration (SMP debugging) */
+    hart_debug_info_t debug_info;
 };
+
+#define MAX_BREAKPOINTS 32
+
+/* Breakpoint information */
+typedef struct {
+    uint32_t addr; /**< Breakpoint address */
+    bool enabled;  /**< Whether breakpoint is active */
+} breakpoint_t;
+
+/* Debug context for the entire VM */
+typedef struct {
+    breakpoint_t breakpoints[MAX_BREAKPOINTS];
+    uint32_t bp_count;
+} vm_debug_ctx_t;
 
 struct __vm_internel {
     uint32_t n_hart;
     hart_t **hart;
+
+    /* Debug context for GDB integration */
+    vm_debug_ctx_t debug_ctx;
 };
 
 void vm_init(hart_t *vm);
