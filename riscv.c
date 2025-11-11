@@ -389,18 +389,32 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t index = __builtin_parity(vpn) & 0x1;
 
-    if (likely(blk->valid && blk->tag == tag)) {
 #ifdef MMU_CACHE_STATS
-        vm->cache_fetch[index].hits++;
+    vm->cache_fetch[index].total_fetch++;
+#endif
+
+    /* I-cache lookup */
+    if (likely(blk->valid && blk->tag == tag)) {
+        /* I-cache hit */
+#ifdef MMU_CACHE_STATS
+        vm->cache_fetch[index].icache_hits++;
 #endif
         uint32_t ofs = addr & ICACHE_BLOCK_MASK;
         *value = *(const uint32_t *) (blk->base + ofs);
         return;
     }
-
-    if (unlikely(vpn != vm->cache_fetch[index].n_pages)) {
+    /* I-cache miss */
+    else {
 #ifdef MMU_CACHE_STATS
-        vm->cache_fetch[index].misses++;
+        vm->cache_fetch[index].icache_misses++;
+#endif
+    }
+
+    /* I-cache miss, 2-entry TLB lookup */
+    if (unlikely(vpn != vm->cache_fetch[index].n_pages)) {
+        /* TLB miss */
+#ifdef MMU_CACHE_STATS
+        vm->cache_fetch[index].tlb_misses++;
 #endif
         mmu_translate(vm, &addr, (1 << 3), (1 << 6), false, RV_EXC_FETCH_FAULT,
                       RV_EXC_FETCH_PFAULT);
@@ -413,10 +427,17 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
         vm->cache_fetch[index].n_pages = vpn;
         vm->cache_fetch[index].page_addr = page_addr;
     }
+    /* TLB hit */
+    else {
+#ifdef MMU_CACHE_STATS
+        vm->cache_fetch[index].tlb_hits++;
+#endif
+    }
+
     *value =
         vm->cache_fetch[index].page_addr[(addr >> 2) & MASK(RV_PAGE_SHIFT - 2)];
 
-    /* fill into the cache */
+    /* fill into the I-cache */
     uint32_t block_off = (addr & RV_PAGE_MASK) & ~ICACHE_BLOCK_MASK;
     blk->base = (const uint8_t *) vm->cache_fetch[index].page_addr + block_off;
     blk->tag = tag;
