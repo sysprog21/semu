@@ -36,8 +36,13 @@ typedef struct {
     uint32_t n_pages;
     uint32_t *page_addr;
 #ifdef MMU_CACHE_STATS
-    uint64_t hits;
-    uint64_t misses;
+    uint64_t total_fetch;
+    uint64_t tlb_hits;
+    uint64_t tlb_misses;
+    uint64_t icache_hits;
+    uint64_t icache_misses;
+    uint64_t vcache_hits;
+    uint64_t vcache_misses;
 #endif
 } mmu_fetch_cache_t;
 
@@ -75,7 +80,58 @@ typedef struct {
 typedef struct __hart_internal hart_t;
 typedef struct __vm_internel vm_t;
 
+/* ICACHE_BLOCKS_SIZE: Size of one instruction-cache block (line).
+ * ICACHE_BLOCKS: Number of blocks (lines) in the instruction cache.
+ *
+ * The cache address is decomposed into [ tag | index | offset ] fields:
+ *   - block-offset bits = log2(ICACHE_BLOCKS_SIZE)
+ *   - index bits        = log2(ICACHE_BLOCKS)
+ */
+#define ICACHE_BLOCKS_SIZE 256
+#define ICACHE_BLOCKS 256
+#define ICACHE_OFFSET_BITS 8
+#define ICACHE_INDEX_BITS 8
+
+/* VCACHE_BLOCKS_SIZE: Size of one victim-cache block (line).
+ * VCACHE_BLOCKS: Number of blocks (lines) in the victim cache.
+ *
+ * The victim cache is implemented as a small, fully associative cache.
+ * It is designed to serve as a temporary buffer for instruction cache blocks
+ * that were recently evicted from the instruction cache.
+ *
+ * Upon an instruction cache miss, the system first checks the victim cache
+ * for the corresponding data. If the data is found (a victim cache hit),
+ * the instruction cache block and the victim cache block are swapped.
+ * Conversely, when the instruction cache is being filled with new data,
+ * the evicted old data from the instruction cache block is simultaneously
+ * placed into the victim cache.
+ */
+#define VCACHE_BLOCK_SIZE ICACHE_BLOCKS_SIZE
+#define VCACHE_BLOCKS 16
+
+/* For power-of-two sizes, (size - 1) sets all low bits to 1,
+ * allowing fast extraction of an address.
+ */
+#define ICACHE_INDEX_MASK (ICACHE_BLOCKS - 1)
+#define ICACHE_BLOCK_MASK (ICACHE_BLOCKS_SIZE - 1)
+#define RV_PAGE_MASK (RV_PAGE_SIZE - 1)
+
+typedef struct {
+    uint32_t tag;
+    const uint8_t *base;
+    bool valid;
+} icache_block_t;
+
+typedef icache_block_t victim_cache_block_t;
+
+typedef struct {
+    icache_block_t i_block[ICACHE_BLOCKS];
+    victim_cache_block_t v_block[VCACHE_BLOCKS];
+    uint32_t v_used[VCACHE_BLOCKS];
+} icache_t;
+
 struct __hart_internal {
+    icache_t icache;
     uint32_t x_regs[32];
 
     /* LR reservation virtual address. last bit is 1 if valid */
@@ -106,7 +162,8 @@ struct __hart_internal {
      */
     uint32_t exc_cause, exc_val;
 
-    mmu_fetch_cache_t cache_fetch;
+    /* 2-entry direct-mapped with hash-based indexing */
+    mmu_fetch_cache_t cache_fetch[2];
     /* 8-set × 2-way set-associative cache with 3-bit parity hash indexing */
     mmu_cache_set_t cache_load[8];
     /* 8-set × 2-way set-associative cache for store operations */
