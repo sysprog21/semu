@@ -626,7 +626,7 @@ VSND_GEN_TX_QUEUE_HANDLER(flush, 0);
         IIF(WRITE)                                                           \
         (/* enque frames */                                                  \
          virtio_snd_prop_t *props = &vsnd_props[stream_id];                  \
-         props->lock.buf_ev_notity++;                                        \
+         props->lock.buf_ev_notity--;                                        \
          pthread_cond_signal(&props->lock.writable);, /* flush queue */      \
          )                                                                   \
                                                                              \
@@ -1038,7 +1038,7 @@ static void __virtio_snd_rx_frame_dequeue(void *out,
         fprintf(stderr, "((( rx_frame_deque buf_ev_notity %d" " rx_ev_start %d\n",
                 props->lock.buf_ev_notity,
                 rx_ev_start);
-    while (props->lock.buf_ev_notity < 1 && rx_ev_start != 1) {
+    while (!(props->lock.buf_ev_notity > 0 && rx_ev_start == 1)) {
             pthread_cond_wait(&props->lock.readable, &props->lock.lock);
     }
 
@@ -1246,7 +1246,7 @@ static void __virtio_snd_rx_frame_enqueue(void *payload,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    fprintf(stderr, ")) rx_frame enque buf_ev_notity %d", props->lock.buf_ev_notity);
+    fprintf(stderr, ")) rx_frame enque buf_ev_notity %d\n", props->lock.buf_ev_notity);
     while (props->lock.buf_ev_notity > 0) {
         pthread_cond_wait(&props->lock.writable, &props->lock.lock);
     }
@@ -1279,7 +1279,7 @@ static void __virtio_snd_rx_frame_enqueue(void *payload,
     node->pos = 0;
     list_push(&node->q, &props->buf_queue_head);
 
-    props->lock.buf_ev_notity--;
+    props->lock.buf_ev_notity++;
     pthread_cond_signal(&props->lock.readable);
     pthread_mutex_unlock(&props->lock.lock);
     fprintf(stderr, "enque end\n");
