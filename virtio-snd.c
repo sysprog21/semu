@@ -600,7 +600,7 @@ VSND_GEN_TX_QUEUE_HANDLER(flush, 0);
                     (virtio_snd_pcm_status_t *) (base + addr);               \
                 response->status =                                           \
                     bad_msg_err ? VIRTIO_SND_S_IO_ERR : VIRTIO_SND_S_OK;     \
-                response->latency_bytes = 0;                           \
+                response->latency_bytes = ret_len;                           \
                 *plen = sizeof(virtio_snd_pcm_status_t) + ret_len;                                   \
                 fprintf(stderr, "*** rx write %" PRIu32 " bytes \n", *plen); \
                 goto early_continue;                                         \
@@ -841,6 +841,7 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     };
     uint32_t dir = props->p.direction;
     PaError err = paNoError;
+    fprintf(stderr, "pcm_prepare dir %" PRIu32 "\n", dir);
     if (dir == VIRTIO_SND_D_OUTPUT) {
         err = Pa_OpenStream(&props->pa_stream, NULL, /* no input */
                             &params, rate, cnfa_period_frames, paClipOff,
@@ -859,7 +860,6 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
 
     *plen = 0;
 
-    fprintf(stderr, "=== pcm_prepare \n");
     return;
 
 pa_err:
@@ -890,14 +890,12 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return;
     }
-    if(props->p.direction = VIRTIO_SND_D_INPUT) {
+    if(props->p.direction == VIRTIO_SND_D_INPUT) {
         rx_ev_start = 1;
         //pthread_cond_signal(&props->lock.readable);
     }
 
     *plen = 0;
-
-    fprintf(stderr, "=== pcm_start \n");
 }
 
 static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
@@ -929,8 +927,6 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
     }
 
     *plen = 0;
-
-    fprintf(stderr, "=== pcm_stop\n");
 }
 
 static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
@@ -1065,8 +1061,6 @@ static void __virtio_snd_rx_frame_dequeue(void *out,
     fprintf(stderr, "((( RX deque get %" PRIu32 " bytes \n", written_bytes);
 
     pthread_mutex_unlock(&props->lock.lock);
-
-    fprintf(stderr, "((( RX deque end\n");
 }
 
 
@@ -1104,7 +1098,7 @@ static int virtio_snd_rx_stream_cb(const void *input,
     (void) time_info;
     (void) status_flags;
 
-    fprintf(stderr, "rx_stream_cb\n");
+    //fprintf(stderr, "rx_stream_cb\n");
 
     vsnd_stream_sel_t *v_ptr = (vsnd_stream_sel_t *) user_data;
     uint32_t id = v_ptr->stream_id;
@@ -1210,12 +1204,9 @@ static void __virtio_snd_frame_enqueue(void *payload,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (props->lock.buf_ev_notity > 0) {
-        fprintf(stderr, "buf_ev_notity %d", props->lock.buf_ev_notity);
+    while (props->lock.buf_ev_notity > 0)
         pthread_cond_wait(&props->lock.writable, &props->lock.lock);
-    }
 
-    fprintf(stderr, "enque start\n");
     /* Add a PCM frame to queue */
     /* As stated in Linux Kernel mailing list [1], we keep the pointer
      * points to the payload [2] so that we can always get up-to-date
@@ -1235,7 +1226,6 @@ static void __virtio_snd_frame_enqueue(void *payload,
     list_push(&node->q, &props->buf_queue_head);
 
     pthread_mutex_unlock(&props->lock.lock);
-    fprintf(stderr, "enque end\n");
 }
 
 // FIXME: create cirular queue behavior
@@ -1282,7 +1272,6 @@ static void __virtio_snd_rx_frame_enqueue(void *payload,
     props->lock.buf_ev_notity++;
     pthread_cond_signal(&props->lock.readable);
     pthread_mutex_unlock(&props->lock.lock);
-    fprintf(stderr, "enque end\n");
     fprintf(stderr, "+++ virtio_snd_rx_enqueue"
             " idx %" PRIu32
             " base %" PRIu32 
