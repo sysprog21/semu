@@ -13,7 +13,7 @@
 #include "utils.h"
 #include "virtio.h"
 
-#define VSND_DEV_CNT_MAX 1
+#define VSND_DEV_CNT_MAX 2
 
 #define VSND_QUEUE_NUM_MAX 1024
 #define vsndq (vsnd->queues[vsnd->QueueSel])
@@ -297,15 +297,61 @@ typedef struct {
     // PCM frame doubly-ended queue
     vsnd_buf_queue_node_t buf;
     struct list_head buf_queue_head;
-    // PCM frame intermediate buffer;
+    // PCM frame intermediate buffer
     void *intermediate;
+    uint32_t buf_sz;
+    uint32_t buf_idx;
 
     // playback control
     vsnd_stream_sel_t v;
 } virtio_snd_prop_t;
 
+#define VIRTIO_SND_JACK_DEFAULT_CONFIG                        \
+    .hdr.hda_fn_nid = 0, .features = 0, .hda_reg_defconf = 0, \
+    .hda_reg_caps = 0, .connected = 1,
+
 static virtio_snd_config_t vsnd_configs[VSND_DEV_CNT_MAX];
 static virtio_snd_prop_t vsnd_props[VSND_DEV_CNT_MAX] = {
+    [0].j = {VIRTIO_SND_JACK_DEFAULT_CONFIG},
+    [1].j = {VIRTIO_SND_JACK_DEFAULT_CONFIG},
+    [0].p =
+        {
+            .hdr.hda_fn_nid = 0,
+            .features = 0,
+            .formats = (1 << VIRTIO_SND_PCM_FMT_S16),
+#define _(rate) (1 << VIRTIO_SND_PCM_RATE_##rate) |
+            .rates = (SND_PCM_RATE 0),
+#undef _
+            .direction = VIRTIO_SND_D_OUTPUT,
+            .channels_min = 1,
+            .channels_max = 1,
+        },
+    [1].p =
+        {
+            .hdr.hda_fn_nid = 0,
+            .features = 0,
+            .formats = (1 << VIRTIO_SND_PCM_FMT_S16),
+#define _(rate) (1 << VIRTIO_SND_PCM_RATE_##rate) |
+            .rates = (SND_PCM_RATE 0),
+#undef _
+            .direction = VIRTIO_SND_D_INPUT,
+            .channels_min = 1,
+            .channels_max = 1,
+        },
+    [0].c =
+        {
+            .hdr.hda_fn_nid = 0,
+            .direction = VIRTIO_SND_D_OUTPUT,
+            .channels = 1,
+            .positions[0] = VIRTIO_SND_CHMAP_MONO,
+        },
+    [1].c =
+        {
+            .hdr.hda_fn_nid = 0,
+            .direction = VIRTIO_SND_D_INPUT,
+            .channels = 1,
+            .positions[0] = VIRTIO_SND_CHMAP_MONO,
+        },
     [0 ... VSND_DEV_CNT_MAX - 1].pp.hdr.hdr.code = VIRTIO_SND_R_PCM_SET_PARAMS,
     [0 ... VSND_DEV_CNT_MAX - 1].lock =
         {
@@ -316,9 +362,15 @@ static virtio_snd_prop_t vsnd_props[VSND_DEV_CNT_MAX] = {
 };
 static int vsnd_dev_cnt = 0;
 
-static pthread_mutex_t virtio_snd_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t virtio_snd_tx_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t virtio_snd_rx_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t virtio_snd_tx_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t virtio_snd_rx_cond = PTHREAD_COND_INITIALIZER;
 static int tx_ev_notify;
+static int rx_ev_notify;
+
+// FIXME: set these variables into each capture stream;s structure
+static int rx_ev_start;
 
 /* vsnd virtq callback type */
 typedef int (*vsnd_virtq_cb)(virtio_snd_state_t *,       /* vsnd state */
@@ -327,7 +379,13 @@ typedef int (*vsnd_virtq_cb)(virtio_snd_state_t *,       /* vsnd state */
                              uint32_t * /* response length */);
 
 /* Forward declaration */
-static int virtio_snd_stream_cb(const void *input,
+static int virtio_snd_tx_stream_cb(const void *input,
+                                void *output,
+                                unsigned long frame_cnt,
+                                const PaStreamCallbackTimeInfo *time_info,
+                                PaStreamCallbackFlags status_flags,
+                                void *user_data);
+static int virtio_snd_rx_stream_cb(const void *input,
                                 void *output,
                                 unsigned long frame_cnt,
                                 const PaStreamCallbackTimeInfo *time_info,
@@ -339,15 +397,22 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd,
 static void __virtio_snd_frame_enqueue(void *payload,
                                        uint32_t n,
                                        uint32_t stream_id);
+static void __virtio_snd_rx_frame_enqueue(void *payload,
+                                       uint32_t n,
+                                       uint32_t stream_id);
+static void __virtio_snd_rx_frame_dequeue(void *out,
+                                       uint32_t n,
+                                       uint32_t stream_id);
 typedef struct {
     struct virtq_desc vq_desc;
     struct list_head q;
 } virtq_desc_queue_node_t;
 
-/* Flush only stream_id 0.
- * FIXME: let TX queue flushing can select arbitrary stream_id.
+/* Flush only default streams (TX: stream_id 0, RX: stream_id 1).
+ * FIXME: let TX and RX queue to flush can select arbitrary stream_id.
  */
-static uint32_t flush_stream_id = 0;
+static uint32_t flush_tx_stream_id = 0;
+static uint32_t flush_rx_stream_id = 1;
 
 #define VSND_GEN_TX_QUEUE_HANDLER(NAME_SUFFIX, WRITE)                        \
     static int virtio_snd_tx_desc_##NAME_SUFFIX##_handler(                   \
@@ -405,7 +470,7 @@ static uint32_t flush_stream_id = 0;
                 (/* enqueue frames */                                        \
                  bad_msg_err = stream_id >= VSND_DEV_CNT_MAX ? 1 : 0;        \
                  , /* flush queue */                                         \
-                 bad_msg_err = stream_id != flush_stream_id                  \
+                 bad_msg_err = stream_id != flush_tx_stream_id                  \
                                    ? 1                                       \
                                    : 0; /* select only stream_id 0 */        \
                  ) goto early_continue;                                      \
@@ -461,6 +526,139 @@ static uint32_t flush_stream_id = 0;
 
 VSND_GEN_TX_QUEUE_HANDLER(normal, 1);
 VSND_GEN_TX_QUEUE_HANDLER(flush, 0);
+#if 1
+#define VSND_GEN_RX_QUEUE_HANDLER(NAME_SUFFIX, WRITE)                        \
+    static int virtio_snd_rx_desc_##NAME_SUFFIX##_handler(                   \
+        virtio_snd_state_t *vsnd, const virtio_snd_queue_t *queue,           \
+        uint32_t desc_idx, uint32_t *plen)                                   \
+    {                                                                        \
+        /* A PCM I/O message uses at least 3 virtqueue descriptors to        \
+         * represent a PCM data of a period size.                            \
+         * The first part contains one descriptor as follows:                \
+         *   struct virtio_snd_pcm_xfer                                      \
+         * The second part contains one or more descriptors                  \
+         * representing PCM frames.                                          \
+         * the last part contains one descriptor as follows:                 \
+         *   struct virtio_snd_pcm_status                                    \
+         */                                                                  \
+        virtq_desc_queue_node_t *node;                                       \
+        struct list_head q;                                                  \
+        INIT_LIST_HEAD(&q);                                                  \
+                                                                             \
+        /* Collect the descriptors */                                        \
+        int cnt = 0;                                                         \
+        for (;;) {                                                           \
+            /* The size of the `struct virtq_desc` is 4 words */             \
+            const uint32_t *desc =                                           \
+                &vsnd->ram[queue->QueueDesc + desc_idx * 4];                 \
+                                                                             \
+            /* Retrieve the fields of current descriptor */                  \
+            node = (virtq_desc_queue_node_t *) malloc(sizeof(*node));        \
+            node->vq_desc.addr = desc[0];                                    \
+            node->vq_desc.len = desc[2];                                     \
+            node->vq_desc.flags = desc[3];                                   \
+            list_push(&node->q, &q);                                         \
+            desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */           \
+                                                                             \
+            cnt++;                                                           \
+                                                                             \
+            /* Leave the loop if next-flag is not set */                     \
+            if (!(desc[3] & VIRTIO_DESC_F_NEXT))                             \
+                break;                                                       \
+        }                                                                    \
+                                                                             \
+        int idx = 0;                                                         \
+        uint32_t stream_id = 0; /* Explicitly set the stream_id */           \
+        uintptr_t base = (uintptr_t) vsnd->ram;                              \
+        uint32_t ret_len = 0;                                                \
+        uint8_t bad_msg_err = 0;                                             \
+        list_for_each_entry (node, &q, q) {                                  \
+            uint32_t addr = node->vq_desc.addr;                              \
+            uint32_t len = node->vq_desc.len;                                \
+            if (idx == 0) { /* the first descriptor */                       \
+                const virtio_snd_pcm_xfer_t *request =                       \
+                    (virtio_snd_pcm_xfer_t *) (base + addr);                 \
+                stream_id = request->stream_id;                              \
+                IIF(WRITE)                                                   \
+                (/* enqueue frames */                                        \
+                 bad_msg_err = stream_id >= VSND_DEV_CNT_MAX ? 1 : 0;        \
+                 , /* flush queue */                                         \
+                 bad_msg_err = stream_id != flush_rx_stream_id                  \
+                                   ? 1                                       \
+                                   : 0; /* select only stream_id 0 */        \
+                 ) goto early_continue;                                      \
+            } else if (idx == cnt - 1) { /* the last descriptor */           \
+                IIF(WRITE)                                                   \
+                (  /* enqueue frames */                                      \
+                 , /* flush queue */                                         \
+                 if (bad_msg_err == 1) {                                     \
+                     fprintf(stderr, "ignore flush stream_id %" PRIu32 "\n", \
+                             stream_id);                                     \
+                     goto early_continue;                                    \
+                 } fprintf(stderr, "flush stream_id %" PRIu32 "\n",          \
+                           stream_id);) virtio_snd_pcm_status_t *response =  \
+                    (virtio_snd_pcm_status_t *) (base + addr);               \
+                response->status =                                           \
+                    bad_msg_err ? VIRTIO_SND_S_IO_ERR : VIRTIO_SND_S_OK;     \
+                response->latency_bytes = ret_len;                           \
+                *plen = sizeof(virtio_snd_pcm_status_t) + ret_len;                                   \
+                fprintf(stderr, "*** rx write %" PRIu32 " bytes \n", *plen); \
+                goto early_continue;                                         \
+            }                                                                \
+                                                                             \
+            IIF(WRITE)                                                       \
+            (/* enqueue frames */                                            \
+             void *payload = (void *) (base + addr); \
+             if (bad_msg_err != 0)   \
+             goto early_continue; \
+             __virtio_snd_rx_frame_dequeue(payload, len, stream_id);        \
+             , /* flush queue */                                             \
+             (void) stream_id;                                               \
+             /* Suppress unused variable warning. */) ret_len += len;        \
+                                                                             \
+        early_continue:                                                      \
+            idx++;                                                           \
+        }                                                                    \
+        fprintf(stderr, "||| finish iterating virtq list\n"); \
+                                                                             \
+        if (bad_msg_err != 0)                                                \
+            goto finally;                                                    \
+        IIF(WRITE)                                                           \
+        (/* enque frames */                                                  \
+         virtio_snd_prop_t *props = &vsnd_props[stream_id];                  \
+         props->lock.buf_ev_notity--;                                        \
+         pthread_cond_signal(&props->lock.writable);, /* flush queue */      \
+         )                                                                   \
+                                                                             \
+            /* Tear down the descriptor list and free space. */              \
+            virtq_desc_queue_node_t *tmp = NULL;                             \
+        list_for_each_entry_safe (node, tmp, &q, q) {                        \
+            list_del(&node->q);                                              \
+            free(node);                                                      \
+        }                                                                    \
+                                                                             \
+    finally:                                                                 \
+        return 0;                                                            \
+    }
+
+VSND_GEN_RX_QUEUE_HANDLER(normal, 1);
+VSND_GEN_RX_QUEUE_HANDLER(flush, 0);
+#endif
+#if 0
+static int virtio_snd_rx_desc_normal_handler(virtio_snd_state_t *vsnd,
+                                             const virtio_snd_queue_t *queue,
+                                             uint32_t desc_idx,
+                                             uint32_t *plen)
+{
+    fprintf(stderr, "=== rx_desc_normal_handler ===\n");
+
+    /* check for new buffers */
+    /* process them */
+    /* consume from available queue, write to used queue */
+    /* send interrupt, unless VIRTQ_AVAIL_F_NO_INTERRUPT is set */
+    return 0;
+}
+#endif
 
 static void virtio_snd_set_fail(virtio_snd_state_t *vsnd)
 {
@@ -508,19 +706,13 @@ static void virtio_snd_read_jack_info_handler(
 {
     uint32_t cnt = query->count;
     for (uint32_t i = 0; i < cnt; i++) {
-        info[i].hdr.hda_fn_nid = 0;
-        info[i].features = 0;
-        info[i].hda_reg_defconf = 0;
-        info[i].hda_reg_caps = 0;
-        info[i].connected = 1;
-        memset(&info[i].padding, 0, sizeof(info[i].padding));
-
         virtio_snd_prop_t *props = &vsnd_props[i];
-        props->j.hdr.hda_fn_nid = 0;
-        props->j.features = 0;
-        props->j.hda_reg_defconf = 0;
-        props->j.hda_reg_caps = 0;
-        props->j.connected = 1;
+        info[i].hdr.hda_fn_nid = props->j.hdr.hda_fn_nid;
+        info[i].features = props->j.features;
+        info[i].hda_reg_defconf = props->j.hda_reg_defconf;
+        info[i].hda_reg_caps = props->j.hda_reg_caps;
+        info[i].connected = props->j.connected;
+        memset(&info[i].padding, 0, sizeof(info[i].padding));
         memset(&props->j.padding, 0, sizeof(props->j.padding));
     }
 
@@ -534,29 +726,15 @@ static void virtio_snd_read_pcm_info_handler(
 {
     uint32_t cnt = query->count;
     for (uint32_t i = 0; i < cnt; i++) {
-        info[i].hdr.hda_fn_nid = 0;
-        info[i].features = 0;
-        info[i].formats = (1 << VIRTIO_SND_PCM_FMT_S16);
-
-        info[i].rates = 0;
-#define _(rate) info[i].rates |= (1 << VIRTIO_SND_PCM_RATE_##rate);
-        SND_PCM_RATE
-#undef _
-        info[i].direction = VIRTIO_SND_D_OUTPUT;
-        info[i].channels_min = 1;
-        info[i].channels_max = 1;
-        memset(&info[i].padding, 0, sizeof(info[i].padding));
-
         virtio_snd_prop_t *props = &vsnd_props[i];
-        props->p.hdr.hda_fn_nid = 0;
-        props->p.features = 0;
-        props->p.formats = (1 << VIRTIO_SND_PCM_FMT_S16);
-#define _(rate) props->p.rates |= (1 << VIRTIO_SND_PCM_RATE_##rate);
-        SND_PCM_RATE
-#undef _
-        props->p.direction = VIRTIO_SND_D_OUTPUT;
-        props->p.channels_min = 1;
-        props->p.channels_max = 1;
+        info[i].hdr.hda_fn_nid = props->p.hdr.hda_fn_nid;
+        info[i].features = props->p.features;
+        info[i].formats = props->p.formats;
+        info[i].rates = props->p.rates;
+        info[i].direction = props->p.direction;
+        info[i].channels_min = props->p.channels_min;
+        info[i].channels_max = props->p.channels_max;
+        memset(&info[i].padding, 0, sizeof(info[i].padding));
         memset(&props->p.padding, 0, sizeof(props->p.padding));
     }
     *plen = cnt * sizeof(*info);
@@ -569,16 +747,11 @@ static void virtio_snd_read_chmap_info_handler(
 {
     uint32_t cnt = query->count;
     for (uint32_t i = 0; i < cnt; i++) {
-        info[i].hdr.hda_fn_nid = 0;
-        info[i].direction = VIRTIO_SND_D_OUTPUT;
-        info[i].channels = 1;
-        info[i].positions[0] = VIRTIO_SND_CHMAP_MONO;
-
         virtio_snd_prop_t *props = &vsnd_props[i];
-        props->c.hdr.hda_fn_nid = 0;
-        props->c.direction = VIRTIO_SND_D_OUTPUT;
-        props->c.channels = 1;
-        props->c.positions[0] = VIRTIO_SND_CHMAP_MONO;
+        info[i].hdr.hda_fn_nid = props->c.hdr.hda_fn_nid;
+        info[i].direction = props->c.direction;
+        info[i].channels = props->c.channels;
+        info[i].positions[0] = props->c.positions[0];
     }
     *plen = cnt * sizeof(info);
 }
@@ -650,10 +823,15 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     uint32_t cnfa_period_bytes = bps_rate / 10;
     /* Calculate the period size (in frames) for CNFA . */
     uint32_t cnfa_period_frames = cnfa_period_bytes / VSND_CNFA_FRAME_SZ;
+    /* Get the number of buffer multiplier */
+    uint32_t mul = props->pp.buffer_bytes / props->pp.period_bytes;
 
     INIT_LIST_HEAD(&props->buf_queue_head);
+    props->buf_sz = cnfa_period_bytes * mul;
+    props->buf_idx = 0;
+    uint32_t sz = sizeof(*props->intermediate) * props->buf_sz;
     props->intermediate =
-        (void *) malloc(sizeof(*props->intermediate) * cnfa_period_bytes);
+        (void *) malloc(sz);
     PaStreamParameters params = {
         .device = Pa_GetDefaultOutputDevice(),
         .channelCount = props->pp.channels,
@@ -661,16 +839,32 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
         .suggestedLatency = 0.1, /* 100 ms */
         .hostApiSpecificStreamInfo = NULL,
     };
-    PaError err = Pa_OpenStream(&props->pa_stream, NULL, /* no input */
-                                &params, rate, cnfa_period_frames, paClipOff,
-                                virtio_snd_stream_cb, &props->v);
-    if (err != paNoError) {
-        fprintf(stderr, "Cannot create PortAudio\n");
-        printf("PortAudio error: %s\n", Pa_GetErrorText(err));
-        return;
+    uint32_t dir = props->p.direction;
+    PaError err = paNoError;
+    fprintf(stderr, "pcm_prepare dir %" PRIu32 "\n", dir);
+    if (dir == VIRTIO_SND_D_OUTPUT) {
+        err = Pa_OpenStream(&props->pa_stream, NULL, /* no input */
+                            &params, rate, cnfa_period_frames, paClipOff,
+                            virtio_snd_tx_stream_cb, &props->v);
+        if(err != paNoError)
+            goto pa_err;
+    } else if (dir == VIRTIO_SND_D_INPUT) {
+        err = Pa_OpenStream(&props->pa_stream, &params, NULL /* no output */,
+                            rate, cnfa_period_frames, paClipOff,
+                            virtio_snd_rx_stream_cb, &props->v);
+        if(err != paNoError)
+            goto pa_err;
+        rx_ev_start = 0;
+        //pthread_cond_signal(&props->lock.readable);
     }
 
     *plen = 0;
+
+    return;
+
+pa_err:
+    fprintf(stderr, "Cannot create PortAudio\n");
+    printf("PortAudio error: %s\n", Pa_GetErrorText(err));
 }
 
 static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
@@ -695,6 +889,10 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
         fprintf(stderr, "get error in pcm_start\n");
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return;
+    }
+    if(props->p.direction == VIRTIO_SND_D_INPUT) {
+        rx_ev_start = 1;
+        //pthread_cond_signal(&props->lock.readable);
     }
 
     *plen = 0;
@@ -722,6 +920,10 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
         fprintf(stderr, "get error in pcm_stop\n");
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return;
+    }
+    if(props->p.direction == VIRTIO_SND_D_INPUT) {
+        rx_ev_start = 0;
+        //pthread_cond_signal(&props->lock.readable);
     }
 
     *plen = 0;
@@ -778,7 +980,10 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
      * - The device MUST NOT complete the control request while there
      *   are pending I/O messages for the specified stream ID.
      */
-    virtio_queue_notify_handler(vsnd, 2, virtio_snd_tx_desc_flush_handler);
+    if(props->p.direction == VIRTIO_SND_D_OUTPUT)
+        virtio_queue_notify_handler(vsnd, 2, virtio_snd_tx_desc_flush_handler);
+    else if(props->p.direction == VIRTIO_SND_D_INPUT)
+        virtio_queue_notify_handler(vsnd, 3, virtio_snd_rx_desc_flush_handler);
 
     *plen = 0;
 }
@@ -819,19 +1024,90 @@ static void __virtio_snd_frame_dequeue(void *out,
     pthread_mutex_unlock(&props->lock.lock);
 }
 
-static int virtio_snd_stream_cb(const void *input,
+static void __virtio_snd_rx_frame_dequeue(void *out,
+                                       uint32_t n,
+                                       uint32_t stream_id)
+{
+    virtio_snd_prop_t *props = &vsnd_props[stream_id];
+
+    pthread_mutex_lock(&props->lock.lock);
+        fprintf(stderr, "((( rx_frame_deque buf_ev_notity %d" " rx_ev_start %d\n",
+                props->lock.buf_ev_notity,
+                rx_ev_start);
+    while (!(props->lock.buf_ev_notity > 0 && rx_ev_start == 1)) {
+            pthread_cond_wait(&props->lock.readable, &props->lock.lock);
+    }
+
+    /* Get the PCM frames from queue */
+    fprintf(stderr, "((( RX deque start\n");
+    uint32_t written_bytes = 0;
+    while (!list_empty(&props->buf_queue_head) && written_bytes < n) {
+        vsnd_buf_queue_node_t *node =
+            list_first_entry(&props->buf_queue_head, vsnd_buf_queue_node_t, q);
+        uint32_t left = n - written_bytes;
+        uint32_t actual = node->len - node->pos;
+        uint32_t len =
+            left < actual ? left : actual; /* Naive min implementation */
+
+        memcpy(out + written_bytes, node->addr + node->pos,
+               len);
+
+        written_bytes += len;
+        node->pos += len;
+        if (node->pos >= node->len)
+            list_del(&node->q);
+    }
+
+    fprintf(stderr, "((( RX deque get %" PRIu32 " bytes \n", written_bytes);
+
+    pthread_mutex_unlock(&props->lock.lock);
+}
+
+
+static int virtio_snd_tx_stream_cb(const void *input,
                                 void *output,
                                 unsigned long frame_cnt,
                                 const PaStreamCallbackTimeInfo *time_info,
                                 PaStreamCallbackFlags status_flags,
                                 void *user_data)
 {
+    /* suppress unused variables warning */
+    (void) input;
+    (void) time_info;
+    (void) status_flags;
+
     vsnd_stream_sel_t *v_ptr = (vsnd_stream_sel_t *) user_data;
     uint32_t id = v_ptr->stream_id;
     int channels = vsnd_props[id].pp.channels;
     uint32_t out_buf_sz = frame_cnt * channels;
     uint32_t out_buf_bytes = out_buf_sz * VSND_CNFA_FRAME_SZ;
     __virtio_snd_frame_dequeue(output, out_buf_bytes, id);
+
+    return paContinue;
+}
+
+static int virtio_snd_rx_stream_cb(const void *input,
+                                void *output,
+                                unsigned long frame_cnt,
+                                const PaStreamCallbackTimeInfo *time_info,
+                                PaStreamCallbackFlags status_flags,
+                                void *user_data)
+{
+    /* suppress unused variable warning */
+    (void) output;
+    (void) time_info;
+    (void) status_flags;
+
+    //fprintf(stderr, "rx_stream_cb\n");
+
+    vsnd_stream_sel_t *v_ptr = (vsnd_stream_sel_t *) user_data;
+    uint32_t id = v_ptr->stream_id;
+    virtio_snd_prop_t *props = &vsnd_props[id];
+    int channels = props->pp.channels;
+    uint32_t out_buf_sz = frame_cnt * channels;
+    uint32_t out_buf_bytes = out_buf_sz * VSND_CNFA_FRAME_SZ;
+    
+    __virtio_snd_rx_frame_enqueue(input, out_buf_bytes, id);
 
     return paContinue;
 }
@@ -952,6 +1228,58 @@ static void __virtio_snd_frame_enqueue(void *payload,
     pthread_mutex_unlock(&props->lock.lock);
 }
 
+// FIXME: create cirular queue behavior
+static void __virtio_snd_rx_frame_enqueue(void *payload,
+                                       uint32_t n,
+                                       uint32_t stream_id)
+{
+    virtio_snd_prop_t *props = &vsnd_props[stream_id];
+
+    pthread_mutex_lock(&props->lock.lock);
+    fprintf(stderr, ")) rx_frame enque buf_ev_notity %d\n", props->lock.buf_ev_notity);
+    while (props->lock.buf_ev_notity > 0) {
+        pthread_cond_wait(&props->lock.writable, &props->lock.lock);
+    }
+
+    fprintf(stderr, "enque start\n");
+
+    uint32_t idx = props->buf_idx;
+    uint32_t sz = props->buf_sz;
+    uint32_t base = (idx + n > sz) ? (sz - idx) : n;
+    uint32_t left = n - base;
+    memcpy(props->intermediate + idx, payload, base);
+    if(left != 0)
+        memcpy(props->intermediate, payload + base, left);
+    props->buf_idx = (props->buf_idx + n) % sz;
+    /* Add a PCM frame to queue */
+    /* As stated in Linux Kernel mailing list [1], we keep the pointer
+     * points to the payload [2] so that we can always get up-to-date
+     * contents of PCM frames.
+     * References:
+     * [1] https://lore.kernel.org/all/ZQHPeD0fds9sYzHO@pc-79.home/T/
+     * [2]
+     * https://github.com/rust-vmm/vhost-device/blob/eb2e2227e41d48a52e4e6346189b772c5363879d/staging/vhost-device-sound/src/device.rs#L554
+     */
+    /* FIXME: locate the root case of repeating artifact even we
+     * keep the pointer of the payload.
+     */
+    vsnd_buf_queue_node_t *node = malloc(sizeof(*node));
+    node->addr = props->intermediate + idx;
+    node->len = n;
+    node->pos = 0;
+    list_push(&node->q, &props->buf_queue_head);
+
+    props->lock.buf_ev_notity++;
+    pthread_cond_signal(&props->lock.readable);
+    pthread_mutex_unlock(&props->lock.lock);
+    fprintf(stderr, "+++ virtio_snd_rx_enqueue"
+            " idx %" PRIu32
+            " base %" PRIu32 
+            " left %" PRIu32 " +++\n",
+            idx, base, left);
+}
+
+
 static void virtio_queue_notify_handler(
     virtio_snd_state_t *vsnd,
     int index,
@@ -1020,18 +1348,36 @@ static void virtio_queue_notify_handler(
 
 /* TX thread context */
 /* Receive PCM frames from driver. */
-static void *func(void *args)
+static void *tx_func(void *args)
 {
     virtio_snd_state_t *vsnd = (virtio_snd_state_t *) args;
     for (;;) {
-        pthread_mutex_lock(&virtio_snd_mutex);
+        pthread_mutex_lock(&virtio_snd_tx_mutex);
         while (tx_ev_notify <= 0)
-            pthread_cond_wait(&virtio_snd_tx_cond, &virtio_snd_mutex);
+            pthread_cond_wait(&virtio_snd_tx_cond, &virtio_snd_tx_mutex);
 
         tx_ev_notify--;
         virtio_queue_notify_handler(vsnd, 2, virtio_snd_tx_desc_normal_handler);
 
-        pthread_mutex_unlock(&virtio_snd_mutex);
+        pthread_mutex_unlock(&virtio_snd_tx_mutex);
+    }
+    pthread_exit(NULL);
+}
+
+/* RX thread context */
+/* Send PCM frames to driver. */
+static void *rx_func(void *args)
+{
+    virtio_snd_state_t *vsnd = (virtio_snd_state_t *) args;
+    for (;;) {
+        pthread_mutex_lock(&virtio_snd_rx_mutex);
+        while (rx_ev_notify <= 0)
+            pthread_cond_wait(&virtio_snd_rx_cond, &virtio_snd_rx_mutex);
+
+        rx_ev_notify--;
+        virtio_queue_notify_handler(vsnd, 3, virtio_snd_rx_desc_normal_handler);
+
+        pthread_mutex_unlock(&virtio_snd_rx_mutex);
     }
     pthread_exit(NULL);
 }
@@ -1150,6 +1496,11 @@ static bool virtio_snd_reg_write(virtio_snd_state_t *vsnd,
                 tx_ev_notify++;
                 pthread_cond_signal(&virtio_snd_tx_cond);
                 break;
+            case VSND_QUEUE_RX:
+                rx_ev_notify++;
+                pthread_cond_signal(&virtio_snd_rx_cond);
+                fprintf(stderr, "))) hit RX queue\n");
+                break;
             default:
                 fprintf(stderr, "value %d not supported\n", value);
                 return false;
@@ -1232,18 +1583,24 @@ bool virtio_snd_init(virtio_snd_state_t *vsnd)
     }
 
     /* Allocate the memory of private member. */
-    vsnd->priv = &vsnd_configs[vsnd_dev_cnt++];
+    vsnd->priv = &vsnd_configs[vsnd_dev_cnt];
+    vsnd_dev_cnt += 2;
 
-    PRIV(vsnd)->jacks = 1;
-    PRIV(vsnd)->streams = 1;
-    PRIV(vsnd)->chmaps = 1;
+    PRIV(vsnd)->jacks = 2;
+    PRIV(vsnd)->streams = 2;
+    PRIV(vsnd)->chmaps = 2;
     PRIV(vsnd)->controls =
         0; /* virtio-snd device does not support control elements */
 
     tx_ev_notify = 0;
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, func, vsnd) != 0) {
+    rx_ev_notify = 0;
+    pthread_t tx_tid, rx_tid;
+    if (pthread_create(&tx_tid, NULL, tx_func, vsnd) != 0) {
         fprintf(stderr, "cannot create TX thread\n");
+        return false;
+    }
+    if (pthread_create(&rx_tid, NULL, rx_func, vsnd) != 0) {
+        fprintf(stderr, "cannot create RX thread\n");
         return false;
     }
     /* Initialize PortAudio */
