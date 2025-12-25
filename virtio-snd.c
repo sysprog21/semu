@@ -297,8 +297,6 @@ typedef struct {
     // PCM frame doubly-ended queue
     vsnd_buf_queue_node_t buf;
     struct list_head buf_queue_head;
-    // PCM frame intermediate buffer;
-    void *intermediate;
 
     // playback control
     vsnd_stream_sel_t v;
@@ -652,8 +650,6 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     uint32_t cnfa_period_frames = cnfa_period_bytes / VSND_CNFA_FRAME_SZ;
 
     INIT_LIST_HEAD(&props->buf_queue_head);
-    props->intermediate =
-        (void *) malloc(sizeof(*props->intermediate) * cnfa_period_bytes);
     PaStreamParameters params = {
         .device = Pa_GetDefaultOutputDevice(),
         .channelCount = props->pp.channels,
@@ -746,7 +742,6 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
     props->pp.hdr.hdr.code = VIRTIO_SND_R_PCM_RELEASE;
 
     /* Tear down PCM buffer related locking attributes. */
-    free(props->intermediate);
     /* Explicitly unlock the CVs and mutex. */
     pthread_cond_broadcast(&props->lock.readable);
     pthread_cond_broadcast(&props->lock.writable);
@@ -760,9 +755,6 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
             free(node);
         }
     }
-
-    /* avoid dangling pointers */
-    props->intermediate = NULL;
 
     PaError err = Pa_CloseStream(props->pa_stream);
     if (err != paNoError) {
@@ -795,7 +787,6 @@ static void __virtio_snd_frame_dequeue(void *out,
 
     /* Get the PCM frames from queue */
     uint32_t written_bytes = 0;
-    memset(props->intermediate, 0, sizeof(*props->intermediate) * n);
     while (!list_empty(&props->buf_queue_head) && written_bytes < n) {
         vsnd_buf_queue_node_t *node =
             list_first_entry(&props->buf_queue_head, vsnd_buf_queue_node_t, q);
@@ -804,15 +795,13 @@ static void __virtio_snd_frame_dequeue(void *out,
         uint32_t len =
             left < actual ? left : actual; /* Naive min implementation */
 
-        memcpy(props->intermediate + written_bytes, node->addr + node->pos,
-               len);
+        memcpy(out + written_bytes, node->addr + node->pos, len);
 
         written_bytes += len;
         node->pos += len;
         if (node->pos >= node->len)
             list_del(&node->q);
     }
-    memcpy(out, props->intermediate, written_bytes);
 
     props->lock.buf_ev_notity--;
     pthread_cond_signal(&props->lock.writable);
