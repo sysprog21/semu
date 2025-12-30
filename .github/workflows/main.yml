@@ -69,6 +69,10 @@ jobs:
       run: sudo .ci/test-netdev.sh
       shell: bash
       timeout-minutes: 10
+    - name: sound test
+      run: .ci/test-sound.sh
+      shell: bash
+      timeout-minutes: 5
 
   semu-macOS:
     runs-on: macos-latest
@@ -118,6 +122,10 @@ jobs:
       shell: bash
       timeout-minutes: 20
       if: ${{ success() }}
+    - name: sound test
+      run: .ci/test-sound.sh
+      shell: bash
+      timeout-minutes: 20
 
   coding_style:
     runs-on: ubuntu-24.04
