@@ -331,9 +331,7 @@ static int virtio_snd_stream_cb(const void *input,
                                 const PaStreamCallbackTimeInfo *time_info,
                                 PaStreamCallbackFlags status_flags,
                                 void *user_data);
-static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd,
-                                        int index, /* virtq index */
-                                        vsnd_virtq_cb cb);
+static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index);
 static void __virtio_snd_frame_enqueue(void *payload,
                                        uint32_t n,
                                        uint32_t stream_id);
@@ -347,11 +345,8 @@ typedef struct {
  */
 static uint32_t flush_stream_id = 0;
 
-#define VSND_GEN_TX_QUEUE_HANDLER(NAME_SUFFIX, WRITE)                        \
-    static int virtio_snd_tx_desc_##NAME_SUFFIX##_handler(                   \
-        virtio_snd_state_t *vsnd, const virtio_snd_queue_t *queue,           \
-        uint32_t desc_idx, uint32_t *plen)                                   \
-    {                                                                        \
+#define VSND_TX_QUEUE_BODY(WRITE)                                            \
+    do {                                                                     \
         /* A PCM I/O message uses at least 3 virtqueue descriptors to        \
          * represent a PCM data of a period size.                            \
          * The first part contains one descriptor as follows:                \
@@ -455,10 +450,23 @@ static uint32_t flush_stream_id = 0;
                                                                              \
     finally:                                                                 \
         return 0;                                                            \
-    }
+    } while (0)
 
-VSND_GEN_TX_QUEUE_HANDLER(normal, 1);
-VSND_GEN_TX_QUEUE_HANDLER(flush, 0);
+static int virtio_snd_tx_desc_handler(virtio_snd_state_t *vsnd,
+                                      const virtio_snd_queue_t *queue,
+                                      uint32_t desc_idx,
+                                      uint32_t *plen)
+{
+    VSND_TX_QUEUE_BODY(1);
+}
+
+static int virtio_snd_io_desc_flush_handler(virtio_snd_state_t *vsnd,
+                                            const virtio_snd_queue_t *queue,
+                                            uint32_t desc_idx,
+                                            uint32_t *plen)
+{
+    VSND_TX_QUEUE_BODY(0);
+}
 
 static void virtio_snd_set_fail(virtio_snd_state_t *vsnd)
 {
@@ -723,6 +731,7 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
     *plen = 0;
 }
 
+#define VSND_FLUSH_QUEUE 0x4
 static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
                                         uint32_t *plen,
                                         virtio_snd_state_t *vsnd)
@@ -770,7 +779,7 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
      * - The device MUST NOT complete the control request while there
      *   are pending I/O messages for the specified stream ID.
      */
-    virtio_queue_notify_handler(vsnd, 2, virtio_snd_tx_desc_flush_handler);
+    virtio_queue_notify_handler(vsnd, VSND_FLUSH_QUEUE | 0x2);
 
     *plen = 0;
 }
@@ -912,6 +921,20 @@ static int virtio_snd_ctrl_desc_handler(virtio_snd_state_t *vsnd,
     return 0;
 }
 
+/* virtq device operation lookup table */
+/* The entry of flush queue operation (whether it is needed or not
+ * for each type of queue) starts from 0x04.
+ * So we can set bit with 0x04 when we need to flush queue. */
+static vsnd_virtq_cb __virtio_snd_queue_op_tbl[8] = {
+    virtio_snd_ctrl_desc_handler, /* control queue */
+    NULL,                         /* event queue */
+    virtio_snd_tx_desc_handler,   /* TX queue */
+    NULL,                         /* RX queue */
+    NULL, /* no need to flush control queue, so trigger a failed null check */
+    NULL, /* no need to flush event queue, so trigger a failed null check */
+    virtio_snd_io_desc_flush_handler, /* flush TX queue */
+    NULL,                             /* flush RX queue */
+};
 
 static void __virtio_snd_frame_enqueue(void *payload,
                                        uint32_t n,
@@ -949,16 +972,10 @@ tx_frame_enqueue_final:
     pthread_mutex_unlock(&props->lock.lock);
 }
 
-static void virtio_queue_notify_handler(
-    virtio_snd_state_t *vsnd,
-    int index,
-    int (*handler)(virtio_snd_state_t *,
-                   const virtio_snd_queue_t *,
-                   uint32_t,
-                   uint32_t *))
+static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
 {
     uint32_t *ram = vsnd->ram;
-    virtio_snd_queue_t *queue = &vsnd->queues[index];
+    virtio_snd_queue_t *queue = &vsnd->queues[index & 0x03];
     if (vsnd->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
         return;
 
@@ -992,6 +1009,9 @@ static void virtio_queue_notify_handler(
          * descriptor list.
          */
         uint32_t len = 0;
+        vsnd_virtq_cb handler = __virtio_snd_queue_op_tbl[index & 0x07];
+        if (!handler)
+            return virtio_snd_set_fail(vsnd);
         int result = handler(vsnd, queue, buffer_idx, &len);
         if (result != 0)
             return virtio_snd_set_fail(vsnd);
@@ -1026,7 +1046,7 @@ static void *func(void *args)
             pthread_cond_wait(&virtio_snd_tx_cond, &virtio_snd_mutex);
 
         tx_ev_notify--;
-        virtio_queue_notify_handler(vsnd, 2, virtio_snd_tx_desc_normal_handler);
+        virtio_queue_notify_handler(vsnd, 2);
 
         pthread_mutex_unlock(&virtio_snd_mutex);
     }
@@ -1140,8 +1160,7 @@ static bool virtio_snd_reg_write(virtio_snd_state_t *vsnd,
         if (value < ARRAY_SIZE(vsnd->queues)) {
             switch (value) {
             case VSND_QUEUE_CTRL:
-                virtio_queue_notify_handler(vsnd, value,
-                                            virtio_snd_ctrl_desc_handler);
+                virtio_queue_notify_handler(vsnd, value);
                 break;
             case VSND_QUEUE_TX:
                 tx_ev_notify++;
