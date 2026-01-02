@@ -269,7 +269,7 @@ typedef struct {
 
 typedef struct {
     pthread_cond_t readable, writable;
-    int buf_ev_notity;
+    int buf_ev_notify;
     pthread_mutex_t lock;
 } virtio_snd_queue_lock_t;
 
@@ -442,7 +442,7 @@ static uint32_t flush_stream_id = 0;
         IIF(WRITE)                                                           \
         (/* enque frames */                                                  \
          virtio_snd_prop_t *props = &vsnd_props[stream_id];                  \
-         props->lock.buf_ev_notity++;                                        \
+         props->lock.buf_ev_notify++;                                        \
          pthread_cond_signal(&props->lock.readable);, /* flush queue */      \
          )                                                                   \
                                                                              \
@@ -782,7 +782,7 @@ static void __virtio_snd_frame_dequeue(void *out,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (props->lock.buf_ev_notity < 1)
+    while (props->lock.buf_ev_notify < 1)
         pthread_cond_wait(&props->lock.readable, &props->lock.lock);
 
     /* Get the PCM frames from queue */
@@ -803,7 +803,7 @@ static void __virtio_snd_frame_dequeue(void *out,
             list_del(&node->q);
     }
 
-    props->lock.buf_ev_notity--;
+    props->lock.buf_ev_notify--;
     pthread_cond_signal(&props->lock.writable);
     pthread_mutex_unlock(&props->lock.lock);
 }
@@ -917,7 +917,7 @@ static void __virtio_snd_frame_enqueue(void *payload,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (props->lock.buf_ev_notity > 0)
+    while (props->lock.buf_ev_notify > 0)
         pthread_cond_wait(&props->lock.writable, &props->lock.lock);
 
     /* Add a PCM frame to queue */
