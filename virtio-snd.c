@@ -799,8 +799,11 @@ static void __virtio_snd_frame_dequeue(void *out,
 
         written_bytes += len;
         node->pos += len;
-        if (node->pos >= node->len)
+        if (node->pos >= node->len) {
             list_del(&node->q);
+            free(node->addr);
+            free(node);
+        }
     }
 
     props->lock.buf_ev_notify--;
@@ -929,15 +932,20 @@ static void __virtio_snd_frame_enqueue(void *payload,
      * [2]
      * https://github.com/rust-vmm/vhost-device/blob/eb2e2227e41d48a52e4e6346189b772c5363879d/staging/vhost-device-sound/src/device.rs#L554
      */
-    /* FIXME: locate the root case of repeating artifact even we
-     * keep the pointer of the payload.
-     */
     vsnd_buf_queue_node_t *node = malloc(sizeof(*node));
-    node->addr = payload;
+    if (!node)
+        goto tx_frame_enqueue_final;
+    node->addr = malloc(sizeof(*node->addr) * n);
+    if (!node->addr) {
+        free(node);
+        goto tx_frame_enqueue_final;
+    }
+    memcpy(node->addr, payload, n);
     node->len = n;
     node->pos = 0;
     list_push(&node->q, &props->buf_queue_head);
 
+tx_frame_enqueue_final:
     pthread_mutex_unlock(&props->lock.lock);
 }
 
