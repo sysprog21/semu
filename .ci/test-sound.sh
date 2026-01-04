@@ -34,6 +34,8 @@ expect "buildroot login:" { send "root\\n" } timeout { exit 1 }
 expect "# " { send "uname -a\\n" } timeout { exit 2 }
 expect "riscv32 GNU/Linux" { send "aplay ${SAMPLE_SOUND} \\n" } timeout { exit 3 }
 expect " Mono" { } timeout { exit 4 }
+expect "# " { send "aplay -C -d 3 -f S16_LE > /dev/null \\n" } timeout { exit 5 }
+expect " Mono" { } timeout { exit 6 }
 DONE
 
 ret="$?"
@@ -43,6 +45,8 @@ MESSAGES=("OK!" \
      "Fail to login" \
      "Fail to run playback commands" \
      "Playback fails" \
+     "Fail to run capture commands" \
+     "Capture fails" \
 )
 
 if [ "$ret" -eq 0 ]; then
