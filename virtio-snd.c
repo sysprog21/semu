@@ -1102,7 +1102,7 @@ static vsnd_virtq_cb __virtio_snd_queue_op_tbl[8] = {
     virtio_snd_ctrl_desc_handler, /* control queue */
     NULL,                         /* event queue */
     virtio_snd_tx_desc_handler,   /* TX queue */
-    NULL,                         /* RX queue */
+    virtio_snd_rx_desc_handler,                         /* RX queue */
     NULL, /* no need to flush control queue, so trigger a failed null check */
     NULL, /* no need to flush event queue, so trigger a failed null check */
     virtio_snd_io_desc_tx_flush_handler, /* flush TX queue */
