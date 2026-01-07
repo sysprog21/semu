@@ -757,9 +757,9 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
                             virtio_snd_rx_stream_cb, &props->v);
         if (err != paNoError)
             goto pa_err;
-        pthread_mutex_lock(&props->lock.lock);
+        /*pthread_mutex_lock(&props->lock.lock);
         rx_ev_start = 0;
-        pthread_mutex_unlock(&props->lock.lock);
+        pthread_mutex_unlock(&props->lock.lock);*/
     }
     *plen = 0;
 
@@ -793,11 +793,11 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return;
     }
-    if (props->p.direction == VIRTIO_SND_D_INPUT) {
+    /*if (props->p.direction == VIRTIO_SND_D_INPUT) {
         pthread_mutex_lock(&props->lock.lock);
         rx_ev_start = 1;
         pthread_mutex_unlock(&props->lock.lock);
-    }
+    }*/
 
     *plen = 0;
 }
@@ -825,11 +825,11 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         return;
     }
-    if (props->p.direction == VIRTIO_SND_D_INPUT) {
+    /*if (props->p.direction == VIRTIO_SND_D_INPUT) {
         pthread_mutex_lock(&props->lock.lock);
         rx_ev_start = 0;
         pthread_mutex_unlock(&props->lock.lock);
-    }
+    }*/
 
     *plen = 0;
 }
@@ -934,7 +934,7 @@ static void __virtio_snd_rx_frame_dequeue(void *out,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (!(props->lock.buf_ev_notify > 0 && rx_ev_start == 1))
+    while (!(props->lock.buf_ev_notify > 0 && !Pa_IsStreamStopped(props->pa_stream)))
         pthread_cond_wait(&props->lock.readable, &props->lock.lock);
 
     fprintf(stderr, "deque start\n");
