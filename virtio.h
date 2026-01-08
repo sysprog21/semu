@@ -71,6 +71,11 @@
 #define FUSE_CACHE_SYMLINKS (1 << 23)
 #define FUSE_NO_OPENDIR_SUPPORT (1 << 24)
 
+/* virtio-gpu */
+#define VIRTIO_GPU_FLAG_FENCE (1 << 0)
+
+#define VIRTIO_GPU_MAX_SCANOUTS 16
+
 /* VirtIO MMIO registers */
 #define VIRTIO_REG_LIST                  \
     _(MagicValue, 0x000)        /* R */  \
@@ -96,6 +101,12 @@
     _(QueueDeviceLow, 0x0a0)    /* W */  \
     _(QueueDeviceHigh, 0x0a4)   /* W */  \
     _(ConfigGeneration, 0x0fc)  /* R */  \
+    _(SHMSel, 0x0ac)            /* W */  \
+    _(SHMLenLow, 0x0b0)         /* R */  \
+    _(SHMLenHigh, 0x0b4)        /* R */  \
+    _(SHMBaseLow, 0x0b8)        /* R */  \
+    _(SHMBaseHigh, 0x0bc)       /* R */  \
+    _(QueueReset, 0x0c0)        /* RW */ \
     _(Config, 0x100)            /* RW */
 
 enum {
