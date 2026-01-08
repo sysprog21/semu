@@ -1,9 +1,10 @@
 /* Lightweight coroutine for multi-hart execution */
 
-#include "coro.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "coro.h"
 
 /* Platform detection */
 
@@ -22,7 +23,8 @@
 /* Coroutine state */
 
 typedef enum {
-    CORO_STATE_SUSPENDED,
+    CORO_STATE_SUSPENDED,       /* WFI suspension */
+    CORO_STATE_DEBUG_SUSPENDED, /* Debug breakpoint suspension */
     CORO_STATE_RUNNING,
     CORO_STATE_DEAD
 } coro_state_t;
@@ -612,4 +614,70 @@ uint32_t coro_current_hart_id(void)
         return UINT32_MAX;
 
     return coro_state.current_hart;
+}
+
+/* Debug-related coroutine functions for GDB integration */
+
+void coro_suspend_hart_debug(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.hart_slots || !coro_state.initialized)
+        return;
+
+    /* Mark the hart as suspended for debugging.
+     * The scheduler should skip this hart until resumed.
+     */
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (co && co->state != CORO_STATE_DEAD)
+        co->state = CORO_STATE_DEBUG_SUSPENDED;
+}
+
+void coro_resume_hart_debug(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.hart_slots || !coro_state.initialized)
+        return;
+
+    /* Resume the hart from debug suspension.
+     * Transition from DEBUG_SUSPENDED to SUSPENDED, then delegate to
+     * coro_resume_hart which handles the actual context switch.
+     */
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (co && co->state == CORO_STATE_DEBUG_SUSPENDED) {
+        co->state = CORO_STATE_SUSPENDED;
+        coro_resume_hart(hart_id);
+    }
+}
+
+bool coro_is_debug_suspended(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.hart_slots || !coro_state.initialized)
+        return false;
+
+    coro_t *co = coro_state.coroutines[hart_id];
+    return (co && co->state == CORO_STATE_DEBUG_SUSPENDED);
+}
+
+bool coro_step_hart(uint32_t hart_id)
+{
+    if (hart_id >= coro_state.hart_slots || !coro_state.initialized)
+        return false;
+
+    coro_t *co = coro_state.coroutines[hart_id];
+    if (!co)
+        return false;
+
+    /* Only allow stepping if hart is currently debug-suspended */
+    if (co->state != CORO_STATE_DEBUG_SUSPENDED)
+        return false;
+
+    /* Transition to SUSPENDED state so coro_resume_hart can proceed */
+    co->state = CORO_STATE_SUSPENDED;
+
+    /* Resume the coroutine for one instruction.
+     * The hart coroutine should check single_step_mode and yield after one
+     * instruction, transitioning back to DEBUG_SUSPENDED state.
+     */
+    coro_resume_hart(hart_id);
+
+    /* Verify that the hart actually yielded back after single-step */
+    return (co->state == CORO_STATE_DEBUG_SUSPENDED);
 }

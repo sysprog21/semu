@@ -170,6 +170,7 @@ OBJS := \
 	main.o \
 	aclint.o \
 	coro.o \
+	gdbctrl.o \
 	$(OBJS_EXTRA)
 
 deps := $(OBJS:%.o=.%.o.d)

@@ -37,3 +37,23 @@ bool coro_is_suspended(uint32_t slot_id);
 
 /* Get currently executing hart ID */
 uint32_t coro_current_hart_id(void);
+
+/* Debug-related coroutine functions for GDB integration */
+
+/* Suspend a hart for debugging (e.g., hit breakpoint)
+ * The hart will not be scheduled until explicitly resumed.
+ * This is different from WFI suspension.
+ */
+void coro_suspend_hart_debug(uint32_t hart_id);
+
+/* Resume a hart from debug suspension */
+void coro_resume_hart_debug(uint32_t hart_id);
+
+/* Check if a hart is suspended for debugging */
+bool coro_is_debug_suspended(uint32_t hart_id);
+
+/* Execute exactly one instruction on a hart (for single-step debugging)
+ * This will resume the hart, execute one instruction, then suspend again.
+ * Returns: true on success, false if hart is not in valid state
+ */
+bool coro_step_hart(uint32_t hart_id);

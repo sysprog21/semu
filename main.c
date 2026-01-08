@@ -24,6 +24,7 @@
 
 #include "coro.h"
 #include "device.h"
+#include "gdbctrl.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -936,6 +937,43 @@ static void hart_exec_loop(void *arg)
          * Batch size of 64 balances throughput and responsiveness.
          */
         for (int i = 0; i < 64; i++) {
+            /* Debug mode only: check for breakpoint and single-step */
+            if (unlikely(emu->debug)) {
+                /* Check for breakpoint before executing instruction */
+                if (gdb_check_breakpoint(hart)) {
+                    gdb_suspend_hart(hart);
+                    break; /* Exit batch loop and yield */
+                }
+
+                /* Handle single-step mode */
+                if (hart->debug_info.state == HART_STATE_DEBUG_STEP) {
+                    /* Execute one instruction then suspend */
+                    emu_tick_peripherals(emu);
+                    emu_update_timer_interrupt(hart);
+                    emu_update_swi_interrupt(hart);
+                    vm_step(hart);
+
+                    /* Handle errors before suspending (same as normal
+                     * execution)
+                     */
+                    if (unlikely(hart->error)) {
+                        if (hart->error == ERR_EXCEPTION &&
+                            hart->exc_cause == RV_EXC_ECALL_S) {
+                            handle_sbi_ecall(hart);
+                        } else if (hart->error == ERR_EXCEPTION) {
+                            hart_trap(hart);
+                        } else {
+                            vm_error_report(hart);
+                            emu->stopped = true;
+                            goto cleanup;
+                        }
+                    }
+
+                    gdb_suspend_hart(hart);
+                    break; /* Exit batch loop and yield */
+                }
+            }
+
             emu_tick_peripherals(emu);
             emu_update_timer_interrupt(hart);
             emu_update_swi_interrupt(hart);
@@ -952,6 +990,7 @@ static void hart_exec_loop(void *arg)
                     continue;
                 }
 
+                /* Handle general exceptions via trap (same as single-core) */
                 if (hart->error == ERR_EXCEPTION) {
                     /* Other exception: delegate to supervisor via trap */
                     hart_trap(hart);
@@ -1455,6 +1494,13 @@ static int semu_read_mem(void *args, size_t addr, size_t len, void *val)
 static gdb_action_t semu_cont(void *args)
 {
     emu_state_t *emu = (emu_state_t *) args;
+    vm_t *vm = &emu->vm;
+
+    /* Resume current hart from debug suspension */
+    hart_t *current_hart = vm->hart[emu->curr_cpuid];
+    if (current_hart->debug_info.state == HART_STATE_DEBUG_BREAK)
+        gdb_resume_hart(current_hart);
+
     while (!semu_is_interrupt(emu)) {
 #ifdef MMU_CACHE_STATS
         /* Check if signal received (SIGINT/SIGTERM).
@@ -1464,6 +1510,14 @@ static gdb_action_t semu_cont(void *args)
             break;
 #endif
         semu_step(emu);
+
+        /* Check if any hart hit a breakpoint */
+        for (uint32_t i = 0; i < vm->n_hart; i++) {
+            if (vm->hart[i]->debug_info.breakpoint_pending) {
+                /* Breakpoint hit, stop execution */
+                return ACT_RESUME;
+            }
+        }
     }
 
     /* Clear the interrupt if it's pending */
@@ -1475,7 +1529,26 @@ static gdb_action_t semu_cont(void *args)
 static gdb_action_t semu_stepi(void *args)
 {
     emu_state_t *emu = (emu_state_t *) args;
+    vm_t *vm = &emu->vm;
+    hart_t *current_hart = vm->hart[emu->curr_cpuid];
+
+    /* Check and resume BEFORE enabling single-step mode.
+     * gdb_enable_single_step() sets state to DEBUG_STEP, which would make
+     * the DEBUG_BREAK check always fail if done before this check.
+     */
+    if (current_hart->debug_info.state == HART_STATE_DEBUG_BREAK)
+        gdb_resume_hart(current_hart);
+
+    /* Enable single-step mode for the current hart */
+    gdb_enable_single_step(current_hart);
+
+    /* Execute one step */
     semu_step(emu);
+
+    /* Disable single-step mode (hart should auto-suspend after one instruction)
+     */
+    gdb_disable_single_step(current_hart);
+
     return ACT_RESUME;
 }
 
@@ -1498,6 +1571,18 @@ static void semu_set_cpu(void *args, int cpuid)
     emu->curr_cpuid = cpuid;
 }
 
+static bool semu_set_bp(void *args, size_t addr, bp_type_t UNUSED type)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    return gdb_set_breakpoint(&emu->vm, (uint32_t) addr);
+}
+
+static bool semu_del_bp(void *args, size_t addr, bp_type_t UNUSED type)
+{
+    emu_state_t *emu = (emu_state_t *) args;
+    return gdb_del_breakpoint(&emu->vm, (uint32_t) addr);
+}
+
 static int semu_run_debug(emu_state_t *emu)
 {
     vm_t *vm = &emu->vm;
@@ -1511,13 +1596,19 @@ static int semu_run_debug(emu_state_t *emu)
         .write_mem = NULL,
         .cont = semu_cont,
         .stepi = semu_stepi,
-        .set_bp = NULL,
-        .del_bp = NULL,
+        .set_bp = semu_set_bp,
+        .del_bp = semu_del_bp,
         .on_interrupt = semu_on_interrupt,
 
         .get_cpu = semu_get_cpu,
         .set_cpu = semu_set_cpu,
     };
+
+    /* Initialize GDB debug subsystem */
+    if (!gdb_debug_init(vm)) {
+        fprintf(stderr, "Failed to initialize GDB debug subsystem\n");
+        return 1;
+    }
 
     emu->curr_cpuid = 0;
     if (!gdbstub_init(&gdbstub, &gdbstub_ops,
@@ -1527,14 +1618,19 @@ static int semu_run_debug(emu_state_t *emu)
                           .target_desc = TARGET_RV32,
                       },
                       "127.0.0.1:1234")) {
+        gdb_debug_cleanup(vm);
         return 1;
     }
 
     emu->is_interrupted = false;
-    if (!gdbstub_run(&gdbstub, (void *) emu))
+    if (!gdbstub_run(&gdbstub, (void *) emu)) {
+        gdbstub_close(&gdbstub);
+        gdb_debug_cleanup(vm);
         return 1;
+    }
 
     gdbstub_close(&gdbstub);
+    gdb_debug_cleanup(vm);
 
     return 0;
 }
