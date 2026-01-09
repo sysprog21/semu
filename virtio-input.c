@@ -587,13 +587,15 @@ void virtio_input_read(hart_t *vm,
         break;
     case RV_MEM_LBU:
     case RV_MEM_LB:
-        /* virtio-input driver needs to access device config register per byte */
+        /* virtio-input driver needs to access device config register per byte
+         */
         if (!virtio_input_reg_read(vinput, addr, value, 1))
             vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
         break;
     case RV_MEM_LHU:
     case RV_MEM_LH:
-        /* virtio-input driver needs to access device config register per halfword */
+        /* virtio-input driver needs to access device config register per
+         * halfword */
         if (!virtio_input_reg_read(vinput, addr, value, 2))
             vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
         break;
