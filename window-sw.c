@@ -98,20 +98,28 @@ static int window_thread(void *data)
                 resource->bits_per_pixel, resource->stride,
                 display->primary_sdl_format);
 
-            SDL_DestroyTexture(display->primary_texture);
-            display->primary_texture =
-                SDL_CreateTextureFromSurface(display->renderer, surface);
-            SDL_FreeSurface(surface);
+            if (surface) {
+                SDL_DestroyTexture(display->primary_texture);
+                display->primary_texture =
+                    SDL_CreateTextureFromSurface(display->renderer, surface);
+                SDL_FreeSurface(surface);
+            } else {
+                fprintf(stderr, "Failed to create primary plane surface\n");
+            }
         } else if (display->render_type == UPDATE_CURSOR_PLANE) {
             /* Generate cursor plane texture */
             surface = SDL_CreateRGBSurfaceWithFormatFrom(
                 cursor->image, cursor->width, cursor->height, CURSOR_BPP,
                 CURSOR_STRIDE, SDL_PIXELFORMAT_ARGB8888);
 
-            SDL_DestroyTexture(display->cursor_texture);
-            display->cursor_texture =
-                SDL_CreateTextureFromSurface(display->renderer, surface);
-            SDL_FreeSurface(surface);
+            if (surface) {
+                SDL_DestroyTexture(display->cursor_texture);
+                display->cursor_texture =
+                    SDL_CreateTextureFromSurface(display->renderer, surface);
+                SDL_FreeSurface(surface);
+            } else {
+                fprintf(stderr, "Failed to create cursor plane surface\n");
+            }
         } else if (display->render_type == CLEAR_CURSOR_PLANE) {
             SDL_DestroyTexture(display->cursor_texture);
             display->cursor_texture = NULL;
@@ -209,8 +217,12 @@ static bool virtio_gpu_to_sdl_format(uint32_t virtio_gpu_format,
 
 static void cursor_clear_sw(int scanout_id)
 {
-    /* Reset cursor information */
     struct display_info *display = &displays[scanout_id];
+
+    /* Start of the critical section */
+    window_lock_mutex(scanout_id);
+
+    /* Reset cursor information */
     memset(&display->cursor_rect, 0, sizeof(SDL_Rect));
     display->cursor_sdl_format = 0;
 
@@ -223,6 +235,9 @@ static void cursor_clear_sw(int scanout_id)
     /* Trigger plane rendering */
     display->render_type = CLEAR_CURSOR_PLANE;
     SDL_CondSignal(display->img_cond);
+
+    /* End of the critical section */
+    window_unlock_mutex(scanout_id);
 }
 
 static int cursor_update_sw(int scanout_id, int res_id, int x, int y)
@@ -269,13 +284,14 @@ static int cursor_update_sw(int scanout_id, int res_id, int x, int y)
 
 static void cursor_move_sw(int scanout_id, int x, int y)
 {
-    /* Update cursor position */
     struct display_info *display = &displays[scanout_id];
-    display->cursor_rect.x = x;
-    display->cursor_rect.y = y;
 
     /* Start of the critical section */
     window_lock_mutex(scanout_id);
+
+    /* Update cursor position */
+    display->cursor_rect.x = x;
+    display->cursor_rect.y = y;
 
     /* Trigger cursor rendering */
     display->render_type = MOVE_CURSOR_PLANE;

@@ -11,7 +11,12 @@ echo "[*] Remove old rootfs directory..."
 rm -rf $DIR
 mkdir -p $DIR
 
-cp -r extra_packages/* $DIR 
+if [ -d extra_packages ]; then
+    echo "[*] Copying extra packages..."
+    cp -r extra_packages/* $DIR
+else
+    echo "[*] No extra_packages directory found, skipping..."
+fi
 
 echo "[*] Extract CPIO"
 pushd $DIR

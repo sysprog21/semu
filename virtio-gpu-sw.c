@@ -79,8 +79,7 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
     res_2d->format = request->format;
     res_2d->bits_per_pixel = bits_per_pixel;
     res_2d->stride = STRIDE_SIZE;
-    res_2d->image = malloc(bytes_per_pixel * (request->width + res_2d->stride) *
-                           request->height);
+    res_2d->image = malloc(res_2d->stride * request->height);
 
     /* Failed to create image buffer */
     if (!res_2d->image) {
@@ -106,7 +105,7 @@ static void virtio_gpu_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
         vgpu_mem_guest_to_host(vgpu, vq_desc[0].addr);
 
     /* Destroy 2D resource */
-    int result = vgpu_destory_resource_2d(request->resource_id);
+    int result = vgpu_destroy_resource_2d(request->resource_id);
     if (result) {
         fprintf(stderr, "%s(): failed to destroy resource %d\n", __func__,
                 request->resource_id);
@@ -303,6 +302,9 @@ static void virtio_gpu_cmd_resource_attach_backing_handler(
         /* Corrupted page address */
         if (!res_2d->iovec[i].iov_base) {
             fprintf(stderr, "%s(): invalid page address\n", __func__);
+            free(res_2d->iovec);
+            res_2d->iovec = NULL;
+            res_2d->page_cnt = 0;
             *plen = virtio_gpu_write_response(vgpu, vq_desc[2].addr,
                                               VIRTIO_GPU_RESP_ERR_UNSPEC);
             return;
@@ -368,7 +370,7 @@ const struct vgpu_cmd_backend g_vgpu_backend = {
     .resource_unref = virtio_gpu_cmd_resource_unref_handler,
     .set_scanout = virtio_gpu_cmd_set_scanout_handler,
     .resource_flush = virtio_gpu_cmd_resource_flush_handler,
-    .trasfer_to_host_2d = virtio_gpu_cmd_transfer_to_host_2d_handler,
+    .transfer_to_host_2d = virtio_gpu_cmd_transfer_to_host_2d_handler,
     .resource_attach_backing = virtio_gpu_cmd_resource_attach_backing_handler,
     .resource_detach_backing = VGPU_CMD_UNDEF,
     .get_capset_info = VGPU_CMD_UNDEF,

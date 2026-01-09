@@ -13,6 +13,6 @@
 
 [host_machine]
     system = 'linux'
-    cpu_family = 'riscv'
+    cpu_family = 'riscv32'
     cpu = 'riscv32-ima'
     endian = 'little'

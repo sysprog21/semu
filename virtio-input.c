@@ -587,17 +587,15 @@ void virtio_input_read(hart_t *vm,
         break;
     case RV_MEM_LBU:
     case RV_MEM_LB:
-    case RV_MEM_LHU:
-    case RV_MEM_LH:
-        /*FIXME: virtio-input driver need to access device config register per
-         * byte. the following code that derived from other virtio devices'
-         * implementation will cause kernel panic */
-        // vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
-#if 1
-        // printf("read addr: 0x%x, width: %d\n", addr, width);
+        /* virtio-input driver needs to access device config register per byte */
         if (!virtio_input_reg_read(vinput, addr, value, 1))
             vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
-#endif
+        break;
+    case RV_MEM_LHU:
+    case RV_MEM_LH:
+        /* virtio-input driver needs to access device config register per halfword */
+        if (!virtio_input_reg_read(vinput, addr, value, 2))
+            vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
         break;
     default:
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);

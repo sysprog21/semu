@@ -22,7 +22,7 @@ static inline int ilog2(int x)
 
 static inline void set_bit(unsigned long bit, unsigned long *word)
 {
-    *word |= (1 << bit);
+    *word |= (1UL << bit);
 }
 
 static inline void bitmap_set_bit(unsigned long *map, unsigned long bit)

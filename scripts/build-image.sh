@@ -177,7 +177,12 @@ function do_directfb
     mkdir -p directfb
 
     # Build DirectFB2
-    ASSERT git clone https://github.com/directfb2/DirectFB2.git
+    if [ ! -d DirectFB2 ]; then
+        echo "Cloning DirectFB2..."
+        ASSERT git clone https://github.com/directfb2/DirectFB2.git
+    else
+        echo "DirectFB2 already exists, skipping clone..."
+    fi
     pushd DirectFB2
     cp ../configs/riscv-cross-file .
     ASSERT meson -Ddrmkms=true --cross-file riscv-cross-file build/riscv
@@ -187,7 +192,12 @@ function do_directfb
     popd
 
     # Build DirectFB2 examples
-    ASSERT git clone https://github.com/directfb2/DirectFB-examples.git
+    if [ ! -d DirectFB-examples ]; then
+        echo "Cloning DirectFB-examples..."
+        ASSERT git clone https://github.com/directfb2/DirectFB-examples.git
+    else
+        echo "DirectFB-examples already exists, skipping clone..."
+    fi
     pushd DirectFB-examples/
     cp ../configs/riscv-cross-file .
     ASSERT meson --cross-file riscv-cross-file build/riscv

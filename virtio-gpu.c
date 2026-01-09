@@ -75,7 +75,7 @@ size_t iov_to_buf(const struct iovec *iov,
             /* Copy to buffer */
             void *src = (void *) ((uintptr_t) iov[i].iov_base + offset);
             void *dest = (void *) ((uintptr_t) buf + done);
-            memcpy((void *) ((uintptr_t) dest + done), src, len);
+            memcpy(dest, src, len);
 
             /* If there is still data left to read, but current page is
              * exhausted, we need to read from the beginning of the next
@@ -119,7 +119,7 @@ struct vgpu_resource_2d *vgpu_get_resource_2d(uint32_t resource_id)
     return NULL;
 }
 
-int vgpu_destory_resource_2d(uint32_t resource_id)
+int vgpu_destroy_resource_2d(uint32_t resource_id)
 {
     struct vgpu_resource_2d *res_2d = vgpu_get_resource_2d(resource_id);
 
@@ -270,7 +270,7 @@ static void virtio_gpu_generate_edid(uint8_t *edid, int width_cm, int height_cm)
                           (((manufacture[2] - '@') & 0b11111) << 0));
     /* Convert vendor ID to big-endian order */
     edid[8] = vendor_id >> 8;
-    edid[9] = vendor_id && 0xff;
+    edid[9] = vendor_id & 0xff;
 
     /* Product code (all zeros if unused) */
     memset(&edid[10], 0, 6);
@@ -394,7 +394,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
         VGPU_CMD(RESOURCE_UNREF, resource_unref)
         VGPU_CMD(SET_SCANOUT, set_scanout)
         VGPU_CMD(RESOURCE_FLUSH, resource_flush)
-        VGPU_CMD(TRANSFER_TO_HOST_2D, trasfer_to_host_2d)
+        VGPU_CMD(TRANSFER_TO_HOST_2D, transfer_to_host_2d)
         VGPU_CMD(RESOURCE_ATTACH_BACKING, resource_attach_backing)
         VGPU_CMD(RESOURCE_DETACH_BACKING, resource_detach_backing)
         VGPU_CMD(GET_CAPSET_INFO, get_capset_info)

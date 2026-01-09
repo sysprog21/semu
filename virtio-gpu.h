@@ -140,7 +140,7 @@ PACKED(struct vgpu_get_capset {
 
 PACKED(struct virtio_gpu_resp_capset {
     struct vgpu_ctrl_hdr hdr;
-    uint8_t *capset_data;
+    uint8_t capset_data[];
 });
 
 PACKED(struct virtio_gpu_ctx_create {
@@ -296,7 +296,7 @@ struct vgpu_cmd_backend {
     vgpu_cmd_func resource_unref;
     vgpu_cmd_func set_scanout;
     vgpu_cmd_func resource_flush;
-    vgpu_cmd_func trasfer_to_host_2d;
+    vgpu_cmd_func transfer_to_host_2d;
     vgpu_cmd_func resource_attach_backing;
     vgpu_cmd_func resource_detach_backing;
     vgpu_cmd_func get_capset_info;
@@ -329,7 +329,7 @@ size_t iov_to_buf(const struct iovec *iov,
 
 struct vgpu_resource_2d *vgpu_create_resource_2d(int resource_id);
 struct vgpu_resource_2d *vgpu_get_resource_2d(uint32_t resource_id);
-int vgpu_destory_resource_2d(uint32_t resource_id);
+int vgpu_destroy_resource_2d(uint32_t resource_id);
 
 void *vgpu_mem_guest_to_host(virtio_gpu_state_t *vgpu, uint32_t addr);
 uint32_t virtio_gpu_write_response(virtio_gpu_state_t *vgpu,
