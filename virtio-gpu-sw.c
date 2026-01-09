@@ -71,8 +71,6 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         return;
     }
 
-    uint32_t bytes_per_pixel = bits_per_pixel / 8;
-
     /* Set 2D resource */
     res_2d->width = request->width;
     res_2d->height = request->height;
