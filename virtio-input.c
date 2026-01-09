@@ -319,7 +319,7 @@ static void virtio_keyboard_support_events(int dev_id, uint8_t event)
         memset(cfg->u.bitmap, 0xff, 128);
         cfg->size = 128;
         break;
-    case EV_MSC:
+    case EV_REP:
         bitmap_set_bit((unsigned long *) cfg->u.bitmap, REP_DELAY);
         bitmap_set_bit((unsigned long *) cfg->u.bitmap, REP_PERIOD);
         cfg->size = 128;
