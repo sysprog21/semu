@@ -33,9 +33,7 @@
 
 #define EV_SYN 0x00
 #define EV_KEY 0x01
-#define EV_REL 0x02
 #define EV_ABS 0x03
-#define EV_MSC 0x04
 #define EV_REP 0x14
 
 /*

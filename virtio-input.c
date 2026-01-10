@@ -183,9 +183,11 @@ static bool virtio_input_desc_handler(virtio_input_state_t *vinput,
         vq_desc.len = desc[2];
         vq_desc.flags = desc[3] & 0xFFFF;
 
-        /* Check high 32-bit of address must be 0 (we only support 32-bit addressing) */
+        /* Check high 32-bit of address must be 0 (we only support 32-bit
+         * addressing) */
         if (addr_high != 0) {
-            fprintf(stderr, "virtio-input: descriptor addr high 32-bit non-zero\n");
+            fprintf(stderr,
+                    "virtio-input: descriptor addr high 32-bit non-zero\n");
             return false;
         }
 
@@ -201,15 +203,14 @@ static bool virtio_input_desc_handler(virtio_input_state_t *vinput,
             return false;
         }
 
+        /* Write event into guest buffer directly */
         ev = (struct virtio_input_event *) ((uintptr_t) vinput->ram +
                                             vq_desc.addr);
-
-        /* Write event */
         ev->type = input_ev[i].type;
         ev->code = input_ev[i].code;
         ev->value = input_ev[i].value;
 
-        /* Used ring */
+        /* Update used ring */
         uint32_t vq_used_addr =
             queue->QueueUsed + 1 + (new_used % queue->QueueNum) * 2;
         ram[vq_used_addr] = buffer_idx;
@@ -219,8 +220,10 @@ static bool virtio_input_desc_handler(virtio_input_state_t *vinput,
         queue->last_avail++;
     }
 
-    /* Update used ring header: flags=0 (low 16 bits), idx=new_used (high 16 bits) */
-    vinput->ram[queue->QueueUsed] = ((uint32_t) new_used) << 16;
+    /* Update used ring header */
+    uint16_t *used_hdr = (uint16_t *) &vinput->ram[queue->QueueUsed];
+    used_hdr[0] = 0;        /* virtq_used.flags */
+    used_hdr[1] = new_used; /* virtq_used.idx */
 
     return true;
 }
@@ -259,9 +262,11 @@ static void virtio_queue_event_update(int dev_id,
     }
 
     /* Try to write events to used ring */
-    bool wrote_events = virtio_input_desc_handler(vinput, input_ev, ev_cnt, queue);
+    bool wrote_events =
+        virtio_input_desc_handler(vinput, input_ev, ev_cnt, queue);
 
-    /* Send interrupt only if we actually wrote events, unless VIRTQ_AVAIL_F_NO_INTERRUPT is set */
+    /* Send interrupt only if we actually wrote events, unless
+     * VIRTQ_AVAIL_F_NO_INTERRUPT is set */
     if (wrote_events && !(ram[queue->QueueAvail] & 1))
         vinput->InterruptStatus |= VIRTIO_INT__USED_RING;
 
@@ -489,7 +494,8 @@ static bool virtio_input_reg_read(virtio_input_state_t *vinput,
         uint8_t *reg =
             (uint8_t *) ((uintptr_t) &vinput_dev[vinput->id].cfg + offset);
 
-        /* Clear value first to avoid returning dirty high bits on partial reads */
+        /* Clear value first to avoid returning dirty high bits on partial reads
+         */
         *value = 0;
         memcpy(value, reg, size);
 
@@ -556,7 +562,8 @@ static bool virtio_input_reg_write(virtio_input_state_t *vinput,
         if (value < ARRAY_SIZE(vinput->queues)) {
             /* QueueNotify is just a "kick" signal - actual buffer availability
              * is checked via avail.idx in virtio_queue_event_update() */
-            /* No action needed here for event queue in this minimal implementation */
+            /* No action needed here for event queue in this minimal
+             * implementation */
         } else {
             virtio_input_set_fail(vinput);
         }
