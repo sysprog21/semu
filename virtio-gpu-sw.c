@@ -6,8 +6,6 @@
 #include "virtio-gpu.h"
 #include "window.h"
 
-#define STRIDE_SIZE 4096
-
 extern const struct window_backend g_window;
 
 static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
@@ -71,12 +69,14 @@ static void virtio_gpu_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         return;
     }
 
+    uint32_t bytes_per_pixel = bits_per_pixel / 8;
+
     /* Set 2D resource */
     res_2d->width = request->width;
     res_2d->height = request->height;
     res_2d->format = request->format;
     res_2d->bits_per_pixel = bits_per_pixel;
-    res_2d->stride = STRIDE_SIZE;
+    res_2d->stride = request->width * (bits_per_pixel / 8);
     res_2d->image = malloc(res_2d->stride * request->height);
 
     /* Failed to create image buffer */
