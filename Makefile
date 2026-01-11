@@ -4,6 +4,7 @@ include mk/check-libs.mk
 CC ?= gcc
 CFLAGS := -O2 -g -Wall -Wextra
 CFLAGS += -include common.h
+LDFLAGS :=
 
 # clock frequency
 CLOCK_FREQ ?= 65000000
@@ -14,7 +15,7 @@ OBJS_EXTRA :=
 # command line option
 OPTS :=
 
-LDFLAGS :=
+LDFLAGS := -lpthread
 
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
@@ -157,6 +158,46 @@ LDFLAGS += -lm
 # .DEFAULT_GOAL should be set to all since the very first target is not all
 # after git submodule.
 .DEFAULT_GOAL := all
+
+# virtio-gpu
+ENABLE_VIRTIOGPU ?= 1
+
+# SDL2
+ENABLE_SDL ?= 1
+ifeq (, $(shell which sdl2-config))
+    $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
+    override ENABLE_SDL := 0
+endif
+ifeq ($(ENABLE_SDL),1)
+    CFLAGS += $(shell sdl2-config --cflags)
+    LDFLAGS += $(shell sdl2-config --libs)
+else
+    # Disable virtio-gpu if SDL is not set
+    override ENABLE_VIRTIOGPU := 0
+endif
+
+# virtio-gpu
+ifneq ($(UNAME_S),Linux)
+    ENABLE_VIRTIOGPU := 0
+endif
+ifeq ($(ENABLE_VIRTIOGPU),1)
+    OBJS_EXTRA += window-events.o
+    OBJS_EXTRA += virtio-gpu.o
+    OBJS_EXTRA += virtio-gpu-sw.o
+    OBJS_EXTRA += window-sw.o
+endif
+
+$(call set-feature, VIRTIOGPU)
+
+# virtio-input
+ENABLE_VIRTIOINPUT ?= 1
+ifneq ($(UNAME_S),Linux)
+    ENABLE_VIRTIOINPUT := 0
+endif
+$(call set-feature, VIRTIOINPUT)
+ifeq ($(call has, VIRTIOINPUT), 1)
+    OBJS_EXTRA += virtio-input.o
+endif
 
 BIN = semu
 all: $(BIN) minimal.dtb
