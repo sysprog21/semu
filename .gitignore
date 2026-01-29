@@ -8,6 +8,19 @@ semu
 Image
 ext4.img
 rootfs.cpio
+rootfs_full.cpio
 
 # intermediate
 riscv-harts.dtsi
+.smp_stamp
+
+# Build directories
+buildroot/
+linux/
+rootfs/
+directfb/
+extra_packages/
+
+# DirectFB build
+DirectFB2/
+DirectFB-examples/

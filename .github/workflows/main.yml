@@ -101,7 +101,7 @@ jobs:
     - name: install-dependencies
       uses: ./.github/actions/setup-semu
     - name: default build
-      run: make
+      run: make ENABLE_SDL=0
       shell: bash
       timeout-minutes: 20
     - name: automated test
