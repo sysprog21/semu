@@ -12,6 +12,9 @@
 #define DTB_SIZE (1 * 1024 * 1024)
 #define INITRD_SIZE (8 * 1024 * 1024)
 
+#define SCREEN_WIDTH 1024
+#define SCREEN_HEIGHT 768
+
 void ram_read(hart_t *core,
               uint32_t *mem,
               const uint32_t addr,
@@ -224,6 +227,114 @@ void virtio_rng_write(hart_t *vm,
 
 void virtio_rng_init(void);
 #endif /* SEMU_HAS(VIRTIORNG) */
+
+/* VirtIO-GPU */
+
+#if SEMU_HAS(VIRTIOGPU)
+
+#define IRQ_VGPU 7
+#define IRQ_VGPU_BIT (1 << IRQ_VGPU)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_gpu_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_gpu_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_gpu_state_t;
+
+void virtio_gpu_read(hart_t *vm,
+                     virtio_gpu_state_t *vgpu,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_gpu_write(hart_t *vm,
+                      virtio_gpu_state_t *vgpu,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+void virtio_gpu_init(virtio_gpu_state_t *vgpu);
+void virtio_gpu_add_scanout(virtio_gpu_state_t *vgpu,
+                            uint32_t width,
+                            uint32_t height);
+#endif /* SEMU_HAS(VIRTIOGPU) */
+
+/* VirtIO Input */
+
+#if SEMU_HAS(VIRTIOINPUT)
+
+#define IRQ_VINPUT_KEYBOARD 8
+#define IRQ_VINPUT_KEYBOARD_BIT (1 << IRQ_VINPUT_KEYBOARD)
+
+#define IRQ_VINPUT_MOUSE 9
+#define IRQ_VINPUT_MOUSE_BIT (1 << IRQ_VINPUT_MOUSE)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_input_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_input_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_input_state_t;
+
+void virtio_input_read(hart_t *vm,
+                       virtio_input_state_t *vinput,
+                       uint32_t addr,
+                       uint8_t width,
+                       uint32_t *value);
+
+void virtio_input_write(hart_t *vm,
+                        virtio_input_state_t *vinput,
+                        uint32_t addr,
+                        uint8_t width,
+                        uint32_t value);
+
+void virtio_input_init(virtio_input_state_t *vinput);
+
+void virtio_input_update_key(uint32_t key, uint32_t state);
+
+void virtio_input_update_mouse_button_state(uint32_t button, bool pressed);
+
+void virtio_input_update_cursor(uint32_t x, uint32_t y);
+#endif /* SEMU_HAS(VIRTIOINPUT) */
 
 /* ACLINT MTIMER */
 typedef struct {
@@ -442,16 +553,23 @@ typedef struct {
 #if SEMU_HAS(VIRTIORNG)
     virtio_rng_state_t vrng;
 #endif
-    /* ACLINT */
-    mtimer_state_t mtimer;
-    mswi_state_t mswi;
-    sswi_state_t sswi;
 #if SEMU_HAS(VIRTIOSND)
     virtio_snd_state_t vsnd;
 #endif
 #if SEMU_HAS(VIRTIOFS)
     virtio_fs_state_t vfs;
 #endif
+#if SEMU_HAS(VIRTIOGPU)
+    virtio_gpu_state_t vgpu;
+#endif
+#if SEMU_HAS(VIRTIOINPUT)
+    virtio_input_state_t vkeyboard;
+    virtio_input_state_t vmouse;
+#endif
+    /* ACLINT */
+    mtimer_state_t mtimer;
+    mswi_state_t mswi;
+    sswi_state_t sswi;
 
     uint32_t peripheral_update_ctr;
 
