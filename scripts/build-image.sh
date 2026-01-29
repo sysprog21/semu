@@ -31,6 +31,29 @@ function safe_copy {
     fi
 }
 
+function copy_buildroot_config
+{
+    local buildroot_config="configs/buildroot.config"
+    local x11_config="configs/x11.config"
+    local output_config="buildroot/.config"
+    local merge_tool="buildroot/support/kconfig/merge_config.sh"
+
+    if [ ! -f "$output_config" ]; then
+        echo "Preparing initial Buildroot config..."
+
+        # Check X11 option
+        if [[ $BUILD_X11 -eq 1 ]]; then
+            # Compile Buildroot with X11
+            "$merge_tool" -m -r -O buildroot "$buildroot_config" "$x11_config"
+        else
+            # Compile Buildroot without X11
+            cp -f "$buildroot_config" "$output_config"
+        fi
+    else
+        echo "$output_config already exists, skipping copy"
+    fi
+}
+
 function do_buildroot
 {
     if [ ! -d buildroot ]; then
@@ -40,7 +63,7 @@ function do_buildroot
         echo "buildroot/ already exists, skipping clone"
     fi
 
-    safe_copy configs/buildroot.config buildroot/.config
+    copy_buildroot_config
     safe_copy configs/busybox.config buildroot/busybox.config
     cp -f target/init buildroot/fs/cpio/init
 
@@ -94,6 +117,7 @@ Usage: $0 [--buildroot] [--linux] [--extra-packages] [--all] [--external-root] [
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --x11               Build Buildroot with X11
   --extra-packages    Build extra packages along with Buildroot
   --linux             Build Linux kernel
   --all               Build both Buildroot and Linux kernel
@@ -105,6 +129,7 @@ EOF
 }
 
 BUILD_BUILDROOT=0
+BUILD_X11=0
 BUILD_EXTRA_PACKAGES=0
 BUILD_LINUX=0
 EXTERNAL_ROOT=0
@@ -114,6 +139,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --buildroot)
             BUILD_BUILDROOT=1
+            ;;
+        --x11)
+            BUILD_X11=1
             ;;
         --extra-packages)
             BUILD_EXTRA_PACKAGES=1
@@ -200,6 +228,11 @@ fi
 
 if [[ $BUILD_EXTRA_PACKAGES -eq 1 && $BUILD_BUILDROOT -eq 0 ]]; then
     echo "Error: --extra-packages requires --buildroot to be specified."
+    show_help
+fi
+
+if [[ $BUILD_X11 -eq 1 && $BUILD_BUILDROOT -eq 0 ]]; then
+    echo "Error: --x11 requires --buildroot to be specified."
     show_help
 fi
 
