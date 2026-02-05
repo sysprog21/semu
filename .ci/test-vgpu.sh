@@ -34,6 +34,10 @@ echo "Decompressing ext4.img.bz2 for DirectFB testing..."
 rm -f ext4.img
 bunzip2 -kf ext4.img.bz2
 
+# Force fresh download of Image and rootfs.cpio to avoid stale cache
+rm -f Image rootfs.cpio
+make Image rootfs.cpio
+
 # NOTE: We want to capture the expect exit code and map
 # it to our MESSAGES array for meaningful error output.
 # Temporarily disable errexit for the expect call.
