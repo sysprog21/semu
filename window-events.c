@@ -1,5 +1,7 @@
 #include <SDL.h>
-#include <SDL_thread.h>
+#include <stdbool.h>
+
+#define SDL_COND_TIMEOUT 1 /* ms */
 
 #include "device.h"
 #include "virtio-input-codes.h"
@@ -146,20 +148,17 @@ static int sdl_scancode_to_linux_key(int sdl_scancode)
     return -1;
 }
 
-int window_events_thread(void *data)
+bool handle_window_events(void)
 {
-    (void) data;
-
+    SDL_Event e;
     int linux_key;
+    bool quit = false;
 
-    while (1) {
-        SDL_Event e;
-        if (!SDL_WaitEvent(&e))
-            continue;
-
+    while (SDL_WaitEventTimeout(&e, SDL_COND_TIMEOUT)) {
         switch (e.type) {
         case SDL_QUIT:
-            exit(0);
+            quit = true;
+            break;
         case SDL_KEYDOWN:
             linux_key = sdl_scancode_to_linux_key(e.key.keysym.scancode);
             if (linux_key >= 0)
@@ -185,4 +184,6 @@ int window_events_thread(void *data)
             break;
         }
     }
+
+    return quit;
 }

@@ -177,10 +177,6 @@ else
     override ENABLE_VIRTIOINPUT := 0
 endif
 
-# virtio-gpu
-ifneq ($(UNAME_S),Linux)
-    ENABLE_VIRTIOGPU := 0
-endif
 ifeq ($(ENABLE_VIRTIOGPU),1)
     OBJS_EXTRA += virtio-gpu.o
     OBJS_EXTRA += virtio-gpu-sw.o

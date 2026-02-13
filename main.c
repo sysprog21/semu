@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1631,6 +1632,24 @@ static int semu_run_debug(emu_state_t *emu)
     return 0;
 }
 
+/* Thread wrapper for running emulator in background thread */
+static void *emu_thread_func(void *arg)
+{
+    emu_state_t *emu = (emu_state_t *) arg;
+    int ret;
+
+    if (emu->debug)
+        ret = semu_run_debug(emu);
+    else
+        ret = semu_run(emu);
+
+    /* Unblock window_main_loop() on the main thread so it can return */
+    if (g_window.window_shutdown)
+        g_window.window_shutdown();
+
+    return (void *) (intptr_t) ret;
+}
+
 int main(int argc, char **argv)
 {
     int ret;
@@ -1644,10 +1663,33 @@ int main(int argc, char **argv)
     signal(SIGTERM, signal_handler_stats);
 #endif
 
-    if (emu.debug)
-        ret = semu_run_debug(&emu);
-    else
-        ret = semu_run(&emu);
+#if SEMU_HAS(VIRTIOGPU)
+    /* If window backend has a main loop function, run emulator in background
+     * thread and use main thread for window events (required for macOS SDL2).
+     */
+    if (g_window.window_main_loop) {
+        pthread_t emu_thread;
+        void *thread_ret;
+
+        if (pthread_create(&emu_thread, NULL, emu_thread_func, &emu) != 0) {
+            fprintf(stderr, "Failed to create emulator thread\n");
+            return 1;
+        }
+
+        /* Main thread runs window event loop (required for macOS) */
+        g_window.window_main_loop();
+
+        /* Wait for emulator thread to finish */
+        pthread_join(emu_thread, &thread_ret);
+        ret = (int) (intptr_t) thread_ret;
+    } else
+#endif
+    {
+        if (emu.debug)
+            ret = semu_run_debug(&emu);
+        else
+            ret = semu_run(&emu);
+    }
 
 #ifdef MMU_CACHE_STATS
     print_mmu_cache_stats(&emu.vm);

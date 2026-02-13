@@ -18,6 +18,7 @@ enum {
 struct display_info {
     /* Request type: primary or cursor */
     int render_type;
+    bool render_pending;
 
     /* Primary plane */
     struct vgpu_resource_2d resource;
@@ -34,149 +35,196 @@ struct display_info {
 
     SDL_mutex *img_mtx;
     SDL_cond *img_cond;
-    SDL_Thread *win_thread;
-    SDL_Thread *ev_thread;
     SDL_Window *window;
     SDL_Renderer *renderer;
 };
 
 static struct display_info displays[VIRTIO_GPU_MAX_SCANOUTS];
 static int display_cnt;
+static bool headless_mode = false;
+static bool should_exit = false;
 
-static int window_thread(void *data)
+/* Main loop runs on the main thread */
+static void window_main_loop_sw(void)
 {
-    struct display_info *display = (struct display_info *) data;
-    struct vgpu_resource_2d *resource = &display->resource;
-    struct vgpu_resource_2d *cursor = &display->cursor;
-
-    /* Create SDL window */
-    display->window = SDL_CreateWindow("semu", SDL_WINDOWPOS_UNDEFINED,
-                                       SDL_WINDOWPOS_UNDEFINED, resource->width,
-                                       resource->height, SDL_WINDOW_SHOWN);
-
-    if (!display->window) {
-        fprintf(stderr, "%s(): failed to create window\n", __func__);
-        exit(2);
-    }
-
-    /* Create SDL render */
-    display->renderer =
-        SDL_CreateRenderer(display->window, -1, SDL_RENDERER_ACCELERATED);
-
-    if (!display->renderer) {
-        fprintf(stderr, "%s(): failed to create renderer\n", __func__);
-        exit(2);
-    }
-
-    /* Render the whole screen with black color */
-    SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
-    SDL_RenderClear(display->renderer);
-    SDL_RenderPresent(display->renderer);
-
-#if SEMU_HAS(VIRTIOINPUT)
-    /* Create event handling thread */
-    ((struct display_info *) data)->ev_thread =
-        SDL_CreateThread(window_events_thread, NULL, data);
-#endif
+    if (headless_mode)
+        return;
 
     SDL_Surface *surface;
 
-    while (1) {
-        /* Mutex lock */
-        SDL_LockMutex(display->img_mtx);
-
-        /* Wait until the image is arrived */
-        while (SDL_CondWaitTimeout(display->img_cond, display->img_mtx,
-                                   SDL_COND_TIMEOUT))
-            ;
-
-        if (display->render_type == CLEAR_PRIMARY_PLANE) {
-            /* FIXME */
-            /* Set color for clearing */
-            SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
-        } else if (display->render_type == FLUSH_PRIMARY_PLANE) {
-            /* Generate primary plane texture */
-            surface = SDL_CreateRGBSurfaceWithFormatFrom(
-                resource->image, resource->width, resource->height,
-                resource->bits_per_pixel, resource->stride,
-                display->primary_sdl_format);
-
-            if (surface) {
-                SDL_DestroyTexture(display->primary_texture);
-                display->primary_texture =
-                    SDL_CreateTextureFromSurface(display->renderer, surface);
-                SDL_FreeSurface(surface);
-            } else {
-                fprintf(stderr, "Failed to create primary plane surface\n");
-            }
-        } else if (display->render_type == UPDATE_CURSOR_PLANE) {
-            /* Generate cursor plane texture */
-            surface = SDL_CreateRGBSurfaceWithFormatFrom(
-                cursor->image, cursor->width, cursor->height, CURSOR_BPP,
-                CURSOR_STRIDE, SDL_PIXELFORMAT_ARGB8888);
-
-            if (surface) {
-                SDL_DestroyTexture(display->cursor_texture);
-                display->cursor_texture =
-                    SDL_CreateTextureFromSurface(display->renderer, surface);
-                SDL_FreeSurface(surface);
-            } else {
-                fprintf(stderr, "Failed to create cursor plane surface\n");
-            }
-        } else if (display->render_type == CLEAR_CURSOR_PLANE) {
-            SDL_DestroyTexture(display->cursor_texture);
-            display->cursor_texture = NULL;
+    while (!should_exit) {
+#if SEMU_HAS(VIRTIOINPUT)
+        /* Handle SDL events */
+        if (handle_window_events()) {
+            should_exit = true;
+            exit(0);
         }
+#endif
 
-        /* Render primary and cursor planes */
-        SDL_RenderClear(display->renderer);
+        /* Check each display for pending render requests */
+        for (int i = 0; i < display_cnt; i++) {
+            struct display_info *display = &displays[i];
+            struct vgpu_resource_2d *resource = &display->resource;
+            struct vgpu_resource_2d *cursor = &display->cursor;
 
-        if (display->primary_texture)
-            SDL_RenderCopy(display->renderer, display->primary_texture, NULL,
-                           NULL);
+            /* Mutex lock */
+            if (SDL_LockMutex(display->img_mtx) == 0) {
+                /* Wait until the image is arrived */
+                SDL_CondWaitTimeout(display->img_cond, display->img_mtx,
+                                    SDL_COND_TIMEOUT);
 
-        if (display->cursor_texture)
-            SDL_RenderCopy(display->renderer, display->cursor_texture, NULL,
-                           &display->cursor_rect);
+                if (display->render_pending) {
+                    if (display->render_type == CLEAR_PRIMARY_PLANE) {
+                        /* FIXME */
+                        /* Set color for clearing */
+                        SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
+                    } else if (display->render_type == FLUSH_PRIMARY_PLANE) {
+                        /* Generate primary plane texture */
+                        surface = SDL_CreateRGBSurfaceWithFormatFrom(
+                            resource->image, resource->width, resource->height,
+                            resource->bits_per_pixel, resource->stride,
+                            display->primary_sdl_format);
 
-        SDL_RenderPresent(display->renderer);
+                        if (surface) {
+                            SDL_DestroyTexture(display->primary_texture);
+                            display->primary_texture =
+                                SDL_CreateTextureFromSurface(display->renderer,
+                                                             surface);
+                            SDL_FreeSurface(surface);
+                        } else {
+                            fprintf(stderr,
+                                    "Failed to create primary plane surface: "
+                                    "%s\n",
+                                    SDL_GetError());
+                        }
+                    } else if (display->render_type == UPDATE_CURSOR_PLANE) {
+                        /* Generate cursor plane texture */
+                        surface = SDL_CreateRGBSurfaceWithFormatFrom(
+                            cursor->image, cursor->width, cursor->height,
+                            CURSOR_BPP * 8, CURSOR_STRIDE,
+                            SDL_PIXELFORMAT_ARGB8888);
 
-        /* Mutex unlock */
-        SDL_UnlockMutex(display->img_mtx);
+                        if (surface) {
+                            SDL_DestroyTexture(display->cursor_texture);
+                            display->cursor_texture =
+                                SDL_CreateTextureFromSurface(display->renderer,
+                                                             surface);
+                            SDL_FreeSurface(surface);
+                        } else {
+                            fprintf(stderr,
+                                    "Failed to create cursor plane surface: "
+                                    "%s\n",
+                                    SDL_GetError());
+                        }
+                    } else if (display->render_type == CLEAR_CURSOR_PLANE) {
+                        SDL_DestroyTexture(display->cursor_texture);
+                        display->cursor_texture = NULL;
+                    }
+
+                    /* Render primary and cursor planes */
+                    SDL_RenderClear(display->renderer);
+
+                    if (display->primary_texture)
+                        SDL_RenderCopy(display->renderer,
+                                       display->primary_texture, NULL, NULL);
+
+                    if (display->cursor_texture)
+                        SDL_RenderCopy(display->renderer,
+                                       display->cursor_texture, NULL,
+                                       &display->cursor_rect);
+
+                    SDL_RenderPresent(display->renderer);
+                    display->render_pending = false;
+                }
+                SDL_UnlockMutex(display->img_mtx);
+            }
+        }
     }
 }
 
-void window_init_sw(void)
+static void window_init_sw(void)
 {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "%s(): failed to initialize SDL\n", __func__);
-        exit(2);
+        fprintf(stderr,
+                "window_init_sw(): failed to initialize SDL: %s\n"
+                "Running in headless mode.\n",
+                SDL_GetError());
+        headless_mode = true;
+        return;
     }
 
+    /* Create windows and renderers on main thread */
     for (int i = 0; i < display_cnt; i++) {
         displays[i].img_mtx = SDL_CreateMutex();
         if (!displays[i].img_mtx) {
-            fprintf(stderr, "%s(): failed to create mutex: %s\n", __func__,
-                    SDL_GetError());
+            fprintf(stderr,
+                    "window_init_sw(): failed to create mutex for display %d: "
+                    "%s\n",
+                    i, SDL_GetError());
             exit(2);
         }
 
         displays[i].img_cond = SDL_CreateCond();
         if (!displays[i].img_cond) {
-            fprintf(stderr, "%s(): failed to create condition variable: %s\n",
-                    __func__, SDL_GetError());
+            fprintf(stderr,
+                    "window_init_sw(): failed to create condition variable for "
+                    "display %d: %s\n",
+                    i, SDL_GetError());
             SDL_DestroyMutex(displays[i].img_mtx);
             exit(2);
         }
 
-        displays[i].win_thread =
-            SDL_CreateThread(window_thread, NULL, (void *) &displays[i]);
-        if (!displays[i].win_thread) {
-            fprintf(stderr, "%s(): failed to create window thread\n", __func__);
+        /* Create window on main thread (required for macOS) */
+        displays[i].window = SDL_CreateWindow(
+            "semu", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+            displays[i].resource.width, displays[i].resource.height,
+            SDL_WINDOW_SHOWN);
+
+        if (!displays[i].window) {
+            fprintf(stderr,
+                    "window_init_sw(): failed to create SDL window for display "
+                    "%d: %s\n"
+                    "Possible causes:\n"
+                    "  - No display available (headless environment)\n"
+                    "  - SDL video driver not supported\n"
+                    "  - Insufficient permissions\n"
+                    "Running in headless mode.\n",
+                    i, SDL_GetError());
+            headless_mode = true;
+            return;
+        }
+
+        /* Create renderer (try accelerated first, fall back to software) */
+        displays[i].renderer = SDL_CreateRenderer(displays[i].window, -1,
+                                                  SDL_RENDERER_ACCELERATED);
+
+        if (!displays[i].renderer) {
+            fprintf(stderr,
+                    "window_init_sw(): accelerated renderer not available, "
+                    "trying software renderer: %s\n",
+                    SDL_GetError());
+            displays[i].renderer = SDL_CreateRenderer(displays[i].window, -1,
+                                                      SDL_RENDERER_SOFTWARE);
+        }
+
+        if (!displays[i].renderer) {
+            fprintf(stderr,
+                    "window_init_sw(): failed to create renderer for display "
+                    "%d: %s\n",
+                    i, SDL_GetError());
             exit(2);
         }
-        SDL_DetachThread(displays[i].win_thread);
+
+        /* Initialize with black screen */
+        SDL_SetRenderDrawColor(displays[i].renderer, 0, 0, 0, 255);
+        SDL_RenderClear(displays[i].renderer);
+        SDL_RenderPresent(displays[i].renderer);
     }
+}
+
+static void window_shutdown_sw(void)
+{
+    should_exit = true;
 }
 
 static void window_add_sw(uint32_t width, uint32_t height)
@@ -226,6 +274,9 @@ static bool virtio_gpu_to_sdl_format(uint32_t virtio_gpu_format,
 
 static void cursor_clear_sw(int scanout_id)
 {
+    if (headless_mode)
+        return;
+
     if (scanout_id >= display_cnt)
         return;
 
@@ -250,6 +301,7 @@ static void cursor_clear_sw(int scanout_id)
 
     /* Trigger plane rendering */
     display->render_type = CLEAR_CURSOR_PLANE;
+    display->render_pending = true;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -258,6 +310,9 @@ static void cursor_clear_sw(int scanout_id)
 
 static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
 {
+    if (headless_mode)
+        return;
+
     if (scanout_id >= display_cnt)
         return;
 
@@ -307,6 +362,7 @@ static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
 
     /* Trigger cursor rendering */
     display->render_type = UPDATE_CURSOR_PLANE;
+    display->render_pending = true;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -315,6 +371,9 @@ static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
 
 static void cursor_move_sw(int scanout_id, int x, int y)
 {
+    if (headless_mode)
+        return;
+
     if (scanout_id >= display_cnt)
         return;
 
@@ -333,6 +392,7 @@ static void cursor_move_sw(int scanout_id, int x, int y)
 
     /* Trigger cursor rendering */
     display->render_type = MOVE_CURSOR_PLANE;
+    display->render_pending = true;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -341,6 +401,9 @@ static void cursor_move_sw(int scanout_id, int x, int y)
 
 static void window_clear_sw(int scanout_id)
 {
+    if (headless_mode)
+        return;
+
     if (scanout_id >= display_cnt)
         return;
 
@@ -361,6 +424,7 @@ static void window_clear_sw(int scanout_id)
 
     /* Trigger primary plane rendering */
     display->render_type = CLEAR_PRIMARY_PLANE;
+    display->render_pending = true;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -369,6 +433,9 @@ static void window_clear_sw(int scanout_id)
 
 static void window_flush_sw(int scanout_id, int res_id)
 {
+    if (headless_mode)
+        return;
+
     if (scanout_id >= display_cnt)
         return;
 
@@ -413,6 +480,7 @@ static void window_flush_sw(int scanout_id, int res_id)
 
     /* Trigger primary plane flushing */
     display->render_type = FLUSH_PRIMARY_PLANE;
+    display->render_pending = true;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -428,4 +496,6 @@ const struct window_backend g_window = {
     .cursor_clear = cursor_clear_sw,
     .cursor_update = cursor_update_sw,
     .cursor_move = cursor_move_sw,
+    .window_main_loop = window_main_loop_sw,
+    .window_shutdown = window_shutdown_sw,
 };
