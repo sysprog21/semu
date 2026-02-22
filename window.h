@@ -19,4 +19,8 @@ struct window_backend {
     void (*cursor_move)(int scanout_id, int x, int y);
 };
 
+#if SEMU_HAS(VIRTIOINPUT)
+int window_events_thread(void *data);
+#endif
+
 #endif

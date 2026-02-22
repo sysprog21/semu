@@ -35,6 +35,7 @@ struct display_info {
     SDL_mutex *img_mtx;
     SDL_cond *img_cond;
     SDL_Thread *win_thread;
+    SDL_Thread *ev_thread;
     SDL_Window *window;
     SDL_Renderer *renderer;
 };
@@ -71,6 +72,12 @@ static int window_thread(void *data)
     SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
     SDL_RenderClear(display->renderer);
     SDL_RenderPresent(display->renderer);
+
+#if SEMU_HAS(VIRTIOINPUT)
+    /* Create event handling thread */
+    ((struct display_info *) data)->ev_thread =
+        SDL_CreateThread(window_events_thread, NULL, data);
+#endif
 
     SDL_Surface *surface;
 

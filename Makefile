@@ -172,8 +172,9 @@ ifeq ($(ENABLE_SDL),1)
     CFLAGS += $(shell sdl2-config --cflags)
     LDFLAGS += $(shell sdl2-config --libs)
 else
-    # Disable virtio-gpu if SDL is not set
+    # Disable virtio-gpu and virtio-input if SDL is not set
     override ENABLE_VIRTIOGPU := 0
+    override ENABLE_VIRTIOINPUT := 0
 endif
 
 # virtio-gpu
@@ -187,6 +188,15 @@ ifeq ($(ENABLE_VIRTIOGPU),1)
 endif
 
 $(call set-feature, VIRTIOGPU)
+
+# virtio-input
+ENABLE_VIRTIOINPUT ?= 1
+ifeq ($(ENABLE_VIRTIOINPUT),1)
+    OBJS_EXTRA += virtio-input.o
+    OBJS_EXTRA += window-events.o
+endif
+
+$(call set-feature, VIRTIOINPUT)
 
 BIN = semu
 all: $(BIN) minimal.dtb
