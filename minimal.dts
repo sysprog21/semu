@@ -87,5 +87,13 @@
             interrupts = <6>;
         };
 #endif
+
+#if SEMU_FEATURE_VIRTIOGPU 
+        gpu0: virtio@4900000 {
+            compatible = "virtio,mmio";
+            reg = <0x4900000 0x200>;
+            interrupts = <7>;
+        };       
+#endif
     };
 };

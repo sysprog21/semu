@@ -73,6 +73,12 @@ jobs:
       run: .ci/test-sound.sh
       shell: bash
       timeout-minutes: 5
+    - name: virtio-gpu test
+      run: .ci/test-vgpu.sh
+      shell: bash
+      timeout-minutes: 5
+      env:
+        SDL_VIDEODRIVER: offscreen
 
   semu-macOS:
     runs-on: macos-latest
@@ -126,6 +132,12 @@ jobs:
       run: .ci/test-sound.sh
       shell: bash
       timeout-minutes: 20
+    - name: virtio-gpu test
+      run: .ci/test-vgpu.sh
+      shell: bash
+      timeout-minutes: 120
+      env:
+        SDL_VIDEODRIVER: offscreen
 
   coding_style:
     runs-on: ubuntu-24.04
