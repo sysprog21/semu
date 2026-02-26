@@ -7,18 +7,22 @@
 
 #define SDL_COND_TIMEOUT 1 /* ms */
 
-enum {
-    CLEAR_PRIMARY_PLANE,
-    FLUSH_PRIMARY_PLANE,
-    UPDATE_CURSOR_PLANE,
-    CLEAR_CURSOR_PLANE,
-    MOVE_CURSOR_PLANE,
+enum primary_op {
+    PRIMARY_NONE,
+    PRIMARY_CLEAR,
+    PRIMARY_FLUSH,
+};
+
+enum cursor_op {
+    CURSOR_NONE,
+    CURSOR_CLEAR,
+    CURSOR_UPDATE,
+    CURSOR_MOVE,
 };
 
 struct display_info {
-    /* Request type: primary or cursor */
-    int render_type;
-    bool render_pending;
+    enum primary_op primary_pending;
+    enum cursor_op cursor_pending;
 
     /* Primary plane */
     struct vgpu_resource_2d resource;
@@ -28,7 +32,6 @@ struct display_info {
 
     /* Cursor plane */
     struct vgpu_resource_2d cursor;
-    uint32_t cursor_sdl_format;
     uint32_t *cursor_img;
     SDL_Rect cursor_rect; /* Cursor size and position */
     SDL_Texture *cursor_texture;
@@ -73,55 +76,75 @@ static void window_main_loop_sw(void)
                 SDL_CondWaitTimeout(display->img_cond, display->img_mtx,
                                     SDL_COND_TIMEOUT);
 
-                if (display->render_pending) {
-                    if (display->render_type == CLEAR_PRIMARY_PLANE) {
-                        /* FIXME */
-                        /* Set color for clearing */
-                        SDL_SetRenderDrawColor(display->renderer, 0, 0, 0, 255);
-                    } else if (display->render_type == FLUSH_PRIMARY_PLANE) {
-                        /* Generate primary plane texture */
-                        surface = SDL_CreateRGBSurfaceWithFormatFrom(
-                            resource->image, resource->width, resource->height,
-                            resource->bits_per_pixel, resource->stride,
-                            display->primary_sdl_format);
+                bool any_update = display->primary_pending != PRIMARY_NONE ||
+                                  display->cursor_pending != CURSOR_NONE;
 
-                        if (surface) {
-                            SDL_DestroyTexture(display->primary_texture);
-                            display->primary_texture =
-                                SDL_CreateTextureFromSurface(display->renderer,
-                                                             surface);
-                            SDL_FreeSurface(surface);
-                        } else {
-                            fprintf(stderr,
-                                    "Failed to create primary plane surface: "
-                                    "%s\n",
-                                    SDL_GetError());
-                        }
-                    } else if (display->render_type == UPDATE_CURSOR_PLANE) {
-                        /* Generate cursor plane texture */
-                        surface = SDL_CreateRGBSurfaceWithFormatFrom(
-                            cursor->image, cursor->width, cursor->height,
-                            CURSOR_BPP * 8, CURSOR_STRIDE,
-                            SDL_PIXELFORMAT_ARGB8888);
+                /* Handle primary plane update */
+                if (display->primary_pending == PRIMARY_CLEAR) {
+                    SDL_DestroyTexture(display->primary_texture);
+                    display->primary_texture = NULL;
+                    display->primary_pending = PRIMARY_NONE;
+                } else if (display->primary_pending == PRIMARY_FLUSH) {
+                    /* Generate primary plane texture */
+                    surface = SDL_CreateRGBSurfaceWithFormatFrom(
+                        resource->image, resource->width, resource->height,
+                        resource->bits_per_pixel, resource->stride,
+                        display->primary_sdl_format);
 
-                        if (surface) {
-                            SDL_DestroyTexture(display->cursor_texture);
-                            display->cursor_texture =
-                                SDL_CreateTextureFromSurface(display->renderer,
-                                                             surface);
-                            SDL_FreeSurface(surface);
-                        } else {
-                            fprintf(stderr,
-                                    "Failed to create cursor plane surface: "
-                                    "%s\n",
-                                    SDL_GetError());
-                        }
-                    } else if (display->render_type == CLEAR_CURSOR_PLANE) {
-                        SDL_DestroyTexture(display->cursor_texture);
-                        display->cursor_texture = NULL;
+                    if (surface) {
+                        SDL_DestroyTexture(display->primary_texture);
+                        display->primary_texture = SDL_CreateTextureFromSurface(
+                            display->renderer, surface);
+                        SDL_FreeSurface(surface);
+                    } else {
+                        fprintf(stderr,
+                                "Failed to create primary plane surface: "
+                                "%s\n",
+                                SDL_GetError());
                     }
+                    display->primary_pending = PRIMARY_NONE;
+                }
 
-                    /* Render primary and cursor planes */
+                /* Handle cursor plane update */
+                if (display->cursor_pending == CURSOR_UPDATE) {
+                    /* Cursor data is always treated as ARGB8888 regardless of
+                     * the resource format reported by the guest, following the
+                     * same approach as QEMU (see QEMUCursor: "data format is
+                     * 32bit RGBA").
+                     *
+                     * In practice the Linux virtio-gpu driver creates dumb
+                     * buffers with B8G8R8X8_UNORM and uses the X byte as alpha
+                     * (0 = transparent), so following the X format would
+                     * discard cursor transparency.
+                     */
+                    surface = SDL_CreateRGBSurfaceWithFormatFrom(
+                        cursor->image, cursor->width, cursor->height,
+                        cursor->bits_per_pixel, cursor->stride,
+                        SDL_PIXELFORMAT_ARGB8888);
+
+                    if (surface) {
+                        SDL_DestroyTexture(display->cursor_texture);
+                        display->cursor_texture = SDL_CreateTextureFromSurface(
+                            display->renderer, surface);
+                        SDL_FreeSurface(surface);
+                    } else {
+                        fprintf(stderr,
+                                "Failed to create cursor plane surface: "
+                                "%s\n",
+                                SDL_GetError());
+                    }
+                    display->cursor_pending = CURSOR_NONE;
+                } else if (display->cursor_pending == CURSOR_CLEAR) {
+                    SDL_DestroyTexture(display->cursor_texture);
+                    display->cursor_texture = NULL;
+                    display->cursor_pending = CURSOR_NONE;
+                } else if (display->cursor_pending == CURSOR_MOVE) {
+                    /* cursor_rect already updated by caller */
+                    display->cursor_pending = CURSOR_NONE;
+                }
+
+                /* Render both planes when any update is pending */
+                if (any_update) {
                     SDL_RenderClear(display->renderer);
 
                     if (display->primary_texture)
@@ -134,7 +157,6 @@ static void window_main_loop_sw(void)
                                        &display->cursor_rect);
 
                     SDL_RenderPresent(display->renderer);
-                    display->render_pending = false;
                 }
                 SDL_UnlockMutex(display->img_mtx);
             }
@@ -291,7 +313,6 @@ static void cursor_clear_sw(int scanout_id)
 
     /* Reset cursor information */
     memset(&display->cursor_rect, 0, sizeof(SDL_Rect));
-    display->cursor_sdl_format = 0;
 
     /* Reset cursor resource */
     memset(&display->cursor, 0, sizeof(struct vgpu_resource_2d));
@@ -299,9 +320,8 @@ static void cursor_clear_sw(int scanout_id)
     display->cursor_img = NULL;
     display->cursor.image = NULL;
 
-    /* Trigger plane rendering */
-    display->render_type = CLEAR_CURSOR_PLANE;
-    display->render_pending = true;
+    /* Trigger cursor plane rendering */
+    display->cursor_pending = CURSOR_CLEAR;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -322,15 +342,6 @@ static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
         return;
     }
 
-    /* Convert virtio-gpu resource format to SDL format */
-    uint32_t sdl_format;
-    bool legal_format = virtio_gpu_to_sdl_format(resource->format, &sdl_format);
-
-    if (!legal_format) {
-        fprintf(stderr, "%s(): invalid resource format\n", __func__);
-        return;
-    }
-
     /* Start of the critical section */
     if (SDL_LockMutex(displays[scanout_id].img_mtx) != 0) {
         fprintf(stderr, "%s(): failed to lock mutex: %s\n", __func__,
@@ -344,7 +355,6 @@ static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
     display->cursor_rect.y = y;
     display->cursor_rect.w = resource->width;
     display->cursor_rect.h = resource->height;
-    display->cursor_sdl_format = sdl_format;
 
     /* Cursor resource update */
     memcpy(&display->cursor, resource, sizeof(struct vgpu_resource_2d));
@@ -361,8 +371,7 @@ static void cursor_update_sw(int scanout_id, int res_id, int x, int y)
     memcpy(display->cursor_img, resource->image, pixels_size);
 
     /* Trigger cursor rendering */
-    display->render_type = UPDATE_CURSOR_PLANE;
-    display->render_pending = true;
+    display->cursor_pending = CURSOR_UPDATE;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -391,8 +400,7 @@ static void cursor_move_sw(int scanout_id, int x, int y)
     display->cursor_rect.y = y;
 
     /* Trigger cursor rendering */
-    display->render_type = MOVE_CURSOR_PLANE;
-    display->render_pending = true;
+    display->cursor_pending = CURSOR_MOVE;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -423,8 +431,7 @@ static void window_clear_sw(int scanout_id)
     display->resource.image = NULL;
 
     /* Trigger primary plane rendering */
-    display->render_type = CLEAR_PRIMARY_PLANE;
-    display->render_pending = true;
+    display->primary_pending = PRIMARY_CLEAR;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */
@@ -446,10 +453,12 @@ static void window_flush_sw(int scanout_id, int res_id)
         return;
     }
 
-    /* Convert virtio-gpu resource format to SDL format */
+    /* Convert virtio-gpu resource format to SDL format.
+     * Only the primary plane negotiates format at runtime; the cursor plane
+     * always renders as ARGB8888 (see cursor_update_sw).
+     */
     uint32_t sdl_format;
     bool legal_format = virtio_gpu_to_sdl_format(resource->format, &sdl_format);
-
     if (!legal_format) {
         fprintf(stderr, "%s(): invalid resource format\n", __func__);
         return;
@@ -479,8 +488,7 @@ static void window_flush_sw(int scanout_id, int res_id)
     memcpy(new_img, resource->image, pixels_size);
 
     /* Trigger primary plane flushing */
-    display->render_type = FLUSH_PRIMARY_PLANE;
-    display->render_pending = true;
+    display->primary_pending = PRIMARY_FLUSH;
     SDL_CondSignal(display->img_cond);
 
     /* End of the critical section */

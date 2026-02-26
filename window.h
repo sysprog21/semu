@@ -5,9 +5,6 @@
 #define CURSOR_WIDTH 64
 #define CURSOR_HEIGHT 64
 
-#define CURSOR_BPP 4 /* Bytes per pixel, using ARGB */
-#define CURSOR_STRIDE (CURSOR_WIDTH * CURSOR_BPP)
-
 struct window_backend {
     void (*window_init)(void);
     void (*window_add)(uint32_t width, uint32_t height);
