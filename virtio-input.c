@@ -1,6 +1,5 @@
 #include <assert.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +13,25 @@
 #include "virtio-input-codes.h"
 #include "virtio-input-event.h"
 #include "virtio.h"
+
+/* Threading invariant: every function in this file that reads or writes
+ * guest-visible virtio-input state (descriptors, virtqueues, Status,
+ * InterruptStatus, the per-device config union) runs exclusively on the
+ * emulator thread.
+ *
+ * The SDL/main thread produces host input through the SPSC queue in
+ * virtio-input-event.c; the emulator thread consumes that queue in
+ * virtio_input_drain_host_events() and then calls into this file. Guest MMIO
+ * accesses arrive via virtio_input_read()/virtio_input_write() from
+ * mem_load()/mem_store(), which is also the emulator thread.
+ *
+ * The only cross-thread touch point is virtio_input_irq_pending(), which reads
+ * InterruptStatus from the PLIC polling path on the same emulator thread.
+ *
+ * No vinput-internal mutex is required as long as this invariant holds. If a
+ * future change reintroduces SDL-thread writes into virtio-input device state,
+ * add a lock back at the same time.
+ */
 
 #define BUS_VIRTUAL 0x06
 
@@ -93,7 +111,6 @@ struct vinput_data {
     int type; /* VINPUT_KEYBOARD_ID or VINPUT_MOUSE_ID */
 };
 
-static pthread_mutex_t vinput_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct vinput_data vinput_dev[VINPUT_DEV_CNT];
 static const char *vinput_dev_name[VINPUT_DEV_CNT] = {
     VINPUT_KEYBOARD_NAME,
@@ -152,7 +169,7 @@ static inline uint32_t virtio_input_preprocess(virtio_input_state_t *vinput,
  * used ring. The guest driver uses statusq to send EV_LED events (Caps Lock,
  * Num Lock, etc.) and acknowledges each buffer so the queue never stalls.
  * SDL has no portable LED-control API, so LED state is not applied to the host
- * keyboard here. Must be called with vinput_mutex held.
+ * keyboard here.
  */
 static void virtio_input_drain_statusq(virtio_input_state_t *vinput)
 {
@@ -227,6 +244,8 @@ static void virtio_input_update_status(virtio_input_state_t *vinput,
     /* Reset */
     uint32_t *ram = vinput->ram;
     void *priv = vinput->priv;
+    int dev_id = PRIV(vinput)->type;
+    vinput_reset_host_events(dev_id);
     memset(vinput, 0, sizeof(*vinput));
     vinput->ram = ram;
     vinput->priv = priv;
@@ -325,25 +344,23 @@ static void virtio_input_update_eventq(int dev_id,
 
     int index = VIRTIO_INPUT_EVENTQ;
 
-    /* Start of the critical section */
-    pthread_mutex_lock(&vinput_mutex);
-
     uint32_t *ram = vinput->ram;
     virtio_input_queue_t *queue = &vinput->queues[index];
 
     /* Check device status */
     if (vinput->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
-        goto out;
+        return;
 
     if (!((vinput->Status & VIRTIO_STATUS__DRIVER_OK) && queue->ready))
-        goto out;
+        return;
 
     /* Check for new buffers */
     uint16_t new_avail = ram[queue->QueueAvail] >> 16;
     uint16_t avail_delta = (uint16_t) (new_avail - queue->last_avail);
     if (avail_delta > (uint16_t) queue->QueueNum) {
         fprintf(stderr, "%s(): size check failed\n", __func__);
-        goto fail;
+        virtio_input_set_fail(vinput);
+        return;
     }
 
     /* No buffers available - drop event or handle later */
@@ -353,7 +370,7 @@ static void virtio_input_update_eventq(int dev_id,
                 dev_id);
 #endif
         /* TODO: Consider buffering events instead of dropping them */
-        goto out;
+        return;
     }
 
     /* Try to write events to used ring */
@@ -365,18 +382,9 @@ static void virtio_input_update_eventq(int dev_id,
      */
     if (wrote_events && !(ram[queue->QueueAvail] & 1))
         vinput->InterruptStatus |= VIRTIO_INT__USED_RING;
-
-    goto out;
-
-fail:
-    virtio_input_set_fail(vinput);
-
-out:
-    /* End of the critical section */
-    pthread_mutex_unlock(&vinput_mutex);
 }
 
-void virtio_input_update_key(uint32_t key, uint32_t ev_value)
+static void virtio_input_update_key(uint32_t key, uint32_t ev_value)
 {
 #if SEMU_INPUT_DEBUG
     fprintf(stderr, VINPUT_DEBUG_PREFIX "key code=%u value=%u\n", key,
@@ -392,7 +400,8 @@ void virtio_input_update_key(uint32_t key, uint32_t ev_value)
     virtio_input_update_eventq(VINPUT_KEYBOARD_ID, input_ev, ev_cnt);
 }
 
-void virtio_input_update_mouse_button_state(uint32_t button, bool pressed)
+static void virtio_input_update_mouse_button_state(uint32_t button,
+                                                   bool pressed)
 {
 #if SEMU_INPUT_DEBUG
     fprintf(stderr, VINPUT_DEBUG_PREFIX "button code=%u pressed=%u\n", button,
@@ -407,7 +416,7 @@ void virtio_input_update_mouse_button_state(uint32_t button, bool pressed)
     virtio_input_update_eventq(VINPUT_MOUSE_ID, input_ev, ev_cnt);
 }
 
-void virtio_input_update_mouse_motion(int32_t dx, int32_t dy)
+static void virtio_input_update_mouse_motion(int32_t dx, int32_t dy)
 {
 #if SEMU_INPUT_DEBUG
     fprintf(stderr, VINPUT_DEBUG_PREFIX "motion dx=%d dy=%d\n", dx, dy);
@@ -430,7 +439,7 @@ void virtio_input_update_mouse_motion(int32_t dx, int32_t dy)
     virtio_input_update_eventq(VINPUT_MOUSE_ID, input_ev, ev_cnt);
 }
 
-void virtio_input_update_scroll(int32_t dx, int32_t dy)
+static void virtio_input_update_scroll(int32_t dx, int32_t dy)
 {
 #if SEMU_INPUT_DEBUG
     fprintf(stderr, VINPUT_DEBUG_PREFIX "scroll dx=%d dy=%d\n", dx, dy);
@@ -458,6 +467,54 @@ void virtio_input_update_scroll(int32_t dx, int32_t dy)
         .type = SEMU_EV_SYN, .code = SEMU_SYN_REPORT, .value = 0};
 
     virtio_input_update_eventq(VINPUT_MOUSE_ID, input_ev, ev_cnt);
+}
+
+void virtio_input_drain_host_events(void)
+{
+    for (;;) {
+        struct vinput_cmd event;
+
+        /* Drain per-device queues on the emulator thread so SDL never touches
+         * guest-visible virtio-input state directly.
+         *
+         * We intentionally drain the whole keyboard queue before touching the
+         * mouse queue, rather than round-robining between them. The guest-
+         * visible cross-device order is decided by PLIC arbitration when it
+         * picks between the pending IRQs, not by the order we drain the queues
+         * here. Round-robining between queues would not change it.
+         *
+         * If a future change raises interrupts mid-drain, adds host-side
+         * timestamps to virtio_input_event, or otherwise starts to rely on
+         * sub-tick cross-device ordering, revisit this loop.
+         */
+        while (vinput_pop_cmd(VINPUT_KEYBOARD_ID, &event)) {
+            if (event.type == VINPUT_CMD_KEYBOARD_KEY)
+                virtio_input_update_key(event.u.keyboard_key.key,
+                                        event.u.keyboard_key.value);
+        }
+
+        while (vinput_pop_cmd(VINPUT_MOUSE_ID, &event)) {
+            switch (event.type) {
+            case VINPUT_CMD_MOUSE_BUTTON:
+                virtio_input_update_mouse_button_state(
+                    event.u.mouse_button.button, event.u.mouse_button.pressed);
+                break;
+            case VINPUT_CMD_MOUSE_MOTION:
+                virtio_input_update_mouse_motion(event.u.mouse_motion.dx,
+                                                 event.u.mouse_motion.dy);
+                break;
+            case VINPUT_CMD_MOUSE_WHEEL:
+                virtio_input_update_scroll(event.u.mouse_wheel.dx,
+                                           event.u.mouse_wheel.dy);
+                break;
+            default:
+                break;
+            }
+        }
+
+        if (vinput_rearm_cmd_wake())
+            break;
+    }
 }
 
 static void virtio_input_properties(int dev_id)
@@ -779,8 +836,6 @@ void virtio_input_read(hart_t *vm,
     size_t access_size = 0;
     bool is_cfg = false;
 
-    pthread_mutex_lock(&vinput_mutex);
-
     switch (width) {
     case RV_MEM_LW:
         access_size = 4;
@@ -795,7 +850,7 @@ void virtio_input_read(hart_t *vm,
         break;
     default:
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
-        goto out;
+        return;
     }
 
     is_cfg = virtio_input_is_config_access(addr, access_size);
@@ -808,20 +863,17 @@ void virtio_input_read(hart_t *vm,
     if (!is_cfg) {
         if (access_size != 4 || (addr & 0x3)) {
             vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
-            goto out;
+            return;
         }
     } else {
         if (addr & (access_size - 1)) {
             vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
-            goto out;
+            return;
         }
     }
 
     if (!virtio_input_reg_read(vinput, addr, value, access_size))
         vm_set_exception(vm, RV_EXC_LOAD_FAULT, vm->exc_val);
-
-out:
-    pthread_mutex_unlock(&vinput_mutex);
 }
 
 void virtio_input_write(hart_t *vm,
@@ -832,8 +884,6 @@ void virtio_input_write(hart_t *vm,
 {
     size_t access_size = 0;
     bool is_cfg = false;
-
-    pthread_mutex_lock(&vinput_mutex);
 
     switch (width) {
     case RV_MEM_SW:
@@ -847,7 +897,7 @@ void virtio_input_write(hart_t *vm,
         break;
     default:
         vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
-        goto out;
+        return;
     }
 
     is_cfg = virtio_input_is_config_access(addr, access_size);
@@ -861,28 +911,25 @@ void virtio_input_write(hart_t *vm,
     if (!is_cfg) {
         if (access_size != 4 || (addr & 0x3)) {
             vm_set_exception(vm, RV_EXC_STORE_MISALIGN, vm->exc_val);
-            goto out;
+            return;
         }
     } else {
         if (addr & (access_size - 1)) {
             vm_set_exception(vm, RV_EXC_STORE_MISALIGN, vm->exc_val);
-            goto out;
+            return;
         }
     }
 
     if (!virtio_input_reg_write(vinput, addr, value))
         vm_set_exception(vm, RV_EXC_STORE_FAULT, vm->exc_val);
-
-out:
-    pthread_mutex_unlock(&vinput_mutex);
 }
 
 bool virtio_input_irq_pending(virtio_input_state_t *vinput)
 {
-    pthread_mutex_lock(&vinput_mutex);
-    bool pending = vinput->InterruptStatus != 0;
-    pthread_mutex_unlock(&vinput_mutex);
-    return pending;
+    /* Called from the emulator thread after draining queued window events; see
+     * the threading invariant at the top of this file.
+     */
+    return vinput->InterruptStatus != 0;
 }
 
 void virtio_input_init(virtio_input_state_t *vinput)

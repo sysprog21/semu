@@ -281,10 +281,11 @@ void virtio_input_write(hart_t *vm,
                         uint32_t value);
 
 void virtio_input_init(virtio_input_state_t *vinput);
-void virtio_input_update_key(uint32_t key, uint32_t ev_value);
-void virtio_input_update_mouse_button_state(uint32_t button, bool pressed);
-void virtio_input_update_mouse_motion(int32_t dx, int32_t dy);
-void virtio_input_update_scroll(int32_t dx, int32_t dy);
+
+/* Drain translated host window events and update guest-visible virtio-input
+ * device state. Must be called from the emulator thread.
+ */
+void virtio_input_drain_host_events(void);
 
 /* Returns true if the device has a pending interrupt. Safe to call from
  * the emulator thread without holding any lock internally.
@@ -527,16 +528,17 @@ typedef struct {
     virtio_input_state_t vkeyboard;
     virtio_input_state_t vmouse;
     /* Use self-pipe trick to unblock the emulator loop when the
-     * window closes. When all harts are idle, semu_run() calls
+     * window backend has queued work, such as input events or
+     * window shutdown. When all harts are idle, semu_run() calls
      * poll(-1) and blocks indefinitely waiting for timer or UART
-     * events.  window_shutdown_sw() runs on the window-event thread
-     * and has no way to wake that blocked poll() other than writing
-     * to a file descriptor it is watching.
+     * events. The window-event thread has no way to wake that
+     * blocked poll() other than writing to a file descriptor it is
+     * watching.
      *
      * wake_fd[0] (read end) is added to pfds[] so poll() monitors it.
-     * wake_fd[1] (write end) is handed to window_shutdown_sw(), which
-     * writes one byte on window close to make wake_fd[0] readable and
-     * return poll() immediately.
+     * wake_fd[1] (write end) is handed to the window backend, which
+     * writes one byte when backend work arrives to make wake_fd[0]
+     * readable and return poll() immediately.
      */
     int wake_fd[2];
 #endif

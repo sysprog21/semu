@@ -27,6 +27,7 @@
 #include "device.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #if SEMU_HAS(VIRTIOINPUT)
+#include "virtio-input-event.h"
 #include "window.h"
 #endif
 #include "riscv.h"
@@ -235,6 +236,13 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
             emu_update_vfs_interrupts(vm);
 #endif
 #if SEMU_HAS(VIRTIOINPUT)
+        /* The empty path is common during CI and boot workloads, so only
+         * drain the host-side queue after the window thread has published
+         * pending work for the emulator thread.
+         */
+        if (vinput_may_have_pending_cmds())
+            virtio_input_drain_host_events();
+
         if (virtio_input_irq_pending(&emu->vkeyboard))
             emu_update_vinput_keyboard_interrupts(vm);
 
@@ -1408,8 +1416,8 @@ static void semu_run(emu_state_t *emu)
             }
 
 #if SEMU_HAS(VIRTIOINPUT)
-            /* Always watch the wake pipe so that closing the SDL window
-             * unblocks poll(-1) immediately.
+            /* Always watch the wake pipe so that backend work such as input
+             * events or SDL window close unblocks poll(-1) immediately.
              */
             int wake_pfd_index = -1;
             if (emu->wake_fd[0] >= 0 && pfd_count < poll_capacity) {
@@ -1474,10 +1482,13 @@ static void semu_run(emu_state_t *emu)
             }
 
 #if SEMU_HAS(VIRTIOINPUT)
-            /* Drain one wake byte if the pipe fired. At this point the wake
-             * pipe only signals shutdown/close requests, so one byte is
-             * enough to make emu_tick_peripherals() observe
-             * g_window.window_is_closed() and stop the emulator.
+            /* Drain one wake byte if the pipe fired. The virtio-input path
+             * coalesces backend wakeups behind a bool gate, so it contributes
+             * at most one queued notification byte before the emulator thread
+             * drains pending work. Extra shutdown wake bytes do not need to be
+             * fully consumed here because the first one is enough to make
+             * emu_tick_peripherals() observe g_window.window_is_closed() and
+             * stop the emulator.
              */
             if (wake_pfd_index >= 0 &&
                 (pfds[wake_pfd_index].revents & POLLIN)) {
