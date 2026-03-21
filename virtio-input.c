@@ -17,6 +17,8 @@
 
 #define BUS_VIRTUAL 0x06
 
+#define VINPUT_DEBUG_PREFIX "[SEMU vinput-log]: "
+
 #define VINPUT_KEYBOARD_NAME "VirtIO Keyboard"
 #define VINPUT_MOUSE_NAME "VirtIO Mouse"
 
@@ -346,6 +348,10 @@ static void virtio_input_update_eventq(int dev_id,
 
     /* No buffers available - drop event or handle later */
     if (queue->last_avail == new_avail) {
+#if SEMU_INPUT_DEBUG
+        fprintf(stderr, VINPUT_DEBUG_PREFIX "drop dev=%d (no guest buffers)\n",
+                dev_id);
+#endif
         /* TODO: Consider buffering events instead of dropping them */
         goto out;
     }
@@ -372,6 +378,10 @@ out:
 
 void virtio_input_update_key(uint32_t key, uint32_t ev_value)
 {
+#if SEMU_INPUT_DEBUG
+    fprintf(stderr, VINPUT_DEBUG_PREFIX "key code=%u value=%u\n", key,
+            ev_value);
+#endif
     /* ev_value follows Linux evdev: 0=release, 1=press, 2=repeat */
     struct virtio_input_event input_ev[] = {
         {.type = SEMU_EV_KEY, .code = key, .value = ev_value},
@@ -384,6 +394,10 @@ void virtio_input_update_key(uint32_t key, uint32_t ev_value)
 
 void virtio_input_update_mouse_button_state(uint32_t button, bool pressed)
 {
+#if SEMU_INPUT_DEBUG
+    fprintf(stderr, VINPUT_DEBUG_PREFIX "button code=%u pressed=%u\n", button,
+            pressed);
+#endif
     struct virtio_input_event input_ev[] = {
         {.type = SEMU_EV_KEY, .code = button, .value = pressed},
         {.type = SEMU_EV_SYN, .code = SEMU_SYN_REPORT, .value = 0},
@@ -395,6 +409,9 @@ void virtio_input_update_mouse_button_state(uint32_t button, bool pressed)
 
 void virtio_input_update_mouse_motion(int32_t dx, int32_t dy)
 {
+#if SEMU_INPUT_DEBUG
+    fprintf(stderr, VINPUT_DEBUG_PREFIX "motion dx=%d dy=%d\n", dx, dy);
+#endif
     struct virtio_input_event input_ev[3];
     uint32_t ev_cnt = 0;
 
@@ -415,6 +432,9 @@ void virtio_input_update_mouse_motion(int32_t dx, int32_t dy)
 
 void virtio_input_update_scroll(int32_t dx, int32_t dy)
 {
+#if SEMU_INPUT_DEBUG
+    fprintf(stderr, VINPUT_DEBUG_PREFIX "scroll dx=%d dy=%d\n", dx, dy);
+#endif
     /* Build only the non-zero axis events and always terminate with SYN_REPORT.
      * dx > 0: scroll right, dy > 0: scroll up (matches Linux evdev convention).
      */

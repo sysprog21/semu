@@ -174,6 +174,8 @@ endif
 
 # virtio-input
 ENABLE_VIRTIOINPUT ?= 1
+ENABLE_INPUT_DEBUG ?= 0
+CFLAGS += -DSEMU_INPUT_DEBUG=$(ENABLE_INPUT_DEBUG)
 $(call set-feature, VIRTIOINPUT)
 ifeq ($(call has, VIRTIOINPUT), 1)
     OBJS_EXTRA += virtio-input-event.o
