@@ -935,7 +935,7 @@ bool virtio_fs_init(virtio_fs_state_t *vfs, char *mtag, char *dir)
     memcpy(vfs->shared_dir, dir, dir_len);
 
     snprintf(PRIV(vfs)->tag, sizeof(PRIV(vfs)->tag), "%s", mtag);
-    PRIV(vfs)->num_request_queues = 3;
+    PRIV(vfs)->num_request_queues = 2;
     vfs->mount_tag = mtag;
 
     inode_map_entry *root_entry = malloc(sizeof(inode_map_entry));
