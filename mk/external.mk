@@ -39,6 +39,10 @@ $(PREBUILT_MANIFEST): FORCE
 	    fi; \
 	fi
 
+# optional test tools disk
+TEST_TOOLS_DATA_URL = $(COMMON_URL)/test-tools.img.bz2
+TEST_TOOLS_DATA = test-tools.img
+
 define download
 # Download to a .part file so an interrupted curl never lands a
 # corrupt or incomplete .bz2 that a later run mistakes for valid input.
@@ -46,13 +50,13 @@ define download
 # left over from a previous run, e.g. interrupted before sha1 verify,
 # would make curl request a byte range past EOF, the server replies
 # HTTP 416, and curl exits non-zero, a permanent self-inflicted
-# deadlock. These files are 5 to 7 MiB; a fresh GET is cheap.
+# deadlock. These files are small enough that a fresh GET is cheap.
 #
 # Look up the expected SHA-1 by archive basename in the release
 # manifest, then verify the .part against it. Decompress to a .tmp
 # file and rename only on success, so an interrupted bunzip2 cannot
-# leave a half-decompressed Image or rootfs.cpio that make would treat
-# as a valid up-to-date target on the next invocation.
+# leave a half-decompressed artifact that make would treat as a valid
+# up-to-date target on the next invocation.
 $($(T)_DATA): $(PREBUILT_MANIFEST) | prebuilt-check
 	$(VECHO) "  GET\t$$@\n"
 	$(Q)curl --fail --retry 3 --retry-delay 1 --progress-bar \
@@ -69,18 +73,18 @@ $($(T)_DATA): $(PREBUILT_MANIFEST) | prebuilt-check
 	$(Q)rm -f "$$@.bz2"
 endef
 
-EXTERNAL_DATA = KERNEL INITRD
+EXTERNAL_DATA = KERNEL INITRD TEST_TOOLS
 $(foreach T,$(EXTERNAL_DATA),$(eval $(download)))
 
 # --- Stale-prebuilt detection -------------------------------------------
 #
-# The prebuilt Image and rootfs.cpio above are baked from a fixed set of
-# input files (kernel/buildroot/busybox configs, the build script, and
-# the init stub). When any of those change locally the prebuilt may no
+# The prebuilt Image, rootfs.cpio, and test-tools.img above are baked from a
+# fixed set of input files (kernel/buildroot/busybox configs, the build script,
+# and the init stub). When any of those change locally the prebuilt may no
 # longer reflect the user's intent, so we compute the SHA1 of those
 # inputs and compare against the publisher's recorded inputs hash --
-# the third line of prebuilt.sha1, written by .ci/publish-prebuilt.sh
-# under the virtual name 'inputs'.
+# the line of prebuilt.sha1 written by .ci/publish-prebuilt.sh under
+# the virtual name 'inputs'.
 #
 # Mismatch -> warn but do not auto-rebuild: a buildroot run takes the
 # better part of an hour, so we let the user opt in via make build-image.
@@ -90,9 +94,11 @@ PREBUILT_INPUTS := \
     configs/linux.config \
     configs/busybox.config \
     configs/buildroot.config \
+    configs/riscv-cross-file \
     scripts/build-image.sh \
     scripts/rootfs_ext4.sh \
-    target/init
+    target/init \
+    target/local-env.sh
 
 # Read the publisher's inputs hash from the downloaded manifest at
 # recipe time, after the manifest refresh above has had a chance to run.
@@ -106,10 +112,10 @@ prebuilt-check: $(PREBUILT_MANIFEST)
 	        if [ "$$found" -eq "$$expected" ]; then \
 	            live_sha1=$$(cat $(PREBUILT_INPUTS) | $(SHA1SUM) | awk '{print $$1}'); \
 	            if [ "$$live_sha1" != "$$manifest_sha1" ]; then \
-	                echo "warning: Local kernel/rootfs inputs ($$live_sha1) differ from" >&2; \
+	                echo "warning: Local prebuilt guest inputs ($$live_sha1) differ from" >&2; \
 	                echo "warning: the prebuilt's recorded inputs ($$manifest_sha1)." >&2; \
-	                echo "warning: The downloaded Image/rootfs.cpio do not reflect your local" >&2; \
-	                echo "warning: configs. Run \`make build-image\` to rebuild from source." >&2; \
+	                echo "warning: The downloaded guest artifacts do not reflect your local configs." >&2; \
+	                echo "warning: Run \`make build-image\` to rebuild from source." >&2; \
 	            fi; \
 	        fi; \
 	    fi

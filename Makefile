@@ -311,7 +311,7 @@ minimal.dtb: minimal.dts riscv-harts.dtsi .dtb-config.stamp
 .PHONY: FORCE
 FORCE:
 
-# Rules for downloading prebuilt Linux kernel image
+# Rules for downloading prebuilt guest artifacts
 include mk/external.mk
 
 ifeq ($(call has, EXTERNAL_ROOT), 1)
@@ -347,8 +347,9 @@ check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DEP) $(DISKIMG_FILE) $(SHARED_
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
 	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -H $(INITRD_OPT) $(if $(NETDEV),-n $(NETDEV)) $(OPTS)
 
+BUILD_IMAGE_ARGS ?= --all
 build-image:
-	scripts/build-image.sh
+	scripts/build-image.sh $(BUILD_IMAGE_ARGS)
 
 clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
@@ -363,6 +364,6 @@ distclean: clean
 	$(Q)$(RM) .dtb-config.stamp
 	$(Q)$(RM) .build-config.stamp
 	$(Q)$(RM) Image rootfs.cpio prebuilt.sha1
-	$(Q)$(RM) ext4.img
+	$(Q)$(RM) ext4.img test-tools.img
 
 -include $(deps)
