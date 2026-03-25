@@ -299,6 +299,10 @@ jobs:
       run: .ci/test-vinput.sh
       shell: bash
       timeout-minutes: 20
+    - name: virtio-gpu test
+      run: .ci/test-gpu.sh
+      shell: bash
+      timeout-minutes: 20
 
   coding_style:
     runs-on: ubuntu-24.04

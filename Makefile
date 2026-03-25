@@ -191,7 +191,8 @@ ifeq ($(ENABLE_SDL),1)
     CFLAGS += $(shell sdl2-config --cflags)
     LDFLAGS += $(shell sdl2-config --libs)
 else
-    # Disable virtio-input if SDL is not set
+    # Disable window-backed virtio devices if SDL is not set.
+    override ENABLE_VIRTIOGPU := 0
     override ENABLE_VIRTIOINPUT := 0
 endif
 
@@ -203,6 +204,18 @@ $(call set-feature, VIRTIOINPUT)
 ifeq ($(call has, VIRTIOINPUT), 1)
     OBJS_EXTRA += virtio-input-event.o
     OBJS_EXTRA += virtio-input.o
+endif
+
+# virtio-gpu
+ENABLE_VIRTIOGPU ?= 1
+$(call set-feature, VIRTIOGPU)
+ifeq ($(call has, VIRTIOGPU), 1)
+    OBJS_EXTRA += virtio-gpu.o
+    OBJS_EXTRA += virtio-gpu-sw.o
+    OBJS_EXTRA += vgpu-display.o
+endif
+
+ifneq ($(filter 1,$(call has, VIRTIOGPU) $(call has, VIRTIOINPUT)),)
     OBJS_EXTRA += window-sw.o
 endif
 

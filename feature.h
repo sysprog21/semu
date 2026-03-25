@@ -32,5 +32,10 @@
 #define SEMU_FEATURE_EXTERNAL_ROOT 0
 #endif
 
+/* virtio-gpu */
+#ifndef SEMU_FEATURE_VIRTIOGPU
+#define SEMU_FEATURE_VIRTIOGPU 1
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x
