@@ -293,6 +293,60 @@ void virtio_input_drain_host_events(void);
 bool virtio_input_irq_pending(virtio_input_state_t *vinput);
 #endif /* SEMU_HAS(VIRTIOINPUT) */
 
+/* VirtIO-GPU */
+
+#if SEMU_HAS(VIRTIOGPU)
+
+#define IRQ_VGPU 9
+#define IRQ_VGPU_BIT (1 << IRQ_VGPU)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_gpu_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_gpu_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_gpu_state_t;
+
+void virtio_gpu_read(hart_t *vm,
+                     virtio_gpu_state_t *vgpu,
+                     uint32_t addr,
+                     uint8_t width,
+                     uint32_t *value);
+
+void virtio_gpu_write(hart_t *vm,
+                      virtio_gpu_state_t *vgpu,
+                      uint32_t addr,
+                      uint8_t width,
+                      uint32_t value);
+
+/* Initializes the process-wide virtio-gpu singleton. semu currently supports
+ * one in-process GPU instance; a second call is fatal.
+ */
+void virtio_gpu_init(virtio_gpu_state_t *vgpu);
+uint32_t virtio_gpu_register_scanout(virtio_gpu_state_t *vgpu,
+                                     uint32_t width,
+                                     uint32_t height);
+#endif /* SEMU_HAS(VIRTIOGPU) */
+
 /* ACLINT MTIMER */
 typedef struct {
     /* A MTIMER device has two separate base addresses: one for the MTIME
@@ -514,10 +568,6 @@ typedef struct {
 #if SEMU_HAS(VIRTIORNG)
     virtio_rng_state_t vrng;
 #endif
-    /* ACLINT */
-    mtimer_state_t mtimer;
-    mswi_state_t mswi;
-    sswi_state_t sswi;
 #if SEMU_HAS(VIRTIOSND)
     virtio_snd_state_t vsnd;
 #endif
@@ -527,21 +577,29 @@ typedef struct {
 #if SEMU_HAS(VIRTIOINPUT)
     virtio_input_state_t vkeyboard;
     virtio_input_state_t vmouse;
-    /* Use self-pipe trick to unblock the emulator loop when the
-     * window backend has queued work, such as input events or
-     * window shutdown. When all harts are idle, semu_run() calls
-     * poll(-1) and blocks indefinitely waiting for timer or UART
-     * events. The window-event thread has no way to wake that
-     * blocked poll() other than writing to a file descriptor it is
+#endif
+#if SEMU_HAS(VIRTIOGPU)
+    virtio_gpu_state_t vgpu;
+#endif
+#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
+    /* Use self-pipe trick to unblock the emulator loop when the window backend
+     * has queued work, such as input events or window shutdown. When all harts
+     * are idle, 'semu_run()' can call 'poll(-1)' and block indefinitely
+     * waiting for timer or UART events. The window-event thread has no way to
+     * wake that blocked 'poll()' other than writing to a file descriptor it is
      * watching.
      *
-     * wake_fd[0] (read end) is added to pfds[] so poll() monitors it.
-     * wake_fd[1] (write end) is handed to the window backend, which
-     * writes one byte when backend work arrives to make wake_fd[0]
-     * readable and return poll() immediately.
+     * 'wake_fd[0]' (read end) is added to 'pfds[]' so 'poll()' monitors it.
+     * 'wake_fd[1]' (write end) is handed to the window backend, which
+     * writes one byte when backend work arrives to make 'wake_fd[0]'
+     * readable and return 'poll()' immediately.
      */
     int wake_fd[2];
 #endif
+    /* ACLINT */
+    mtimer_state_t mtimer;
+    mswi_state_t mswi;
+    sswi_state_t sswi;
 
     uint32_t peripheral_update_ctr;
 
