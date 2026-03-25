@@ -20,18 +20,10 @@ LDFLAGS :=
 ENABLE_VIRTIOBLK ?= 1
 $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
-MKFS_EXT4 ?= mkfs.ext4
 ifeq ($(call has, VIRTIOBLK), 1)
     OBJS_EXTRA += virtio-blk.o
     DISKIMG_FILE := ext4.img
     OPTS += -d $(DISKIMG_FILE)
-    MKFS_EXT4 := $(shell which $(MKFS_EXT4))
-    ifndef MKFS_EXT4
-	MKFS_EXT4 := $(shell which $$(brew --prefix e2fsprogs)/sbin/mkfs.ext4)
-    endif
-    ifndef MKFS_EXT4
-        $(error "No mkfs.ext4 found.")
-    endif
 endif
 
 # virtio-rng
@@ -281,12 +273,8 @@ minimal.dtb: minimal.dts riscv-harts.dtsi
 .PHONY: FORCE
 FORCE:
 
-# Rules for downloading prebuilt Linux kernel image
+# Rules for downloading prebuilt guest artifacts
 include mk/external.mk
-
-ext4.img:
-	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
-	$(Q)$(MKFS_EXT4) -F $@
 
 .PHONY: $(DIRECTORY)
 $(SHARED_DIRECTORY):

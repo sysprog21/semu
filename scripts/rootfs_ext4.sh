@@ -13,8 +13,15 @@ mkdir -p $DIR
 
 echo "[*] Extract CPIO"
 pushd $DIR
-cpio -idmv < ../$ROOTFS_CPIO 
+cpio -idmv < ../$ROOTFS_CPIO
 popd
+
+if [ -d extra_packages ] && [ -n "$(ls -A extra_packages 2>/dev/null)" ]; then
+    echo "[*] Copying extra packages..."
+    cp -r extra_packages/. $DIR/
+else
+    echo "[*] No extra_packages directory or directory is empty, skipping..."
+fi
 
 echo "[*] Create empty image"
 dd if=/dev/zero of=${IMG} bs=4k count=${IMG_SIZE_BLOCKS}

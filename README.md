@@ -125,12 +125,13 @@ This command invokes the underlying script: `scripts/build-image.sh`, which also
 ### Script Usage
 
 ```
-./scripts/build-image.sh [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+./scripts/build-image.sh [--buildroot] [--linux] [--directfb2-test] [--all] [--external-root] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --directfb2-test     Build an ext4 guest disk with the DirectFB2 test payload
   --linux             Build Linux kernel
-  --all               Build both Buildroot and Linux
+  --all               Build both Buildroot and Linux kernel
   --external-root     Use external rootfs instead of initramfs
   --clean-build       Remove entire buildroot/ and/or linux/ directories before build
   --help              Show this message
@@ -154,6 +155,12 @@ Build Buildroot and generate an external root file system (ext4 image):
 
 ```
 $ scripts/build-image.sh --buildroot --external-root
+```
+
+Build an ext4 guest disk with the DirectFB2 test payload:
+
+```
+$ scripts/build-image.sh --directfb2-test
 ```
 
 Force a clean build:

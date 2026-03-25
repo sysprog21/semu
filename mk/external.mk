@@ -15,6 +15,11 @@ INITRD_DATA_URL = $(COMMON_URL)/rootfs.cpio.bz2
 INITRD_DATA = rootfs.cpio
 INITRD_DATA_SHA1 = a63336a28e484ed9cd560652c336b93affe50126
 
+# guest disk
+GUEST_DISK_DATA_URL = $(COMMON_URL)/ext4.img.bz2
+GUEST_DISK_DATA = ext4.img
+GUEST_DISK_DATA_SHA1 = 83ed49c16d341bdf3210141d5f6d5842b77a6adc
+
 define download
 $($(T)_DATA):
 	$(VECHO) "  GET\t$$@\n"
@@ -23,5 +28,5 @@ $($(T)_DATA):
 	$(Q)bunzip2 $$@.bz2
 endef
 
-EXTERNAL_DATA = KERNEL INITRD
+EXTERNAL_DATA = KERNEL INITRD GUEST_DISK
 $(foreach T,$(EXTERNAL_DATA),$(eval $(download)))
