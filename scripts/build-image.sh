@@ -31,6 +31,22 @@ function safe_copy {
     fi
 }
 
+function copy_buildroot_config
+{
+    local buildroot_config="configs/buildroot.config"
+    local x11_config="configs/x11.config"
+    local output_config="buildroot/.config"
+    local merge_tool="buildroot/support/kconfig/merge_config.sh"
+
+    echo "Preparing Buildroot config..."
+
+    if [[ $BUILD_X11 -eq 1 ]]; then
+        ASSERT "$merge_tool" -m -r -O buildroot "$buildroot_config" "$x11_config"
+    else
+        ASSERT cp -f "$buildroot_config" "$output_config"
+    fi
+}
+
 function do_buildroot
 {
     if [ ! -d buildroot ]; then
@@ -40,7 +56,7 @@ function do_buildroot
         echo "buildroot/ already exists, skipping clone"
     fi
 
-    safe_copy configs/buildroot.config buildroot/.config
+    copy_buildroot_config
     safe_copy configs/busybox.config buildroot/busybox.config
     cp -f target/init buildroot/fs/cpio/init
 
@@ -90,10 +106,11 @@ function do_linux
 
 function show_help {
     cat << EOF
-Usage: $0 [--buildroot] [--linux] [--directfb2-test] [--all] [--external-root] [--clean-build] [--help]
+Usage: $0 [--buildroot] [--x11] [--linux] [--directfb2-test] [--all] [--external-root] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --x11               Build Buildroot with X11
   --directfb2-test     Build an ext4 guest disk with the DirectFB2 test payload
   --linux             Build Linux kernel
   --all               Build both Buildroot and Linux kernel
@@ -105,6 +122,7 @@ EOF
 }
 
 BUILD_BUILDROOT=0
+BUILD_X11=0
 BUILD_DIRECTFB_TEST=0
 BUILD_LINUX=0
 EXTERNAL_ROOT=0
@@ -114,6 +132,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --buildroot)
             BUILD_BUILDROOT=1
+            ;;
+        --x11)
+            BUILD_X11=1
             ;;
         --directfb2-test)
             BUILD_BUILDROOT=1
@@ -203,6 +224,11 @@ function do_extra_packages
 
 if [[ $BUILD_BUILDROOT -eq 0 && $BUILD_LINUX -eq 0 ]]; then
     echo "Error: No build target specified. Use --buildroot, --linux, or --all."
+    show_help
+fi
+
+if [[ $BUILD_X11 -eq 1 && $BUILD_BUILDROOT -eq 0 ]]; then
+    echo "Error: --x11 requires --buildroot to be specified."
     show_help
 fi
 
