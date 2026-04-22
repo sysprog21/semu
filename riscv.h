@@ -96,6 +96,11 @@ typedef struct __vm_internel vm_t;
 #define RV_PAGE_MASK (RV_PAGE_SIZE - 1)
 
 typedef struct {
+    uint32_t imm;
+    uint32_t fields;
+} decoded_insn_t;
+
+typedef struct {
     uint32_t tag;
     const uint8_t *base;
     bool valid;
@@ -143,6 +148,22 @@ struct __hart_internal {
     mmu_cache_set_t cache_load[8];
     /* 8-set × 2-way set-associative cache for store operations */
     mmu_cache_set_t cache_store[8];
+    uint32_t cache_load_last_vpn;
+    uint32_t cache_load_last_phys_ppn;
+    uint32_t cache_store_last_vpn;
+    uint32_t cache_store_last_phys_ppn;
+
+    /* Direct RAM access for the common translated-RAM fast path */
+    uint32_t *ram_base;
+    uint32_t ram_size;
+    uint32_t ram_load_last_page;
+    uint32_t *ram_load_last_ptr;
+    uint32_t ram_store_last_page;
+    uint32_t *ram_store_last_ptr;
+
+    /* Straight-line instruction execution state */
+    icache_block_t *seq_fetch_block;
+    uint32_t seq_fetch_next_pc;
 
     /* Supervisor state */
     bool s_mode;
@@ -210,6 +231,12 @@ void vm_init(hart_t *vm);
 
 /* Emulate the next instruction. This is a no-op if the error is already set. */
 void vm_step(hart_t *vm);
+
+/* Emulate up to "steps" instructions without per-instruction interrupt checks.
+ * Returns the number of attempted instructions, including one that raised an
+ * exception or fatal error.
+ */
+int vm_step_many(hart_t *vm, int steps);
 
 /* Raise a RISC-V exception. This is equivalent to setting vm->error to
  * ERR_EXCEPTION and setting the accompanying fields. It is provided as

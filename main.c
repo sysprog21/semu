@@ -32,6 +32,15 @@
 /* Forward declarations for coroutine support */
 static void wfi_handler(hart_t *hart);
 static void hart_exec_loop(void *arg);
+static int semu_step_chunk(emu_state_t *emu, hart_t *hart, int steps);
+static int semu_service_hart_step(emu_state_t *emu, hart_t *hart);
+static int semu_run_chunk(emu_state_t *emu, int steps);
+
+enum {
+    SEMU_SMP_SLICE_STEPS = 8,
+    SEMU_SINGLE_SLICE_STEPS = 128,
+    SEMU_SLIRP_SLICE_STEPS = 8,
+};
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -694,6 +703,8 @@ static void handle_options(int argc,
     do {                                          \
         hart->priv = emu;                         \
         hart->mhartid = id;                       \
+        hart->ram_base = (emu)->ram;              \
+        hart->ram_size = RAM_SIZE;                \
         hart->mem_fetch = mem_fetch;              \
         hart->mem_load = mem_load;                \
         hart->mem_store = mem_store;              \
@@ -935,33 +946,13 @@ static void hart_exec_loop(void *arg)
         /* Execute a batch of instructions before yielding.
          * Batch size of 64 balances throughput and responsiveness.
          */
-        for (int i = 0; i < 64; i++) {
-            emu_tick_peripherals(emu);
-            emu_update_timer_interrupt(hart);
-            emu_update_swi_interrupt(hart);
-
-            /* Execute one RISC-V instruction */
-            vm_step(hart);
-
-            /* Handle execution errors */
-            if (unlikely(hart->error)) {
-                if (hart->error == ERR_EXCEPTION &&
-                    hart->exc_cause == RV_EXC_ECALL_S) {
-                    /* S-mode ecall: handle SBI call and continue */
-                    handle_sbi_ecall(hart);
-                    continue;
+        for (int i = 0; i < 64; i += SEMU_SMP_SLICE_STEPS) {
+            for (int j = 0; j < SEMU_SMP_SLICE_STEPS; j++) {
+                int ret = semu_service_hart_step(emu, hart);
+                if (unlikely(ret)) {
+                    emu->stopped = true;
+                    goto cleanup;
                 }
-
-                if (hart->error == ERR_EXCEPTION) {
-                    /* Other exception: delegate to supervisor via trap */
-                    hart_trap(hart);
-                    continue;
-                }
-
-                /* Fatal error: report and stop emulation */
-                vm_error_report(hart);
-                emu->stopped = true;
-                goto cleanup;
             }
         }
 
@@ -980,27 +971,52 @@ static int semu_step(emu_state_t *emu)
      * RFENCE extension is completely implemented.
      */
     for (uint32_t i = 0; i < vm->n_hart; i++) {
-        emu_tick_peripherals(emu);
+        if (semu_service_hart_step(emu, vm->hart[i]))
+            return 2;
+    }
 
-        emu_update_timer_interrupt(vm->hart[i]);
-        emu_update_swi_interrupt(vm->hart[i]);
+    return 0;
+}
 
-        vm_step(vm->hart[i]);
-        if (likely(!vm->hart[i]->error))
-            continue;
+static int semu_service_hart_step(emu_state_t *emu, hart_t *hart)
+{
+    emu_tick_peripherals(emu);
+    emu_update_timer_interrupt(hart);
+    emu_update_swi_interrupt(hart);
+    return semu_step_chunk(emu, hart, 1);
+}
 
-        if (vm->hart[i]->error == ERR_EXCEPTION &&
-            vm->hart[i]->exc_cause == RV_EXC_ECALL_S) {
-            handle_sbi_ecall(vm->hart[i]);
+static int semu_run_chunk(emu_state_t *emu, int steps)
+{
+    hart_t *hart = emu->vm.hart[0];
+
+    emu_tick_peripherals(emu);
+    emu_update_timer_interrupt(hart);
+    emu_update_swi_interrupt(hart);
+    return semu_step_chunk(emu, hart, steps);
+}
+
+static int semu_step_chunk(emu_state_t *emu, hart_t *hart, int steps)
+{
+    while (steps > 0) {
+        int executed = vm_step_many(hart, steps);
+        steps -= executed;
+        if (likely(!hart->error))
+            return 0;
+
+        if (hart->error == ERR_EXCEPTION && hart->exc_cause == RV_EXC_ECALL_S) {
+            handle_sbi_ecall(hart);
+            if (unlikely(emu->stopped))
+                return 0;
             continue;
         }
 
-        if (vm->hart[i]->error == ERR_EXCEPTION) {
-            hart_trap(vm->hart[i]);
+        if (hart->error == ERR_EXCEPTION) {
+            hart_trap(hart);
             continue;
         }
 
-        vm_error_report(vm->hart[i]);
+        vm_error_report(hart);
         return 2;
     }
 
@@ -1399,15 +1415,18 @@ static int semu_run(emu_state_t *emu)
             }
             slirp_pollfds_poll(usr->slirp, (pollout <= 0),
                                semu_slirp_get_revents, usr);
-            for (i = 0; i < SLIRP_POLL_INTERVAL; i++) {
-                ret = semu_step(emu);
+            for (i = 0; i < SLIRP_POLL_INTERVAL; i += SEMU_SLIRP_SLICE_STEPS) {
+                int steps =
+                    MIN(SEMU_SLIRP_SLICE_STEPS, SLIRP_POLL_INTERVAL - i);
+
+                ret = semu_run_chunk(emu, steps);
                 if (ret)
                     return ret;
             }
         } else
 #endif
         {
-            ret = semu_step(emu);
+            ret = semu_run_chunk(emu, SEMU_SINGLE_SLICE_STEPS);
             if (ret)
                 return ret;
         }
