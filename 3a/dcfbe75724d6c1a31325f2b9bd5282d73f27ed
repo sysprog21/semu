@@ -1,0 +1,77 @@
+main.c
+  78c47593f48bf47c 1419-1423
+riscv.c
+  0fbe65e4fc073a13 258-280,289-290,303-304,306-309,342,344-345,377-384,1474-1497
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "3adcfbe75724d6c1a31325f2b9bd5282d73f27ed",
+  "prompts": {
+    "0fbe65e4fc073a13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd8ebd62-fb40-4b89-8cfd-2775b01d946c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 534,
+      "total_deletions": 11,
+      "accepted_lines": 18,
+      "overriden_lines": 0
+    },
+    "4697bed1d0202b4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019db692-ee14-7463-9512-1fd7999db28c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 6,
+      "accepted_lines": 0,
+      "overriden_lines": 3
+    },
+    "78c47593f48bf47c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019db624-ced1-71e3-a360-5773cba7f47b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 2,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "858f898bb52442ce": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019db618-1938-7fc1-8217-cd733faff7f0",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 816,
+      "total_deletions": 0,
+      "accepted_lines": 157,
+      "overriden_lines": 0
+    },
+    "f6060c237a46cb93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019db619-c499-7f52-914c-c540bffeb24e",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 4,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}
