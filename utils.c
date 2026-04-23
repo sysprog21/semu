@@ -26,6 +26,8 @@ bool boot_complete = false;
 static double ticks_increment;
 static double boot_ticks;
 
+#define SEMU_TIMER_BOOT_COEFF 1.744e8
+
 /* Timer calibration statistics */
 static uint64_t timer_call_count = 0;
 static int timer_n_harts = 1;
@@ -110,7 +112,7 @@ static uint64_t semu_timer_clocksource(semu_timer_t *timer)
         /* Output timer calibration statistics (only when SEMU_TIMER_STATS is
          * defined) */
         double actual_coefficient = (double) timer_call_count / timer_n_harts;
-        double current_coefficient = 1.744e8;
+        double current_coefficient = SEMU_TIMER_BOOT_COEFF;
         double recommended_coefficient = actual_coefficient;
 
         fprintf(stderr, "\n[Timer Calibration Statistics]\n");
@@ -163,8 +165,8 @@ void semu_timer_init(semu_timer_t *timer, uint64_t freq, int n_harts)
      * - Verification measurement: 1.744 × 10^8 (error: 2.85%)
      * - Final coefficient: 1.744 × 10^8 (based on verification)
      */
-    ticks_increment =
-        (SEMU_BOOT_TARGET_TIME * CLOCK_FREQ) / (1.744 * 1e8 * n_harts);
+    ticks_increment = (SEMU_BOOT_TARGET_TIME * CLOCK_FREQ) /
+                      (SEMU_TIMER_BOOT_COEFF * n_harts);
 }
 
 uint64_t semu_timer_get(semu_timer_t *timer)
