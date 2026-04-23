@@ -359,9 +359,9 @@ static inline sbi_ret_t handle_sbi_ecall_TIMER(hart_t *hart, int32_t fid)
             (((uint64_t) hart->x_regs[RV_R_A1]) << 32) |
             (uint64_t) (hart->x_regs[RV_R_A0]);
         hart->sip &= ~RV_INT_STI_BIT;
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     default:
-        return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
+        return (sbi_ret_t) {SBI_ERR_NOT_SUPPORTED, 0};
     }
 }
 
@@ -373,9 +373,9 @@ static inline sbi_ret_t handle_sbi_ecall_RST(hart_t *hart, int32_t fid)
         fprintf(stderr, "system reset: type=%u, reason=%u\n",
                 hart->x_regs[RV_R_A0], hart->x_regs[RV_R_A1]);
         data->stopped = true;
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     default:
-        return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
+        return (sbi_ret_t) {SBI_ERR_NOT_SUPPORTED, 0};
     }
 }
 
@@ -395,13 +395,13 @@ static inline sbi_ret_t handle_sbi_ecall_HSM(hart_t *hart, int32_t fid)
         vm->hart[hartid]->x_regs[RV_R_A1] = opaque;
         vm->hart[hartid]->pc = start_addr;
         vm->hart[hartid]->s_mode = true;
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     case SBI_HSM__HART_STOP:
         hart->hsm_status = SBI_HSM_STATE_STOPPED;
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     case SBI_HSM__HART_GET_STATUS:
         hartid = hart->x_regs[RV_R_A0];
-        return (sbi_ret_t){SBI_SUCCESS, vm->hart[hartid]->hsm_status};
+        return (sbi_ret_t) {SBI_SUCCESS, vm->hart[hartid]->hsm_status};
     case SBI_HSM__HART_SUSPEND:
         suspend_type = hart->x_regs[RV_R_A0];
         resume_addr = hart->x_regs[RV_R_A1];
@@ -415,11 +415,11 @@ static inline sbi_ret_t handle_sbi_ecall_HSM(hart_t *hart, int32_t fid)
             hart->hsm_resume_pc = resume_addr;
             hart->hsm_resume_opaque = opaque;
         }
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     default:
-        return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
+        return (sbi_ret_t) {SBI_ERR_NOT_SUPPORTED, 0};
     }
-    return (sbi_ret_t){SBI_ERR_FAILED, 0};
+    return (sbi_ret_t) {SBI_ERR_FAILED, 0};
 }
 
 static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
@@ -438,10 +438,10 @@ static inline sbi_ret_t handle_sbi_ecall_IPI(hart_t *hart, int32_t fid)
                 data->sswi.ssip[i] = hart_mask & 1;
         }
 
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
         break;
     default:
-        return (sbi_ret_t){SBI_ERR_FAILED, 0};
+        return (sbi_ret_t) {SBI_ERR_FAILED, 0};
     }
 }
 
@@ -458,7 +458,7 @@ static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
     switch (fid) {
     case SBI_RFENCE__I:
         /* Instruction cache flush - ignored in interpreter mode */
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     case SBI_RFENCE__VMA:
     case SBI_RFENCE__VMA_ASID:
         /* RFENCE.VMA and RFENCE.VMA.ASID both use the same parameters:
@@ -484,15 +484,15 @@ static inline sbi_ret_t handle_sbi_ecall_RFENCE(hart_t *hart, int32_t fid)
                     mmu_invalidate_range(hart->vm->hart[i], start_addr, size);
             }
         }
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     case SBI_RFENCE__GVMA_VMID:
     case SBI_RFENCE__GVMA:
     case SBI_RFENCE__VVMA_ASID:
     case SBI_RFENCE__VVMA:
         /* Hypervisor-related RFENCE operations - not implemented */
-        return (sbi_ret_t){SBI_SUCCESS, 0};
+        return (sbi_ret_t) {SBI_SUCCESS, 0};
     default:
-        return (sbi_ret_t){SBI_ERR_FAILED, 0};
+        return (sbi_ret_t) {SBI_ERR_FAILED, 0};
     }
 }
 
@@ -504,26 +504,26 @@ static inline sbi_ret_t handle_sbi_ecall_BASE(hart_t *hart, int32_t fid)
 {
     switch (fid) {
     case SBI_BASE__GET_SBI_IMPL_ID:
-        return (sbi_ret_t){SBI_SUCCESS, SBI_IMPL_ID};
+        return (sbi_ret_t) {SBI_SUCCESS, SBI_IMPL_ID};
     case SBI_BASE__GET_SBI_IMPL_VERSION:
-        return (sbi_ret_t){SBI_SUCCESS, SBI_IMPL_VERSION};
+        return (sbi_ret_t) {SBI_SUCCESS, SBI_IMPL_VERSION};
     case SBI_BASE__GET_MVENDORID:
-        return (sbi_ret_t){SBI_SUCCESS, RV_MVENDORID};
+        return (sbi_ret_t) {SBI_SUCCESS, RV_MVENDORID};
     case SBI_BASE__GET_MARCHID:
-        return (sbi_ret_t){SBI_SUCCESS, RV_MARCHID};
+        return (sbi_ret_t) {SBI_SUCCESS, RV_MARCHID};
     case SBI_BASE__GET_MIMPID:
-        return (sbi_ret_t){SBI_SUCCESS, RV_MIMPID};
+        return (sbi_ret_t) {SBI_SUCCESS, RV_MIMPID};
     case SBI_BASE__GET_SBI_SPEC_VERSION:
-        return (sbi_ret_t){SBI_SUCCESS, (2 << 24) | 0}; /* version 2.0 */
+        return (sbi_ret_t) {SBI_SUCCESS, (2 << 24) | 0}; /* version 2.0 */
     case SBI_BASE__PROBE_EXTENSION: {
         int32_t eid = (int32_t) hart->x_regs[RV_R_A0];
         bool available = eid == SBI_EID_BASE || eid == SBI_EID_TIMER ||
                          eid == SBI_EID_RST || eid == SBI_EID_HSM ||
                          eid == SBI_EID_IPI || eid == SBI_EID_RFENCE;
-        return (sbi_ret_t){SBI_SUCCESS, available};
+        return (sbi_ret_t) {SBI_SUCCESS, available};
     }
     default:
-        return (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
+        return (sbi_ret_t) {SBI_ERR_NOT_SUPPORTED, 0};
     }
 }
 
@@ -553,7 +553,7 @@ static void handle_sbi_ecall(hart_t *hart)
         SBI_HANDLE(RFENCE);
         break;
     default:
-        ret = (sbi_ret_t){SBI_ERR_NOT_SUPPORTED, 0};
+        ret = (sbi_ret_t) {SBI_ERR_NOT_SUPPORTED, 0};
     }
     hart->x_regs[RV_R_A0] = (uint32_t) ret.error;
     hart->x_regs[RV_R_A1] = (uint32_t) ret.value;
@@ -1249,7 +1249,7 @@ static int semu_run(emu_state_t *emu)
 #ifdef __APPLE__
             /* macOS: use kqueue with EVFILT_TIMER */
             if (kq >= 0 && pfd_count < poll_capacity && harts_active) {
-                pfds[pfd_count] = (struct pollfd){kq, POLLIN, 0};
+                pfds[pfd_count] = (struct pollfd) {kq, POLLIN, 0};
                 timer_index = (int) pfd_count;
                 pfd_count++;
             }
@@ -1257,7 +1257,7 @@ static int semu_run(emu_state_t *emu)
             /* Linux: use timerfd */
             if (wfi_timer_fd >= 0 && pfd_count < poll_capacity &&
                 harts_active) {
-                pfds[pfd_count] = (struct pollfd){wfi_timer_fd, POLLIN, 0};
+                pfds[pfd_count] = (struct pollfd) {wfi_timer_fd, POLLIN, 0};
                 timer_index = (int) pfd_count;
                 pfd_count++;
             }
@@ -1279,7 +1279,7 @@ static int semu_run(emu_state_t *emu)
                              (idle_harts == 0) || emu->uart.has_waiting_hart;
             if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity &&
                 need_uart) {
-                pfds[pfd_count] = (struct pollfd){emu->uart.in_fd, POLLIN, 0};
+                pfds[pfd_count] = (struct pollfd) {emu->uart.in_fd, POLLIN, 0};
                 pfd_count++;
             }
 
@@ -1521,7 +1521,7 @@ static int semu_run_debug(emu_state_t *emu)
 
     emu->curr_cpuid = 0;
     if (!gdbstub_init(&gdbstub, &gdbstub_ops,
-                      (arch_info_t){
+                      (arch_info_t) {
                           .smp = vm->n_hart,
                           .reg_num = 33,
                           .target_desc = TARGET_RV32,

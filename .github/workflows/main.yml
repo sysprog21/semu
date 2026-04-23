@@ -140,13 +140,13 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-apt-clang-format-18
+        key: ${{ runner.os }}-apt-clang-format-20
         restore-keys: |
           ${{ runner.os }}-apt-
     - name: Install clang-format
       run: |
             sudo apt-get update
-            sudo apt-get install -q -y clang-format-18
+            sudo apt-get install -q -y clang-format-20
       shell: bash
       timeout-minutes: 5
     - name: Setup reviewdog
@@ -178,7 +178,7 @@ jobs:
         trap cleanup_files EXIT INT TERM
 
         # Apply clang-format in-place to generate diff
-        clang-format-18 -i "${SOURCES[@]}"
+        clang-format-20 -i "${SOURCES[@]}"
 
         # Generate diff and pipe to reviewdog
         # Note: reviewdog exit code doesn't affect cleanup due to trap

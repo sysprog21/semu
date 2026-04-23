@@ -345,111 +345,114 @@ typedef struct {
  */
 static uint32_t flush_stream_id = 0;
 
-#define VSND_TX_QUEUE_BODY(WRITE)                                            \
-    do {                                                                     \
-        /* A PCM I/O message uses at least 3 virtqueue descriptors to        \
-         * represent a PCM data of a period size.                            \
-         * The first part contains one descriptor as follows:                \
-         *   struct virtio_snd_pcm_xfer                                      \
-         * The second part contains one or more descriptors                  \
-         * representing PCM frames.                                          \
-         * the last part contains one descriptor as follows:                 \
-         *   struct virtio_snd_pcm_status                                    \
-         */                                                                  \
-        virtq_desc_queue_node_t *node;                                       \
-        struct list_head q;                                                  \
-        INIT_LIST_HEAD(&q);                                                  \
-                                                                             \
-        /* Collect the descriptors */                                        \
-        int cnt = 0;                                                         \
-        for (;;) {                                                           \
-            /* The size of the `struct virtq_desc` is 4 words */             \
-            const uint32_t *desc =                                           \
-                &vsnd->ram[queue->QueueDesc + desc_idx * 4];                 \
-                                                                             \
-            /* Retrieve the fields of current descriptor */                  \
-            node = (virtq_desc_queue_node_t *) malloc(sizeof(*node));        \
-            node->vq_desc.addr = desc[0];                                    \
-            node->vq_desc.len = desc[2];                                     \
-            node->vq_desc.flags = desc[3];                                   \
-            list_push(&node->q, &q);                                         \
-            desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */           \
-                                                                             \
-            cnt++;                                                           \
-                                                                             \
-            /* Leave the loop if next-flag is not set */                     \
-            if (!(desc[3] & VIRTIO_DESC_F_NEXT))                             \
-                break;                                                       \
-        }                                                                    \
-                                                                             \
-        int idx = 0;                                                         \
-        uint32_t stream_id = 0; /* Explicitly set the stream_id */           \
-        uintptr_t base = (uintptr_t) vsnd->ram;                              \
-        uint32_t ret_len = 0;                                                \
-        uint8_t bad_msg_err = 0;                                             \
-        list_for_each_entry (node, &q, q) {                                  \
-            uint32_t addr = node->vq_desc.addr;                              \
-            uint32_t len = node->vq_desc.len;                                \
-            if (idx == 0) { /* the first descriptor */                       \
-                const virtio_snd_pcm_xfer_t *request =                       \
-                    (virtio_snd_pcm_xfer_t *) (base + addr);                 \
-                stream_id = request->stream_id;                              \
-                IIF(WRITE)                                                   \
-                (/* enqueue frames */                                        \
-                 bad_msg_err = stream_id >= VSND_DEV_CNT_MAX ? 1 : 0;        \
-                 , /* flush queue */                                         \
-                 bad_msg_err = stream_id != flush_stream_id                  \
-                                   ? 1                                       \
-                                   : 0; /* select only stream_id 0 */        \
-                 ) goto early_continue;                                      \
-            } else if (idx == cnt - 1) { /* the last descriptor */           \
-                IIF(WRITE)                                                   \
-                (  /* enqueue frames */                                      \
-                 , /* flush queue */                                         \
-                 if (bad_msg_err == 1) {                                     \
-                     fprintf(stderr, "ignore flush stream_id %" PRIu32 "\n", \
-                             stream_id);                                     \
-                     goto early_continue;                                    \
-                 } fprintf(stderr, "flush stream_id %" PRIu32 "\n",          \
-                           stream_id);) virtio_snd_pcm_status_t *response =  \
-                    (virtio_snd_pcm_status_t *) (base + addr);               \
-                response->status =                                           \
-                    bad_msg_err ? VIRTIO_SND_S_IO_ERR : VIRTIO_SND_S_OK;     \
-                response->latency_bytes = ret_len;                           \
-                *plen = sizeof(*response);                                   \
-                goto early_continue;                                         \
-            }                                                                \
-                                                                             \
-            IIF(WRITE)                                                       \
-            (/* enqueue frames */                                            \
-             void *payload = (void *) (base + addr); if (bad_msg_err == 0)   \
-                 __virtio_snd_frame_enqueue(payload, len, stream_id);        \
-             , /* flush queue */                                             \
-             (void) stream_id;                                               \
-             /* Suppress unused variable warning. */) ret_len += len;        \
-                                                                             \
-        early_continue:                                                      \
-            idx++;                                                           \
-        }                                                                    \
-                                                                             \
-        if (bad_msg_err != 0)                                                \
-            goto finally;                                                    \
-        IIF(WRITE)                                                           \
-        (/* enque frames */                                                  \
-         virtio_snd_prop_t *props = &vsnd_props[stream_id];                  \
-         props->lock.buf_ev_notify++;                                        \
-         pthread_cond_signal(&props->lock.readable);, /* flush queue */      \
-         )                                                                   \
-                                                                             \
-            /* Tear down the descriptor list and free space. */              \
-            virtq_desc_queue_node_t *tmp = NULL;                             \
-        list_for_each_entry_safe (node, tmp, &q, q) {                        \
-            list_del(&node->q);                                              \
-            free(node);                                                      \
-        }                                                                    \
-                                                                             \
-    finally:                                                                 \
-        return 0;                                                            \
+#define VSND_TX_QUEUE_BODY(WRITE)                                              \
+    do {                                                                       \
+        /* A PCM I/O message uses at least 3 virtqueue descriptors to          \
+         * represent a PCM data of a period size.                              \
+         * The first part contains one descriptor as follows:                  \
+         *   struct virtio_snd_pcm_xfer                                        \
+         * The second part contains one or more descriptors                    \
+         * representing PCM frames.                                            \
+         * the last part contains one descriptor as follows:                   \
+         *   struct virtio_snd_pcm_status                                      \
+         */                                                                    \
+        virtq_desc_queue_node_t *node;                                         \
+        struct list_head q;                                                    \
+        INIT_LIST_HEAD(&q);                                                    \
+                                                                               \
+        /* Collect the descriptors */                                          \
+        int cnt = 0;                                                           \
+        for (;;) {                                                             \
+            /* The size of the `struct virtq_desc` is 4 words */               \
+            const uint32_t *desc =                                             \
+                &vsnd->ram[queue->QueueDesc + desc_idx * 4];                   \
+                                                                               \
+            /* Retrieve the fields of current descriptor */                    \
+            node = (virtq_desc_queue_node_t *) malloc(sizeof(*node));          \
+            node->vq_desc.addr = desc[0];                                      \
+            node->vq_desc.len = desc[2];                                       \
+            node->vq_desc.flags = desc[3];                                     \
+            list_push(&node->q, &q);                                           \
+            desc_idx = desc[3] >> 16; /* vq_desc[desc_cnt].next */             \
+                                                                               \
+            cnt++;                                                             \
+                                                                               \
+            /* Leave the loop if next-flag is not set */                       \
+            if (!(desc[3] & VIRTIO_DESC_F_NEXT))                               \
+                break;                                                         \
+        }                                                                      \
+                                                                               \
+        int idx = 0;                                                           \
+        uint32_t stream_id = 0; /* Explicitly set the stream_id */             \
+        uintptr_t base = (uintptr_t) vsnd->ram;                                \
+        uint32_t ret_len = 0;                                                  \
+        uint8_t bad_msg_err = 0;                                               \
+        list_for_each_entry (node, &q, q) {                                    \
+            uint32_t addr = node->vq_desc.addr;                                \
+            uint32_t len = node->vq_desc.len;                                  \
+            if (idx == 0) { /* the first descriptor */                         \
+                const virtio_snd_pcm_xfer_t *request =                         \
+                    (virtio_snd_pcm_xfer_t *) (base + addr);                   \
+                stream_id = request->stream_id;                                \
+                IIF(WRITE)(/* enqueue frames */                                \
+                           bad_msg_err =                                       \
+                               stream_id >= VSND_DEV_CNT_MAX ? 1 : 0;          \
+                           , /* flush queue */                                 \
+                           bad_msg_err =                                       \
+                               stream_id != flush_stream_id                    \
+                                   ? 1                                         \
+                                   : 0; /* select only stream_id 0 */          \
+                           ) goto early_continue;                              \
+            } else if (idx == cnt - 1) { /* the last descriptor */             \
+                IIF(WRITE)(              /* enqueue frames */                  \
+                           ,             /* flush queue */                     \
+                           if (bad_msg_err == 1) {                             \
+                               fprintf(stderr,                                 \
+                                       "ignore flush stream_id %" PRIu32 "\n", \
+                                       stream_id);                             \
+                               goto early_continue;                            \
+                           } fprintf(stderr, "flush stream_id %" PRIu32 "\n",  \
+                                     stream_id);)                              \
+                    virtio_snd_pcm_status_t *response =                        \
+                        (virtio_snd_pcm_status_t *) (base + addr);             \
+                response->status =                                             \
+                    bad_msg_err ? VIRTIO_SND_S_IO_ERR : VIRTIO_SND_S_OK;       \
+                response->latency_bytes = ret_len;                             \
+                *plen = sizeof(*response);                                     \
+                goto early_continue;                                           \
+            }                                                                  \
+                                                                               \
+            IIF(WRITE)(/* enqueue frames */                                    \
+                       void *payload = (void *) (base + addr);                 \
+                       if (bad_msg_err == 0) __virtio_snd_frame_enqueue(       \
+                           payload, len, stream_id);                           \
+                       , /* flush queue */                                     \
+                       (void) stream_id;                                       \
+                       /* Suppress unused variable warning. */) ret_len +=     \
+                len;                                                           \
+                                                                               \
+        early_continue:                                                        \
+            idx++;                                                             \
+        }                                                                      \
+                                                                               \
+        if (bad_msg_err != 0)                                                  \
+            goto finally;                                                      \
+        IIF(WRITE)(/* enque frames */                                          \
+                   virtio_snd_prop_t *props = &vsnd_props[stream_id];          \
+                   props->lock.buf_ev_notify++;                                \
+                   pthread_cond_signal(&props->lock.readable);                 \
+                   , /* flush queue */                                         \
+                   )                                                           \
+                                                                               \
+            /* Tear down the descriptor list and free space. */                \
+            virtq_desc_queue_node_t *tmp = NULL;                               \
+        list_for_each_entry_safe (node, tmp, &q, q) {                          \
+            list_del(&node->q);                                                \
+            free(node);                                                        \
+        }                                                                      \
+                                                                               \
+    finally:                                                                   \
+        return 0;                                                              \
     } while (0)
 
 static int virtio_snd_tx_desc_handler(virtio_snd_state_t *vsnd,
