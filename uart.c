@@ -81,10 +81,35 @@ void u8250_check_ready(u8250_state_t *uart)
         uart->in_ready = true;
 }
 
+void u8250_flush_out(u8250_state_t *uart)
+{
+    uint8_t written = 0;
+    while (written < uart->out_buf_len) {
+        ssize_t n = write(uart->out_fd, uart->out_buf + written,
+                          uart->out_buf_len - written);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR)
+                continue;
+            fprintf(stderr, "failed to write UART output: %s\n",
+                    strerror(errno));
+            break;
+        }
+        written += n;
+    }
+    if (written < uart->out_buf_len) {
+        uart->out_buf_len -= written;
+        memmove(uart->out_buf, uart->out_buf + written, uart->out_buf_len);
+    } else {
+        uart->out_buf_len = 0;
+    }
+}
+
 static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
 {
-    if (write(uart->out_fd, &value, 1) < 1)
-        fprintf(stderr, "failed to write UART output: %s\n", strerror(errno));
+    uart->out_buf[uart->out_buf_len++] = value;
+    if (value == '\n' || value == '\r' || value == ':' || value == '#' ||
+        value == '$' || uart->out_buf_len >= sizeof(uart->out_buf))
+        u8250_flush_out(uart);
 }
 
 /* Wait for UART input using coroutine yield (SMP mode only)
@@ -115,6 +140,14 @@ static void u8250_wait_for_input(u8250_state_t *uart)
 
 static uint8_t u8250_handle_in(u8250_state_t *uart)
 {
+    /* Flush any buffered output before reading input.  The guest has
+     * finished printing (e.g. a shell prompt like "# ") and is now
+     * waiting for a keystroke.  Without this flush the trailing
+     * characters after the last flush-trigger stay invisible to the
+     * host, breaking expect-style automation.
+     */
+    u8250_flush_out(uart);
+
     uint8_t value = 0;
     u8250_check_ready(uart);
 

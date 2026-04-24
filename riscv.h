@@ -45,7 +45,8 @@ typedef struct {
 /* Load/store cache: stores physical page numbers (not pointers) */
 typedef struct {
     uint32_t n_pages;
-    uint32_t phys_ppn; /* Physical page number */
+    uint32_t phys_ppn;         /* Physical page number */
+    uintptr_t data_minus_addr; /* host_ptr - guest_addr; 0 if not RAM */
 #ifdef MMU_CACHE_STATS
     uint64_t hits;
     uint64_t misses;
@@ -102,6 +103,7 @@ typedef struct {
 
 typedef struct {
     uint32_t tag;
+    uint32_t epoch;
     const uint8_t *base;
     bool valid;
 } icache_block_t;
@@ -111,49 +113,29 @@ typedef struct {
 } icache_t;
 
 struct __hart_internal {
-    icache_t icache;
+    /* Hot path: accessed every instruction (cache lines 0-4) */
     uint32_t x_regs[32];
-
-    /* LR reservation virtual address. last bit is 1 if valid */
+    uint32_t pc;
+    uint32_t current_pc;
+    uint64_t instret;
+    vm_error_t error;
+    uint32_t exc_cause, exc_val;
     uint32_t lr_reservation;
 
-    /* Assumed to contain an aligned address at all times */
-    uint32_t pc;
-
-    /* Address of last instruction that began execution */
-    uint32_t current_pc;
-
-    /* 'instructions executed' 64-bit counter serves as a real-time clock,
-     * instruction-retired counter, and cycle counter. It is currently
-     * utilized in these capacities and should not be modified between logical
-     * resets.
-     */
-    uint64_t instret;
-    semu_timer_t time;
-    /* Instruction execution state must be set to "NONE" for instruction
-     * execution to continue. If the state is not "NONE," the vm_step()
-     * function will exit.
-     */
-    vm_error_t error;
-
-    /* If the error value is ERR_EXCEPTION, the specified values will be used
-     * for the scause and stval registers if they are turned into a trap.
-     * Refer to the RISC-V specification for the meaning of these values.
-     */
-    uint32_t exc_cause, exc_val;
-
-    /* 2-entry direct-mapped with hash-based indexing */
-    mmu_fetch_cache_t cache_fetch[2];
-    /* 8-set × 2-way set-associative cache with 3-bit parity hash indexing */
-    mmu_cache_set_t cache_load[8];
-    /* 8-set × 2-way set-associative cache for store operations */
-    mmu_cache_set_t cache_store[8];
+    /* Load/store TLB last-entry fast path */
     uint32_t cache_load_last_vpn;
     uint32_t cache_load_last_phys_ppn;
+    uintptr_t cache_load_last_data_minus_addr;
     uint32_t cache_store_last_vpn;
     uint32_t cache_store_last_phys_ppn;
+    uintptr_t cache_store_last_data_minus_addr;
 
-    /* Direct RAM access for the common translated-RAM fast path */
+    /* Instruction fetch sequence state */
+    icache_block_t *seq_fetch_block;
+    uint32_t seq_fetch_next_pc;
+    uint32_t icache_epoch;
+
+    /* Direct RAM access */
     uint32_t *ram_base;
     uint32_t ram_size;
     uint32_t ram_load_last_page;
@@ -161,65 +143,53 @@ struct __hart_internal {
     uint32_t ram_store_last_page;
     uint32_t *ram_store_last_ptr;
 
-    /* Straight-line instruction execution state */
-    icache_block_t *seq_fetch_block;
-    uint32_t seq_fetch_next_pc;
+    /* Warm path: interrupt check fields */
+    bool sstatus_sie;
+    bool s_mode;
+    uint32_t sie;
+    uint32_t sip;
+
+    semu_timer_t time;
 
     /* Supervisor state */
-    bool s_mode;
-    bool sstatus_spp; /**< state saved at trap */
+    bool sstatus_spp;
     bool sstatus_spie;
     uint32_t sepc;
-
-    /* WFI state tracking for CPU usage optimization */
     bool in_wfi;
     uint32_t scause;
     uint32_t stval;
-    bool sstatus_mxr; /**< alter MMU access rules */
+    bool sstatus_mxr;
     bool sstatus_sum;
-    bool sstatus_sie; /**< interrupt state */
-    uint32_t sie;
-    uint32_t sip;
-    uint32_t stvec_addr; /**< trap config */
+    uint32_t stvec_addr;
     bool stvec_vectored;
-    uint32_t sscratch; /**< misc */
+    uint32_t sscratch;
     uint32_t scounteren;
-    uint32_t satp; /**< MMU */
+    uint32_t satp;
     uint32_t *page_table;
 
     /* Machine state */
     uint32_t mhartid;
 
-    void *priv; /**< environment supplied */
+    void *priv;
 
-    /* WFI (Wait-For-Interrupt) callback for power management.
-     * If NULL, WFI becomes a no-op. If set, called when WFI instruction
-     * is executed. Used for coroutine-based scheduling in SMP mode.
-     */
     void (*wfi)(hart_t *vm);
 
-    /* Memory access sets the vm->error to indicate failure. On successful
-     * access, it reads or writes the specified "value".
-     */
     void (*mem_fetch)(hart_t *vm, uint32_t n_pages, uint32_t **page_addr);
     void (*mem_load)(hart_t *vm, uint32_t addr, uint8_t width, uint32_t *value);
     void (*mem_store)(hart_t *vm, uint32_t addr, uint8_t width, uint32_t value);
-
-    /* Pre-validate whether the required page number can accommodate a page
-     * table. If it is not a valid page, it returns NULL. The function returns
-     * a uint32_t * to the page if valid.
-     */
     uint32_t *(*mem_page_table)(const hart_t *vm, uint32_t ppn);
 
-    /* Point to the associated vm_t for better access to other harts. For
-     * example, if hart 0 needs to send an IPI to hart 1, the IPI signal can be
-     * sent to hart 1 through the *vm pointer.
-     */
     vm_t *vm;
     int32_t hsm_status;
     bool hsm_resume_is_ret;
     int32_t hsm_resume_pc;
     int32_t hsm_resume_opaque;
+
+    /* Cold: set-associative caches */
+    mmu_fetch_cache_t cache_fetch[16];
+    mmu_cache_set_t cache_load[32];
+    mmu_cache_set_t cache_store[32];
+    icache_t icache;
 };
 
 struct __vm_internel {
@@ -259,3 +229,6 @@ void mmu_invalidate(hart_t *vm);
 
 /* Invalidate MMU caches for a specific virtual address range */
 void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size);
+
+/* Invalidate instruction cache (FENCE.I) */
+void vm_fence_i(hart_t *vm);

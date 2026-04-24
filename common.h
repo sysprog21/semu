@@ -1,9 +1,12 @@
+#ifndef SEMU_COMMON_H
+#define SEMU_COMMON_H
+
 #pragma once
 
 #include "feature.h"
 
-#define unlikely(x) __builtin_expect((x), 0)
-#define likely(x) __builtin_expect((x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#define likely(x) __builtin_expect(!!(x), 1)
 
 #define UNUSED __attribute__((unused))
 
@@ -52,3 +55,5 @@ static inline int ilog2(int x)
 #define IIF_0(t, ...) __VA_ARGS__
 /* run the 1st parameter */
 #define IIF_1(t, ...) t
+
+#endif /* SEMU_COMMON_H */
