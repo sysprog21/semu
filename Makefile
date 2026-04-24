@@ -161,6 +161,10 @@ LDFLAGS += -lm
 BIN = semu
 all: $(BIN) minimal.dtb
 
+.PHONY: bench-login
+bench-login: $(BIN) minimal.dtb
+	$(Q)/usr/bin/time -p expect scripts/bench-login.expect ./$(BIN) -k Image -b minimal.dtb -i rootfs.cpio
+
 OBJS := \
 	riscv.o \
 	ram.o \

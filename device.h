@@ -60,6 +60,9 @@ typedef struct {
     /* I/O handling */
     int in_fd, out_fd;
     bool in_ready;
+    /* Output buffering */
+    uint8_t out_buf[128];
+    uint8_t out_buf_len;
     /* Coroutine support for input waiting (SMP mode) */
     uint32_t waiting_hart_id; /**< Hart ID waiting for input */
     bool has_waiting_hart;    /**< true if a hart is yielding for input */
@@ -77,6 +80,7 @@ void u8250_write(hart_t *core,
                  uint8_t width,
                  uint32_t value);
 void u8250_check_ready(u8250_state_t *uart);
+void u8250_flush_out(u8250_state_t *uart);
 void capture_keyboard_input();
 
 /* virtio-net */

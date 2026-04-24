@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common.h"
@@ -248,33 +249,50 @@ static inline void decode_insn(decoded_insn_t *decoded, uint32_t insn)
 
 static inline void icache_invalidate_all(hart_t *vm)
 {
-    memset(&vm->icache, 0, sizeof(vm->icache));
+    vm->icache_epoch++;
+    if (unlikely(vm->icache_epoch == 0)) {
+        memset(&vm->icache, 0, sizeof(vm->icache));
+        vm->icache_epoch = 1;
+    }
     vm->seq_fetch_block = NULL;
     vm->seq_fetch_next_pc = 0xFFFFFFFF;
+}
+
+static inline bool icache_block_valid(const hart_t *vm,
+                                      const icache_block_t *blk)
+{
+    return blk->valid && blk->epoch == vm->icache_epoch;
+}
+
+void vm_fence_i(hart_t *vm)
+{
+    icache_invalidate_all(vm);
 }
 
 /* virtual addressing */
 
 void mmu_invalidate(hart_t *vm)
 {
-    vm->cache_fetch[0].n_pages = 0xFFFFFFFF;
-    vm->cache_fetch[1].n_pages = 0xFFFFFFFF;
-    vm->cache_fetch[0].page_addr = NULL;
-    vm->cache_fetch[1].page_addr = NULL;
-    /* Invalidate all 8 sets × 2 ways for load cache */
-    for (int set = 0; set < 8; set++) {
+    for (int i = 0; i < 16; i++) {
+        vm->cache_fetch[i].n_pages = 0xFFFFFFFF;
+        vm->cache_fetch[i].page_addr = NULL;
+    }
+    /* Invalidate all 32 sets x 2 ways for load cache */
+    for (int set = 0; set < 32; set++) {
         for (int way = 0; way < 2; way++)
             vm->cache_load[set].ways[way].n_pages = 0xFFFFFFFF;
         vm->cache_load[set].lru = 0; /* Reset LRU to way 0 */
     }
-    /* Invalidate all 8 sets × 2 ways for store cache */
-    for (int set = 0; set < 8; set++) {
+    /* Invalidate all 32 sets x 2 ways for store cache */
+    for (int set = 0; set < 32; set++) {
         for (int way = 0; way < 2; way++)
             vm->cache_store[set].ways[way].n_pages = 0xFFFFFFFF;
         vm->cache_store[set].lru = 0; /* Reset LRU to way 0 */
     }
     vm->cache_load_last_vpn = 0xFFFFFFFF;
+    vm->cache_load_last_data_minus_addr = 0;
     vm->cache_store_last_vpn = 0xFFFFFFFF;
+    vm->cache_store_last_data_minus_addr = 0;
     icache_invalidate_all(vm);
     vm->ram_load_last_page = 0xFFFFFFFF;
     vm->ram_store_last_page = 0xFFFFFFFF;
@@ -309,8 +327,8 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
         end_addr = UINT32_MAX;
     uint32_t end_vpn = (uint32_t) end_addr >> RV_PAGE_SHIFT;
 
-    /* Invalidate fetch cache: 2 entry */
-    for (int i = 0; i < 2; i++) {
+    /* Invalidate fetch cache: 16 entries */
+    for (int i = 0; i < 16; i++) {
         if (vm->cache_fetch[i].n_pages >= start_vpn &&
             vm->cache_fetch[i].n_pages <= end_vpn) {
             vm->cache_fetch[i].n_pages = 0xFFFFFFFF;
@@ -321,7 +339,7 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
     /* Invalidate I-cache: 256 blocks */
     for (int i = 0; i < ICACHE_BLOCKS; i++) {
         icache_block_t *blk = &vm->icache.block[i];
-        if (!blk->valid)
+        if (!icache_block_valid(vm, blk))
             continue;
 
         uint32_t icache_vpn = (blk->tag << ICACHE_INDEX_BITS) | i;
@@ -330,8 +348,8 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
             blk->valid = false;
     }
 
-    /* Invalidate load cache: 8 sets × 2 ways */
-    for (int set = 0; set < 8; set++) {
+    /* Invalidate load cache: 32 sets x 2 ways */
+    for (int set = 0; set < 32; set++) {
         for (int way = 0; way < 2; way++) {
             if (vm->cache_load[set].ways[way].n_pages >= start_vpn &&
                 vm->cache_load[set].ways[way].n_pages <= end_vpn)
@@ -339,8 +357,8 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
         }
     }
 
-    /* Invalidate store cache: 8 sets × 2 ways */
-    for (int set = 0; set < 8; set++) {
+    /* Invalidate store cache: 32 sets x 2 ways */
+    for (int set = 0; set < 32; set++) {
         for (int way = 0; way < 2; way++) {
             if (vm->cache_store[set].ways[way].n_pages >= start_vpn &&
                 vm->cache_store[set].ways[way].n_pages <= end_vpn)
@@ -350,11 +368,15 @@ void mmu_invalidate_range(hart_t *vm, uint32_t start_addr, uint32_t size)
 
     /* Invalidate last-VPN fast-path caches */
     if (vm->cache_load_last_vpn >= start_vpn &&
-        vm->cache_load_last_vpn <= end_vpn)
+        vm->cache_load_last_vpn <= end_vpn) {
         vm->cache_load_last_vpn = 0xFFFFFFFF;
+        vm->cache_load_last_data_minus_addr = 0;
+    }
     if (vm->cache_store_last_vpn >= start_vpn &&
-        vm->cache_store_last_vpn <= end_vpn)
+        vm->cache_store_last_vpn <= end_vpn) {
         vm->cache_store_last_vpn = 0xFFFFFFFF;
+        vm->cache_store_last_data_minus_addr = 0;
+    }
 }
 
 /* Pre-verify the root page table to minimize page table access during
@@ -471,12 +493,12 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
     if (likely(addr == vm->seq_fetch_next_pc && vm->seq_fetch_block != NULL)) {
         icache_block_t *seq = vm->seq_fetch_block;
         uint32_t ofs = addr & ICACHE_BLOCK_MASK;
-
-        if (likely(seq->valid && seq->tag == (addr >> (ICACHE_OFFSET_BITS +
-                                                       ICACHE_INDEX_BITS)))) {
+        if (likely(icache_block_valid(vm, seq) &&
+                   seq->tag ==
+                       (addr >> (ICACHE_OFFSET_BITS + ICACHE_INDEX_BITS)))) {
 #ifdef MMU_CACHE_STATS
             uint32_t vpn = addr >> RV_PAGE_SHIFT;
-            uint32_t index = __builtin_parity(vpn) & 0x1;
+            uint32_t index = (vpn ^ (vpn >> 4)) & 0xF;
             vm->cache_fetch[index].total_fetch++;
             vm->cache_fetch[index].icache_hits++;
 #endif
@@ -492,14 +514,14 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
     uint32_t tag = addr >> (ICACHE_OFFSET_BITS + ICACHE_INDEX_BITS);
     icache_block_t *blk = &vm->icache.block[idx];
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
-    uint32_t index = __builtin_parity(vpn) & 0x1;
+    uint32_t index = (vpn ^ (vpn >> 4)) & 0xF;
 
 #ifdef MMU_CACHE_STATS
     vm->cache_fetch[index].total_fetch++;
 #endif
 
     /* I-cache lookup */
-    if (likely(blk->valid && blk->tag == tag)) {
+    if (likely(icache_block_valid(vm, blk) && blk->tag == tag)) {
         /* I-cache hit */
 #ifdef MMU_CACHE_STATS
         vm->cache_fetch[index].icache_hits++;
@@ -547,6 +569,7 @@ static void mmu_fetch(hart_t *vm, uint32_t addr, uint32_t *value)
     uint32_t block_off = (addr & RV_PAGE_MASK) & ~ICACHE_BLOCK_MASK;
     blk->base = (const uint8_t *) vm->cache_fetch[index].page_addr + block_off;
     blk->tag = tag;
+    blk->epoch = vm->icache_epoch;
     blk->valid = true;
     *value = *(const uint32_t *) (blk->base + (addr & ICACHE_BLOCK_MASK));
     vm->seq_fetch_block = blk;
@@ -585,6 +608,91 @@ static inline uint32_t *ram_cache_lookup(hart_t *vm,
     vm->ram_load_last_page = page;
     vm->ram_load_last_ptr = page_base;
     return vm->ram_load_last_ptr;
+}
+
+static inline uintptr_t ram_data_minus_addr(hart_t *vm,
+                                            uint32_t guest_addr,
+                                            uint32_t phys_addr,
+                                            bool is_store)
+{
+    uint32_t *page_ptr = ram_cache_lookup(vm, phys_addr, is_store);
+    if (!page_ptr)
+        return 0;
+    return (uintptr_t) page_ptr - (uintptr_t) (guest_addr & ~RV_PAGE_MASK);
+}
+
+static inline void ram_read_host_fast(hart_t *vm,
+                                      uintptr_t host_addr,
+                                      uint8_t width,
+                                      uint32_t *value)
+{
+    uint32_t shift = (host_addr & 0x3) * 8;
+    uint32_t *cell = (uint32_t *) (host_addr & ~(uintptr_t) 0x3);
+    if (likely(width == RV_MEM_LW)) {
+        if (unlikely(host_addr & 0x3)) {
+            vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
+            return;
+        }
+        *value = *cell;
+        return;
+    }
+    switch (width) {
+    case RV_MEM_LHU:
+        if (unlikely(host_addr & 0x1)) {
+            vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
+            return;
+        }
+        *value = (uint16_t) (*cell >> shift);
+        return;
+    case RV_MEM_LH:
+        if (unlikely(host_addr & 0x1)) {
+            vm_set_exception(vm, RV_EXC_LOAD_MISALIGN, vm->exc_val);
+            return;
+        }
+        *value = (uint32_t) (int32_t) (int16_t) (*cell >> shift);
+        return;
+    case RV_MEM_LBU:
+        *value = (uint8_t) (*cell >> shift);
+        return;
+    case RV_MEM_LB:
+        *value = (uint32_t) (int32_t) (int8_t) (*cell >> shift);
+        return;
+    default:
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
+        return;
+    }
+}
+
+static inline void ram_write_host_fast(hart_t *vm,
+                                       uintptr_t host_addr,
+                                       uint8_t width,
+                                       uint32_t value)
+{
+    uint32_t shift = (host_addr & 0x3) * 8;
+    uint32_t *cell = (uint32_t *) (host_addr & ~(uintptr_t) 0x3);
+    if (likely(width == RV_MEM_SW)) {
+        if (unlikely(host_addr & 0x3)) {
+            vm_set_exception(vm, RV_EXC_STORE_MISALIGN, vm->exc_val);
+            return;
+        }
+        *cell = value;
+        return;
+    }
+    switch (width) {
+    case RV_MEM_SH:
+        if (unlikely(host_addr & 0x1)) {
+            vm_set_exception(vm, RV_EXC_STORE_MISALIGN, vm->exc_val);
+            return;
+        }
+        *cell = (*cell & ~(MASK(16) << shift)) | ((value & MASK(16)) << shift);
+        return;
+    case RV_MEM_SB:
+        *cell = (*cell & ~(MASK(8) << shift)) | ((value & MASK(8)) << shift);
+        return;
+    default:
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
+        return;
+    }
 }
 
 static inline void ram_read_fast(hart_t *vm,
@@ -674,23 +782,31 @@ static void mmu_load(hart_t *vm,
     vm->exc_val = addr;
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t phys_addr;
+    uintptr_t host_addr = 0;
+
     if (likely(vm->cache_load_last_vpn == vpn)) {
+        /* Last-VPN fast path with data_minus_addr */
+        if (likely(vm->cache_load_last_data_minus_addr && !reserved)) {
+            host_addr = vm->cache_load_last_data_minus_addr + addr;
+            ram_read_host_fast(vm, host_addr, width, value);
+            return;
+        }
         phys_addr = (vm->cache_load_last_phys_ppn << RV_PAGE_SHIFT) |
                     (addr & MASK(RV_PAGE_SHIFT));
     } else {
-        /* 8-set × 2-way set-associative cache: use 3-bit parity hash */
-        uint32_t set_idx = (__builtin_parity(vpn & 0xAAAAAAAA) << 2) |
-                           (__builtin_parity(vpn & 0x55555555) << 1) |
-                           __builtin_parity(vpn & 0xCCCCCCCC);
+        /* 32-set x 2-way set-associative cache: use xor-fold hash */
+        uint32_t set_idx = (vpn ^ (vpn >> 5)) & 31;
         mmu_cache_set_t *set = &vm->cache_load[set_idx];
-        int hit_way = -1;
 
-        /* Check both ways in the set */
-        for (int way = 0; way < 2; way++) {
-            if (likely(set->ways[way].n_pages == vpn)) {
-                hit_way = way;
-                break;
-            }
+        /* MRU-first open-coded probe */
+        int mru_way = 1 - set->lru;
+        int hit_way;
+        if (likely(set->ways[mru_way].n_pages == vpn)) {
+            hit_way = mru_way;
+        } else if (likely(set->ways[set->lru].n_pages == vpn)) {
+            hit_way = set->lru;
+        } else {
+            hit_way = -1;
         }
 
         if (likely(hit_way >= 0)) {
@@ -702,6 +818,17 @@ static void mmu_load(hart_t *vm,
                         (addr & MASK(RV_PAGE_SHIFT));
             /* Update LRU: mark the other way as replacement candidate */
             set->lru = 1 - hit_way;
+
+            /* data_minus_addr fast path */
+            if (likely(set->ways[hit_way].data_minus_addr && !reserved)) {
+                host_addr = set->ways[hit_way].data_minus_addr + addr;
+                vm->cache_load_last_vpn = vpn;
+                vm->cache_load_last_phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+                vm->cache_load_last_data_minus_addr =
+                    set->ways[hit_way].data_minus_addr;
+                ram_read_host_fast(vm, host_addr, width, value);
+                return;
+            }
         } else {
             /* Cache miss: do full translation */
             int victim_way = set->lru; /* Use LRU bit to select victim */
@@ -718,23 +845,34 @@ static void mmu_load(hart_t *vm,
             /* Replace victim way with new translation */
             set->ways[victim_way].n_pages = vpn;
             set->ways[victim_way].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+            set->ways[victim_way].data_minus_addr =
+                ram_data_minus_addr(vm, addr, phys_addr, false);
             /* Update LRU: mark the other way for next eviction */
             set->lru = 1 - victim_way;
         }
 
         vm->cache_load_last_vpn = vpn;
         vm->cache_load_last_phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+        vm->cache_load_last_data_minus_addr =
+            (hit_way >= 0) ? set->ways[hit_way].data_minus_addr
+                           : set->ways[1 - set->lru].data_minus_addr;
     }
 
-    uint32_t *page_ptr = ram_cache_lookup(vm, phys_addr, false);
-    if (likely(page_ptr != NULL)) {
-        ram_read_fast(vm, page_ptr, phys_addr, width, value);
+    if (likely(host_addr)) {
+        ram_read_host_fast(vm, host_addr, width, value);
         if (vm->error)
             return;
     } else {
-        vm->mem_load(vm, phys_addr, width, value);
-        if (vm->error)
-            return;
+        uint32_t *page_ptr = ram_cache_lookup(vm, phys_addr, false);
+        if (likely(page_ptr != NULL)) {
+            ram_read_fast(vm, page_ptr, phys_addr, width, value);
+            if (vm->error)
+                return;
+        } else {
+            vm->mem_load(vm, phys_addr, width, value);
+            if (vm->error)
+                return;
+        }
     }
 
     if (unlikely(reserved))
@@ -750,23 +888,31 @@ static bool mmu_store(hart_t *vm,
     vm->exc_val = addr;
     uint32_t vpn = addr >> RV_PAGE_SHIFT;
     uint32_t phys_addr;
+    uintptr_t host_addr = 0;
+
     if (likely(vm->cache_store_last_vpn == vpn)) {
         phys_addr = (vm->cache_store_last_phys_ppn << RV_PAGE_SHIFT) |
                     (addr & MASK(RV_PAGE_SHIFT));
+        /* Last-VPN fast path with data_minus_addr */
+        if (likely(vm->cache_store_last_data_minus_addr && !cond)) {
+            host_addr = vm->cache_store_last_data_minus_addr + addr;
+            /* Still need to handle LR/SC invalidation */
+            goto do_store;
+        }
     } else {
-        /* 8-set × 2-way set-associative cache: use 3-bit parity hash */
-        uint32_t set_idx = (__builtin_parity(vpn & 0xAAAAAAAA) << 2) |
-                           (__builtin_parity(vpn & 0x55555555) << 1) |
-                           __builtin_parity(vpn & 0xCCCCCCCC);
+        /* 32-set x 2-way set-associative cache: use xor-fold hash */
+        uint32_t set_idx = (vpn ^ (vpn >> 5)) & 31;
         mmu_cache_set_t *set = &vm->cache_store[set_idx];
-        int hit_way = -1;
 
-        /* Check both ways in the set */
-        for (int way = 0; way < 2; way++) {
-            if (likely(set->ways[way].n_pages == vpn)) {
-                hit_way = way;
-                break;
-            }
+        /* MRU-first open-coded probe */
+        int mru_way = 1 - set->lru;
+        int hit_way;
+        if (likely(set->ways[mru_way].n_pages == vpn)) {
+            hit_way = mru_way;
+        } else if (likely(set->ways[set->lru].n_pages == vpn)) {
+            hit_way = set->lru;
+        } else {
+            hit_way = -1;
         }
 
         if (likely(hit_way >= 0)) {
@@ -778,6 +924,16 @@ static bool mmu_store(hart_t *vm,
                         (addr & MASK(RV_PAGE_SHIFT));
             /* Update LRU: mark the other way as replacement candidate */
             set->lru = 1 - hit_way;
+
+            /* data_minus_addr fast path */
+            if (likely(set->ways[hit_way].data_minus_addr && !cond)) {
+                host_addr = set->ways[hit_way].data_minus_addr + addr;
+                vm->cache_store_last_vpn = vpn;
+                vm->cache_store_last_phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+                vm->cache_store_last_data_minus_addr =
+                    set->ways[hit_way].data_minus_addr;
+                goto do_store;
+            }
         } else {
             /* Cache miss: do full translation */
             int victim_way = set->lru; /* Use LRU bit to select victim */
@@ -793,24 +949,42 @@ static bool mmu_store(hart_t *vm,
             /* Replace victim way with new translation */
             set->ways[victim_way].n_pages = vpn;
             set->ways[victim_way].phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+            set->ways[victim_way].data_minus_addr =
+                ram_data_minus_addr(vm, addr, phys_addr, true);
             /* Update LRU: mark the other way for next eviction */
             set->lru = 1 - victim_way;
         }
 
         vm->cache_store_last_vpn = vpn;
         vm->cache_store_last_phys_ppn = phys_addr >> RV_PAGE_SHIFT;
+        vm->cache_store_last_data_minus_addr =
+            (hit_way >= 0) ? set->ways[hit_way].data_minus_addr
+                           : set->ways[1 - set->lru].data_minus_addr;
     }
 
+do_store:
     if (unlikely(cond)) {
         if ((vm->lr_reservation != (phys_addr | 1)))
             return false;
     }
 
-    for (uint32_t i = 0; i < vm->vm->n_hart; i++) {
-        if (unlikely(vm->vm->hart[i]->lr_reservation & 1) &&
-            (vm->vm->hart[i]->lr_reservation & ~3) == (phys_addr & ~3))
-            vm->vm->hart[i]->lr_reservation = 0;
+    if (likely(vm->vm->n_hart == 1)) {
+        if (unlikely(vm->lr_reservation & 1) &&
+            (vm->lr_reservation & ~3) == (phys_addr & ~3))
+            vm->lr_reservation = 0;
+    } else {
+        for (uint32_t i = 0; i < vm->vm->n_hart; i++) {
+            if (unlikely(vm->vm->hart[i]->lr_reservation & 1) &&
+                (vm->vm->hart[i]->lr_reservation & ~3) == (phys_addr & ~3))
+                vm->vm->hart[i]->lr_reservation = 0;
+        }
     }
+
+    if (likely(host_addr)) {
+        ram_write_host_fast(vm, host_addr, width, value);
+        return true;
+    }
+
     uint32_t *page_ptr = ram_cache_lookup(vm, phys_addr, true);
     if (likely(page_ptr != NULL)) {
         ram_write_fast(vm, page_ptr, phys_addr, width, value);
@@ -823,14 +997,16 @@ static bool mmu_store(hart_t *vm,
 
 /* exceptions, traps, interrupts */
 
-void vm_set_exception(hart_t *vm, uint32_t cause, uint32_t val)
+__attribute__((cold)) void vm_set_exception(hart_t *vm,
+                                            uint32_t cause,
+                                            uint32_t val)
 {
     vm->error = ERR_EXCEPTION;
     vm->exc_cause = cause;
     vm->exc_val = val;
 }
 
-void hart_trap(hart_t *vm)
+__attribute__((cold)) void hart_trap(hart_t *vm)
 {
     /* Fill exception fields */
     vm->scause = vm->exc_cause;
@@ -843,7 +1019,8 @@ void hart_trap(hart_t *vm)
 
     /* Set */
     vm->sstatus_sie = false;
-    mmu_invalidate(vm);
+    if (!vm->s_mode)
+        mmu_invalidate(vm);
     vm->s_mode = true;
     vm->pc = vm->stvec_addr;
     if (vm->stvec_vectored)
@@ -856,7 +1033,8 @@ static void op_sret(hart_t *vm)
 {
     /* Restore from stack */
     vm->pc = vm->sepc;
-    mmu_invalidate(vm);
+    if (vm->s_mode != vm->sstatus_spp)
+        mmu_invalidate(vm);
     vm->s_mode = vm->sstatus_spp;
     vm->sstatus_sie = vm->sstatus_spie;
 
@@ -1411,16 +1589,388 @@ static inline bool vm_execute_insn(hart_t *vm, uint32_t insn)
     }
 }
 
-int vm_step_many(hart_t *vm, int steps)
+/* clang-format off */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((hot))
+#endif
+__attribute__((hot, flatten)) int vm_step_many(hart_t *vm, int steps)
+/* clang-format on */
 {
     const uint32_t *seq_ptr = NULL;
-    uint32_t seq_next_pc = 0xFFFFFFFF;
-    uint32_t seq_limit_pc = 0;
+    uint32_t *x_regs = vm->x_regs;
     int executed = 0;
+    uint32_t insn = 0;
 
     if (vm->hsm_status != SBI_HSM_STATE_STARTED || unlikely(vm->error))
         return 0;
 
+#if defined(__GNUC__) || defined(__clang__)
+    /* Computed goto dispatch table */
+    /* clang-format off */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverride-init"
+    static const void *dispatch[128] = {
+        [0 ... 127] = &&L_illegal,
+        [RV32_OP_IMM]  = &&L_op_imm,
+        [RV32_OP]      = &&L_op,
+        [RV32_LUI]     = &&L_lui,
+        [RV32_AUIPC]   = &&L_auipc,
+        [RV32_JAL]     = &&L_jal,
+        [RV32_JALR]    = &&L_jalr,
+        [RV32_BRANCH]  = &&L_branch,
+        [RV32_LOAD]    = &&L_load,
+        [RV32_STORE]   = &&L_store,
+        [RV32_MISC_MEM] = &&L_misc_mem,
+        [RV32_AMO]     = &&L_amo,
+        [RV32_SYSTEM]  = &&L_system,
+    };
+#pragma GCC diagnostic pop
+
+    /* OP_IMM funct3 sub-dispatch */
+    static const void *op_imm_tbl[8] = {
+        &&L_addi, &&L_slli, &&L_slti, &&L_sltiu,
+        &&L_xori, &&L_srxi, &&L_ori,  &&L_andi,
+    };
+
+    /* OP funct3 sub-dispatch */
+    static const void *op_tbl[8] = {
+        &&L_add_sub, &&L_sll, &&L_slt, &&L_sltu,
+        &&L_xor,     &&L_srx, &&L_or,  &&L_and,
+    };
+    /* clang-format on */
+
+#define DISPATCH_PTR(opcode) dispatch[(opcode) & MASK(7)]
+#define DISPATCH_NEXT                                    \
+    do {                                                 \
+        vm->instret++;                                   \
+        executed++;                                      \
+        if (unlikely(executed >= steps))                 \
+            goto L_slow_path;                            \
+        vm->current_pc = vm->pc;                         \
+        if (likely(seq_ptr)) {                           \
+            insn = *seq_ptr++;                           \
+            vm->pc += 4;                                 \
+            if (unlikely(!(vm->pc & ICACHE_BLOCK_MASK))) \
+                seq_ptr = NULL;                          \
+            goto *DISPATCH_PTR(insn);                    \
+        }                                                \
+        goto L_slow_path;                                \
+    } while (0)
+
+#define DISPATCH_BREAK    \
+    do {                  \
+        vm->instret++;    \
+        executed++;       \
+        seq_ptr = NULL;   \
+        goto L_slow_path; \
+    } while (0)
+
+#define DISPATCH_CHAIN                                                         \
+    do {                                                                       \
+        vm->instret++;                                                         \
+        executed++;                                                            \
+        if (unlikely(executed >= steps))                                       \
+            goto L_slow_path;                                                  \
+        vm->current_pc = vm->pc;                                               \
+        vm_handle_pending_interrupt(vm);                                       \
+        if (unlikely(vm->pc != vm->current_pc)) {                              \
+            seq_ptr = NULL;                                                    \
+            vm->current_pc = vm->pc;                                           \
+        }                                                                      \
+        /* Inline icache lookup */                                             \
+        {                                                                      \
+            uint32_t _addr = vm->pc;                                           \
+            uint32_t _idx = (_addr >> ICACHE_OFFSET_BITS) & ICACHE_INDEX_MASK; \
+            uint32_t _tag = _addr >> (ICACHE_OFFSET_BITS + ICACHE_INDEX_BITS); \
+            icache_block_t *_blk = &vm->icache.block[_idx];                    \
+            if (likely(icache_block_valid(vm, _blk) && _blk->tag == _tag)) {   \
+                uint32_t _ofs = _addr & ICACHE_BLOCK_MASK;                     \
+                insn = *(const uint32_t *) (_blk->base + _ofs);                \
+                vm->seq_fetch_block = _blk;                                    \
+                uint32_t _next_ofs = _ofs + sizeof(uint32_t);                  \
+                if (_next_ofs < ICACHE_BLOCKS_SIZE) {                          \
+                    vm->seq_fetch_next_pc = _addr + 4;                         \
+                    seq_ptr = (const uint32_t *) (_blk->base + _next_ofs);     \
+                } else {                                                       \
+                    vm->seq_fetch_next_pc = 0xFFFFFFFF;                        \
+                    seq_ptr = NULL;                                            \
+                }                                                              \
+                vm->pc += 4;                                                   \
+                goto *DISPATCH_PTR(insn);                                      \
+            }                                                                  \
+        }                                                                      \
+        seq_ptr = NULL;                                                        \
+        goto L_slow_path;                                                      \
+    } while (0)
+
+    /* Macro for OP_IMM handlers */
+#define OP_IMM_HANDLER(label, expr)              \
+    label: {                                     \
+        uint8_t rd = decode_rd(insn);            \
+        uint32_t rs1 = x_regs[decode_rs1(insn)]; \
+        uint32_t imm = decode_i(insn);           \
+        if (rd)                                  \
+            x_regs[rd] = (expr);                 \
+        DISPATCH_NEXT;                           \
+    }
+
+    /* Macro for OP handlers */
+#define OP_HANDLER(label, expr)                  \
+    label: {                                     \
+        uint8_t rd = decode_rd(insn);            \
+        uint32_t rs1 = x_regs[decode_rs1(insn)]; \
+        uint32_t rs2 = x_regs[decode_rs2(insn)]; \
+        if (rd)                                  \
+            x_regs[rd] = (expr);                 \
+        DISPATCH_NEXT;                           \
+    }
+
+    goto L_slow_path;
+
+    /* --- OP_IMM handlers --- */
+L_op_imm:
+    goto *op_imm_tbl[decode_func3(insn)];
+
+    OP_IMM_HANDLER(L_addi, rs1 + imm)
+    OP_IMM_HANDLER(L_slti, (int32_t) rs1 < (int32_t) imm)
+    OP_IMM_HANDLER(L_sltiu, rs1 < imm)
+    OP_IMM_HANDLER(L_xori, rs1 ^ imm)
+    OP_IMM_HANDLER(L_ori, rs1 | imm)
+    OP_IMM_HANDLER(L_andi, rs1 & imm)
+    OP_IMM_HANDLER(L_slli, rs1 << (imm & MASK(5)))
+
+L_srxi: {
+    uint8_t rd = decode_rd(insn);
+    uint32_t rs1 = x_regs[decode_rs1(insn)];
+    uint32_t imm = decode_i(insn);
+    bool neg = (insn & (1 << 30)) != 0;
+    if (rd)
+        x_regs[rd] =
+            neg ? (uint32_t) (((int32_t) rs1) >> (imm & MASK(5))) /* SRA */
+                : rs1 >> (imm & MASK(5));                         /* SRL */
+    DISPATCH_NEXT;
+}
+
+    /* --- OP handlers --- */
+L_op:
+    /* Check M-extension bit first */
+    if (insn & (1 << 25)) {
+        uint8_t rd = decode_rd(insn);
+        uint32_t rs1 = x_regs[decode_rs1(insn)];
+        uint32_t rs2 = x_regs[decode_rs2(insn)];
+        if (rd)
+            x_regs[rd] = op_mul(decode_func3(insn), rs1, rs2);
+        DISPATCH_NEXT;
+    }
+    goto *op_tbl[decode_func3(insn)];
+
+L_add_sub: {
+    uint8_t rd = decode_rd(insn);
+    uint32_t rs1 = x_regs[decode_rs1(insn)];
+    uint32_t rs2 = x_regs[decode_rs2(insn)];
+    bool neg = (insn & (1 << 30)) != 0;
+    if (rd)
+        x_regs[rd] = neg ? rs1 - rs2 : rs1 + rs2;
+    DISPATCH_NEXT;
+}
+
+    OP_HANDLER(L_sll, rs1 << (rs2 & MASK(5)))
+    OP_HANDLER(L_slt, (int32_t) rs1 < (int32_t) rs2)
+    OP_HANDLER(L_sltu, rs1 < rs2)
+    OP_HANDLER(L_xor, rs1 ^ rs2)
+    OP_HANDLER(L_or, rs1 | rs2)
+    OP_HANDLER(L_and, rs1 & rs2)
+
+L_srx: {
+    uint8_t rd = decode_rd(insn);
+    uint32_t rs1 = x_regs[decode_rs1(insn)];
+    uint32_t rs2 = x_regs[decode_rs2(insn)];
+    bool neg = (insn & (1 << 30)) != 0;
+    if (rd)
+        x_regs[rd] =
+            neg ? (uint32_t) (((int32_t) rs1) >> (rs2 & MASK(5))) /* SRA */
+                : rs1 >> (rs2 & MASK(5));                         /* SRL */
+    DISPATCH_NEXT;
+}
+
+    /* --- LUI --- */
+L_lui:
+    set_dest_idx(vm, decode_rd(insn), decode_u(insn));
+    DISPATCH_NEXT;
+
+    /* --- AUIPC --- */
+L_auipc:
+    set_dest_idx(vm, decode_rd(insn), decode_u(insn) + vm->current_pc);
+    DISPATCH_NEXT;
+
+L_jal: {
+    uint8_t rd = decode_rd(insn);
+    uint32_t addr = decode_j(insn) + vm->current_pc;
+    if (unlikely(addr & 0b11)) {
+        vm_set_exception(vm, RV_EXC_PC_MISALIGN, addr);
+        goto L_error;
+    }
+    if (rd == 1)
+        vm->x_regs[1] = vm->pc;
+    else if (rd)
+        vm->x_regs[rd] = vm->pc;
+    vm->pc = addr;
+    DISPATCH_CHAIN;
+}
+L_jalr: {
+    uint8_t rd = decode_rd(insn);
+    uint32_t addr = (decode_i(insn) + x_regs[decode_rs1(insn)]) & ~1U;
+    if (unlikely(addr & 0b11)) {
+        vm_set_exception(vm, RV_EXC_PC_MISALIGN, addr);
+        goto L_error;
+    }
+    if (rd == 1)
+        vm->x_regs[1] = vm->pc;
+    else if (rd)
+        vm->x_regs[rd] = vm->pc;
+    vm->pc = addr;
+    DISPATCH_CHAIN;
+}
+L_branch: {
+    uint32_t rs1 = x_regs[decode_rs1(insn)];
+    uint32_t rs2 = x_regs[decode_rs2(insn)];
+    bool taken;
+    switch (decode_func3(insn)) {
+    case 0b000:
+        taken = (rs1 == rs2);
+        break;
+    case 0b001:
+        taken = (rs1 != rs2);
+        break;
+    case 0b100:
+        taken = ((int32_t) rs1) < ((int32_t) rs2);
+        break;
+    case 0b101:
+        taken = ((int32_t) rs1) >= ((int32_t) rs2);
+        break;
+    case 0b110:
+        taken = (rs1 < rs2);
+        break;
+    case 0b111:
+        taken = (rs1 >= rs2);
+        break;
+    default:
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
+        goto L_error;
+    }
+    if (taken) {
+        do_jump(vm, decode_b(insn) + vm->current_pc);
+        if (unlikely(vm->error))
+            goto L_error;
+        DISPATCH_CHAIN;
+    }
+    DISPATCH_NEXT;
+}
+
+    /* --- LOAD --- */
+L_load: {
+    uint32_t load_value;
+    mmu_load(vm, x_regs[decode_rs1(insn)] + decode_i(insn), decode_func3(insn),
+             &load_value, false);
+    if (unlikely(vm->error))
+        goto L_error;
+    set_dest_idx(vm, decode_rd(insn), load_value);
+    DISPATCH_NEXT;
+}
+
+    /* --- STORE --- */
+L_store:
+    mmu_store(vm, x_regs[decode_rs1(insn)] + decode_s(insn), decode_func3(insn),
+              x_regs[decode_rs2(insn)], false);
+    if (unlikely(vm->error))
+        goto L_error;
+    DISPATCH_NEXT;
+
+    /* --- MISC_MEM --- */
+L_misc_mem:
+    switch (decode_func3(insn)) {
+    case 0b000: /* MM_FENCE */
+        /* nop for single-hart */
+        break;
+    case 0b001: /* MM_FENCE_I */
+        vm_fence_i(vm);
+        break;
+    default:
+        vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
+        goto L_error;
+    }
+    DISPATCH_BREAK;
+
+    /* --- AMO --- */
+L_amo: {
+    decoded_insn_t decoded;
+    decode_insn(&decoded, insn);
+    op_amo(vm, &decoded);
+    if (unlikely(vm->error))
+        goto L_error;
+    DISPATCH_BREAK;
+}
+
+    /* --- SYSTEM --- */
+L_system: {
+    decoded_insn_t decoded;
+    decode_insn(&decoded, insn);
+    op_system(vm, &decoded);
+    if (unlikely(vm->error))
+        goto L_error;
+    DISPATCH_BREAK;
+}
+
+    /* --- ILLEGAL --- */
+L_illegal:
+    vm_set_exception(vm, RV_EXC_ILLEGAL_INSN, 0);
+    goto L_error;
+
+    /* --- SLOW PATH --- */
+L_slow_path:
+    if (unlikely(executed >= steps))
+        return executed;
+
+    vm->current_pc = vm->pc;
+    vm_handle_pending_interrupt(vm);
+    if (unlikely(vm->pc != vm->current_pc)) {
+        seq_ptr = NULL;
+        vm->current_pc = vm->pc;
+    }
+
+    /* Fetch instruction */
+    if (likely(seq_ptr != NULL)) {
+        insn = *seq_ptr++;
+    } else {
+        mmu_fetch(vm, vm->pc, &insn);
+        if (unlikely(vm->error))
+            return executed;
+
+        /* Set up seq_ptr from fetch result */
+        if (likely(vm->seq_fetch_block != NULL)) {
+            uint32_t offset_words = ((vm->pc & ICACHE_BLOCK_MASK) >> 2) + 1;
+            uint32_t max_words = ICACHE_BLOCKS_SIZE >> 2;
+            if (offset_words < max_words) {
+                seq_ptr = ((const uint32_t *) vm->seq_fetch_block->base) +
+                          offset_words;
+            } else {
+                seq_ptr = NULL;
+            }
+        }
+    }
+
+    vm->pc += 4;
+    /* Check block boundary for next fetch */
+    if (!(vm->pc & ICACHE_BLOCK_MASK))
+        seq_ptr = NULL;
+
+    goto *DISPATCH_PTR(insn);
+
+L_error:
+    return executed + 1;
+
+#else
+    /* Fallback: switch-based dispatch */
     for (; executed < steps; executed++) {
         uint32_t insn;
         uint32_t pc = vm->pc;
@@ -1429,32 +1979,25 @@ int vm_step_many(hart_t *vm, int steps)
         vm_handle_pending_interrupt(vm);
         if (unlikely(vm->pc != pc)) {
             seq_ptr = NULL;
-            seq_next_pc = 0xFFFFFFFF;
         }
         vm->current_pc = vm->pc;
-        if (likely(seq_ptr != NULL && vm->pc == seq_next_pc)) {
+        if (likely(seq_ptr != NULL)) {
             insn = *seq_ptr++;
-            seq_next_pc += 4;
-            if (seq_next_pc >= seq_limit_pc) {
+            if (!(vm->pc & ICACHE_BLOCK_MASK))
                 seq_ptr = NULL;
-                seq_next_pc = 0xFFFFFFFF;
-            }
         } else {
             mmu_fetch(vm, vm->pc, &insn);
             if (unlikely(vm->error))
                 return executed;
 
             if (likely(vm->seq_fetch_block != NULL)) {
-                uint32_t block_pc = vm->pc & ~ICACHE_BLOCK_MASK;
-                uint32_t offset_words = (vm->pc & ICACHE_BLOCK_MASK) >> 2;
-
-                seq_ptr = ((const uint32_t *) vm->seq_fetch_block->base) +
-                          offset_words + 1;
-                seq_next_pc = vm->pc + 4;
-                seq_limit_pc = block_pc + ICACHE_BLOCKS_SIZE;
-                if (seq_next_pc >= seq_limit_pc) {
+                uint32_t offset_words = ((vm->pc & ICACHE_BLOCK_MASK) >> 2) + 1;
+                uint32_t max_words = ICACHE_BLOCKS_SIZE >> 2;
+                if (offset_words < max_words) {
+                    seq_ptr = ((const uint32_t *) vm->seq_fetch_block->base) +
+                              offset_words;
+                } else {
                     seq_ptr = NULL;
-                    seq_next_pc = 0xFFFFFFFF;
                 }
             }
         }
@@ -1467,13 +2010,12 @@ int vm_step_many(hart_t *vm, int steps)
             return executed + 1;
         vm->instret++;
 
-        if (unlikely(!keep_linear || vm->pc != vm->current_pc + 4)) {
+        if (unlikely(!keep_linear || vm->pc != vm->current_pc + 4))
             seq_ptr = NULL;
-            seq_next_pc = 0xFFFFFFFF;
-        }
     }
 
     return executed;
+#endif
 }
 
 void vm_step(hart_t *vm)
