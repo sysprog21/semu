@@ -106,9 +106,13 @@ void u8250_flush_out(u8250_state_t *uart)
 
 static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
 {
+    if (uart->out_buf_len >= sizeof(uart->out_buf))
+        u8250_flush_out(uart);
+    if (uart->out_buf_len >= sizeof(uart->out_buf))
+        return; /* flush failed, drop byte rather than corrupt memory */
     uart->out_buf[uart->out_buf_len++] = value;
     if (value == '\n' || value == '\r' || value == ':' || value == '#' ||
-        value == '$' || uart->out_buf_len >= sizeof(uart->out_buf))
+        value == '$')
         u8250_flush_out(uart);
 }
 
