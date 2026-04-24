@@ -35,6 +35,8 @@ static bool plic_reg_read(plic_state_t *plic, uint32_t addr, uint32_t *value)
     int addr_mask = MASK(ilog2(addr)) ^ (1 & addr);
     int context = (addr_mask & addr);
     context >>= __builtin_ffs(context) - (__builtin_ffs(context) & 1);
+    if (context < 0 || context >= (int) ARRAY_SIZE(plic->ie))
+        return false;
     switch (addr & ~addr_mask) {
     case 0x800:
         *value = plic->ie[context];
@@ -66,6 +68,8 @@ static bool plic_reg_write(plic_state_t *plic, uint32_t addr, uint32_t value)
     int addr_mask = MASK(ilog2(addr)) ^ (1 & addr);
     int context = (addr_mask & addr);
     context >>= __builtin_ffs(context) - (__builtin_ffs(context) & 1);
+    if (context < 0 || context >= (int) ARRAY_SIZE(plic->ie))
+        return false;
     switch (addr & ~addr_mask) {
     case 0x800:
         value &= ~1;

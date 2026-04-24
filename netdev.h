@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -73,6 +74,7 @@ void net_vmnet_cleanup(net_vmnet_state_t *state);
 
 /* SLIRP (cross-platform userspace network) */
 #define SLIRP_POLL_INTERVAL 100000
+#define SLIRP_PKT_MAX 16384
 #define SLIRP_READ_SIDE 0
 #define SLIRP_WRITE_SIDE 1
 typedef struct {

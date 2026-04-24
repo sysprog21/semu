@@ -229,19 +229,8 @@ static ssize_t handle_write(netdev_t *netdev,
 #endif
     case _(user): {
         net_user_options_t *usr = (net_user_options_t *) netdev->op;
-
-        uint8_t pkt[1514];
-
-        /* Aggregate data from scatter-gater I/O vector into a
-         * contiguous packet buffer
-         */
-        for (size_t i = 0; i < niovs; i++) {
-            memcpy(pkt + plen, iovs_cursor[i].iov_base, iovs_cursor[i].iov_len);
-            plen += iovs_cursor[i].iov_len;
-        }
-
-        ssize_t written =
-            write(usr->host_to_guest_channel[SLIRP_WRITE_SIDE], pkt, plen);
+        ssize_t written = writev(usr->host_to_guest_channel[SLIRP_WRITE_SIDE],
+                                 iovs_cursor, niovs);
         if (written < 0) {
             queue->fd_ready = false;
             return -1;

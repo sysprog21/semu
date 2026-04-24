@@ -248,6 +248,7 @@ typedef struct {
      * https://github.com/riscv/riscv-aclint/blob/main/riscv-aclint.adoc#21-register-map
      */
     uint64_t *mtimecmp;
+    uint32_t n_hart;
     semu_timer_t mtime;
 } mtimer_state_t;
 
@@ -276,6 +277,7 @@ typedef struct {
      * https://github.com/riscv/riscv-aclint/blob/main/riscv-aclint.adoc#31-register-map
      */
     uint32_t *msip;
+    uint32_t n_hart;
 } mswi_state_t;
 
 void aclint_mswi_update_interrupts(hart_t *hart, mswi_state_t *mswi);
@@ -303,6 +305,7 @@ typedef struct {
      * https://github.com/riscv/riscv-aclint/blob/main/riscv-aclint.adoc#41-register-map
      */
     uint32_t *ssip;
+    uint32_t n_hart;
 } sswi_state_t;
 
 void aclint_sswi_update_interrupts(hart_t *hart, sswi_state_t *sswi);

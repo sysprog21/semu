@@ -140,10 +140,13 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
 
     /* Collect the descriptors */
     for (int i = 0; i < 3; i++) {
+        if (desc_idx >= queue->QueueNum) {
+            virtio_blk_set_fail(vblk);
+            return -1;
+        }
         /* The size of the `struct virtq_desc` is 4 words */
         const struct virtq_desc *desc =
             (struct virtq_desc *) &vblk->ram[queue->QueueDesc + desc_idx * 4];
-
 
         /* Retrieve the fields of current descriptor */
         vq_desc[i].addr = desc->addr;
@@ -171,8 +174,10 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     uint64_t sector = header->sector;
     uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
 
-    /* Check sector index is valid */
-    if (sector > (PRIV(vblk)->capacity - 1)) {
+    /* Check sector index and data length are valid */
+    uint64_t disk_size = (uint64_t) PRIV(vblk)->capacity * DISK_BLK_SIZE;
+    uint64_t offset = sector * DISK_BLK_SIZE;
+    if (sector >= PRIV(vblk)->capacity || vq_desc[1].len > disk_size - offset) {
         *status = VIRTIO_BLK_S_IOERR;
         return -1;
     }

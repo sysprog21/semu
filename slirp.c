@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 
 #include "netdev.h"
 
@@ -158,9 +159,9 @@ int semu_slirp_add_poll_socket(slirp_os_socket fd, int events, void *opaque)
 
 int net_slirp_read(net_user_options_t *usr)
 {
-    uint8_t pkt[1514];
+    uint8_t pkt[SLIRP_PKT_MAX];
     ssize_t plen =
-        read(usr->host_to_guest_channel[SLIRP_READ_SIDE], pkt, sizeof(pkt));
+        recv(usr->host_to_guest_channel[SLIRP_READ_SIDE], pkt, sizeof(pkt), 0);
     if (plen < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return 0;
@@ -213,14 +214,18 @@ int net_slirp_init(net_user_options_t *usr)
         fprintf(stderr, "create slirp failed\n");
     }
 
-    if (pipe(usr->guest_to_host_channel) < 0)
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, usr->guest_to_host_channel) < 0)
         return -1;
     assert(
         fcntl(usr->guest_to_host_channel[SLIRP_READ_SIDE], F_SETFL,
               fcntl(usr->guest_to_host_channel[SLIRP_READ_SIDE], F_GETFL, 0) |
                   O_NONBLOCK) >= 0);
+    assert(
+        fcntl(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], F_SETFL,
+              fcntl(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], F_GETFL, 0) |
+                  O_NONBLOCK) >= 0);
 
-    if (pipe(usr->host_to_guest_channel) < 0)
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, usr->host_to_guest_channel) < 0)
         return -1;
     assert(
         fcntl(usr->host_to_guest_channel[SLIRP_READ_SIDE], F_SETFL,
