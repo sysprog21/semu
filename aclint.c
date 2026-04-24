@@ -30,6 +30,8 @@ static bool aclint_mtimer_reg_read(mtimer_state_t *mtimer,
 
     /* mtimecmp (0x4300000 ~ 0x4307FF8) */
     if (addr < 0x7FF8) {
+        if ((addr >> 3) >= mtimer->n_hart)
+            return false;
         *value =
             (uint32_t) (mtimer->mtimecmp[addr >> 3] >> (addr & 0x4 ? 32 : 0));
         return true;
@@ -58,6 +60,8 @@ static bool aclint_mtimer_reg_write(mtimer_state_t *mtimer,
 
     /* mtimecmp (0x4300000 ~ 0x4307FF8) */
     if (addr < 0x7FF8) {
+        if ((addr >> 3) >= mtimer->n_hart)
+            return false;
         uint64_t cmp_val = mtimer->mtimecmp[addr >> 3];
 
         if (addr & 0x4)
@@ -129,6 +133,8 @@ static bool aclint_mswi_reg_read(mswi_state_t *mswi,
 
     /* Address range for msip: 0x4400000 ~ 0x4404000 */
     if (addr < 0x4000) {
+        if ((addr >> 2) >= mswi->n_hart)
+            return false;
         *value = mswi->msip[addr >> 2];
         return true;
     }
@@ -140,6 +146,8 @@ static bool aclint_mswi_reg_write(mswi_state_t *mswi,
                                   uint32_t value)
 {
     if (addr < 0x4000) {
+        if ((addr >> 2) >= mswi->n_hart)
+            return false;
         mswi->msip[addr >> 2] = value & 0x1; /* Only the LSB is valid */
         return true;
     }
@@ -180,12 +188,14 @@ void aclint_sswi_update_interrupts(hart_t *hart, sswi_state_t *sswi)
     }
 }
 
-static bool aclint_sswi_reg_read(__attribute__((unused)) sswi_state_t *sswi,
+static bool aclint_sswi_reg_read(sswi_state_t *sswi,
                                  uint32_t addr,
                                  uint32_t *value)
 {
     /* Address range for ssip: 0x4500000 ~ 0x4504000 */
     if (addr < 0x4000) {
+        if ((addr >> 2) >= sswi->n_hart)
+            return false;
         *value = 0; /* Upper 31 bits are zero, and LSB reads as 0 */
         return true;
     }
@@ -197,8 +207,9 @@ static bool aclint_sswi_reg_write(sswi_state_t *sswi,
                                   uint32_t value)
 {
     if (addr < 0x4000) {
+        if ((addr >> 2) >= sswi->n_hart)
+            return false;
         sswi->ssip[addr >> 2] = value & 0x1; /* Only the LSB is valid */
-
         return true;
     }
     return false;

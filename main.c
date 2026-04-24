@@ -396,6 +396,8 @@ static inline sbi_ret_t handle_sbi_ecall_HSM(hart_t *hart, int32_t fid)
     switch (fid) {
     case SBI_HSM__HART_START:
         hartid = hart->x_regs[RV_R_A0];
+        if (hartid >= vm->n_hart)
+            return (sbi_ret_t) {SBI_ERR_INVALID_PARAM, 0};
         start_addr = hart->x_regs[RV_R_A1];
         opaque = hart->x_regs[RV_R_A2];
         vm->hart[hartid]->hsm_status = SBI_HSM_STATE_STARTED;
@@ -411,6 +413,8 @@ static inline sbi_ret_t handle_sbi_ecall_HSM(hart_t *hart, int32_t fid)
         return (sbi_ret_t) {SBI_SUCCESS, 0};
     case SBI_HSM__HART_GET_STATUS:
         hartid = hart->x_regs[RV_R_A0];
+        if (hartid >= vm->n_hart)
+            return (sbi_ret_t) {SBI_ERR_INVALID_PARAM, 0};
         return (sbi_ret_t) {SBI_SUCCESS, vm->hart[hartid]->hsm_status};
     case SBI_HSM__HART_SUSPEND:
         suspend_type = hart->x_regs[RV_R_A0];
@@ -825,8 +829,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     /* Set up ACLINT */
     semu_timer_init(&emu->mtimer.mtime, CLOCK_FREQ, hart_count);
     emu->mtimer.mtimecmp = calloc(vm->n_hart, sizeof(uint64_t));
+    emu->mtimer.n_hart = vm->n_hart;
     emu->mswi.msip = calloc(vm->n_hart, sizeof(uint32_t));
+    emu->mswi.n_hart = vm->n_hart;
     emu->sswi.ssip = calloc(vm->n_hart, sizeof(uint32_t));
+    emu->sswi.n_hart = vm->n_hart;
 #if SEMU_HAS(VIRTIOSND)
     if (!virtio_snd_init(&(emu->vsnd)))
         fprintf(stderr, "No virtio-snd functioned\n");
@@ -948,15 +955,16 @@ static void hart_exec_loop(void *arg)
         }
 
         /* Execute a batch of instructions before yielding.
-         * Batch size of 64 balances throughput and responsiveness.
+         * Keep peripheral polling at the original slice cadence so I/O and
+         * external interrupt latency do not scale with the batch size.
          */
         for (int i = 0; i < 64; i += SEMU_SMP_SLICE_STEPS) {
-            for (int j = 0; j < SEMU_SMP_SLICE_STEPS; j++) {
-                int ret = semu_service_hart_step(emu, hart);
-                if (unlikely(ret)) {
-                    emu->stopped = true;
-                    goto cleanup;
-                }
+            emu_tick_peripherals(emu);
+            emu_update_timer_interrupt(hart);
+            emu_update_swi_interrupt(hart);
+            if (unlikely(semu_step_chunk(emu, hart, SEMU_SMP_SLICE_STEPS))) {
+                emu->stopped = true;
+                goto cleanup;
             }
         }
 

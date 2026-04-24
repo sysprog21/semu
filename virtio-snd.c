@@ -589,7 +589,7 @@ static void virtio_snd_read_chmap_info_handler(
         props->c.channels = 1;
         props->c.positions[0] = VIRTIO_SND_CHMAP_MONO;
     }
-    *plen = cnt * sizeof(info);
+    *plen = cnt * sizeof(*info);
 }
 
 static void virtio_snd_read_pcm_set_params(
@@ -1166,8 +1166,10 @@ static bool virtio_snd_reg_write(virtio_snd_state_t *vsnd,
                 virtio_queue_notify_handler(vsnd, value);
                 break;
             case VSND_QUEUE_TX:
+                pthread_mutex_lock(&virtio_snd_mutex);
                 tx_ev_notify++;
                 pthread_cond_signal(&virtio_snd_tx_cond);
+                pthread_mutex_unlock(&virtio_snd_mutex);
                 break;
             default:
                 fprintf(stderr, "value %d not supported\n", value);

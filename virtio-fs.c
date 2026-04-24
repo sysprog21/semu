@@ -307,11 +307,9 @@ static void virtio_fs_readdirplus_handler(virtio_fs_state_t *vfs,
         size_t dirent_size = sizeof(struct fuse_direntplus) + name_len;
         size_t dirent_aligned = (dirent_size + 7) & ~7;
         offset += sizeof(struct fuse_entry_out) + dirent_aligned;
-        printf("%s      ", entry->d_name);
 
         free(full_path);
     }
-    printf("\n");
 
     struct vfs_resp_header *header_resp =
         (struct vfs_resp_header *) ((uintptr_t) vfs->ram + vq_desc[2].addr);
@@ -480,7 +478,8 @@ static void virtio_fs_open_handler(virtio_fs_state_t *vfs,
             (struct vfs_resp_header *) ((uintptr_t) vfs->ram + vq_desc[2].addr);
         header_resp->out.error = -errno;
         *plen = sizeof(struct fuse_out_header);
-        printf("[OPEN] failed: %s, error=%s\n", target_path, strerror(errno));
+        fprintf(stderr, "[OPEN] failed: %s, error=%s\n", target_path,
+                strerror(errno));
         return;
     }
 

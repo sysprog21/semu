@@ -68,6 +68,8 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng,
     void *entropy_buf =
         (void *) ((uintptr_t) vrng->ram + (uintptr_t) vq_desc->addr);
     ssize_t total = read(rng_fd, entropy_buf, vq_desc->len);
+    if (total < 0)
+        total = 0;
 
     /* Clear write flag */
     vq_desc->flags = 0;
