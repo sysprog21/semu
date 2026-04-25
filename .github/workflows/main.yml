@@ -32,8 +32,6 @@ jobs:
           Image
           rootfs.cpio
         key: external-${{ hashFiles('mk/external.mk') }}
-        restore-keys: |
-          external-
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
@@ -91,8 +89,6 @@ jobs:
           Image
           rootfs.cpio
         key: external-${{ hashFiles('mk/external.mk') }}
-        restore-keys: |
-          external-
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
