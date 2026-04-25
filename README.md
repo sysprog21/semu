@@ -9,7 +9,7 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- Three types of I/O support using VirtIO standard:
+- Four types of I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
     - virtio-net is mapped as TAP interface.
     - virtio-snd uses [PortAudio](https://github.com/PortAudio/portaudio) for sound playback on the host with one limitations:
@@ -18,6 +18,8 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
           the program cannot write the PCM frames into guest OS ALSA stack.
             - For instance, the following buffer/period size settings on `aplay` has been tested
               with broken and stutter effects yet complete with no any errors: `aplay --buffer-size=32768 --period-size=4096 /usr/share/sounds/alsa/Front_Center.wav`.
+    - virtio-input exposes SDL-backed keyboard and mouse devices to the guest.
+      - You can exit the SDL window by pressing Ctrl+A+G
 
 ## Prerequisites
 

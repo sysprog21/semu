@@ -7,6 +7,9 @@ set -euo pipefail
 MACHINE_TYPE="$(uname -m)"
 OS_TYPE="$(uname -s)"
 
+# Enable SDL headless mode explicitly.
+export SDL_VIDEODRIVER=offscreen
+
 # Cleanup function - kills all semu processes
 cleanup() {
     sleep 1

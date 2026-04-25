@@ -96,6 +96,12 @@
     _(QueueDeviceLow, 0x0a0)    /* W */  \
     _(QueueDeviceHigh, 0x0a4)   /* W */  \
     _(ConfigGeneration, 0x0fc)  /* R */  \
+    _(SHMSel, 0x0ac)            /* W */  \
+    _(SHMLenLow, 0x0b0)         /* R */  \
+    _(SHMLenHigh, 0x0b4)        /* R */  \
+    _(SHMBaseLow, 0x0b8)        /* R */  \
+    _(SHMBaseHigh, 0x0bc)       /* R */  \
+    _(QueueReset, 0x0c0)        /* RW */ \
     _(Config, 0x100)            /* RW */
 
 enum {

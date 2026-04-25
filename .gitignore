@@ -11,3 +11,10 @@ rootfs.cpio
 
 # intermediate
 riscv-harts.dtsi
+.smp_stamp
+rootfs_full.cpio
+
+# Build directories
+buildroot/
+linux/
+rootfs/

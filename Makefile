@@ -158,6 +158,31 @@ LDFLAGS += -lm
 # after git submodule.
 .DEFAULT_GOAL := all
 
+# SDL2
+ENABLE_SDL ?= 1
+ifeq (, $(shell which sdl2-config))
+    $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
+    override ENABLE_SDL := 0
+endif
+ifeq ($(ENABLE_SDL),1)
+    CFLAGS += $(shell sdl2-config --cflags)
+    LDFLAGS += $(shell sdl2-config --libs)
+else
+    # Disable virtio-input if SDL is not set
+    override ENABLE_VIRTIOINPUT := 0
+endif
+
+# virtio-input
+ENABLE_VIRTIOINPUT ?= 1
+ENABLE_INPUT_DEBUG ?= 0
+CFLAGS += -DSEMU_INPUT_DEBUG=$(ENABLE_INPUT_DEBUG)
+$(call set-feature, VIRTIOINPUT)
+ifeq ($(call has, VIRTIOINPUT), 1)
+    OBJS_EXTRA += virtio-input-event.o
+    OBJS_EXTRA += virtio-input.o
+    OBJS_EXTRA += window-sw.o
+endif
+
 BIN = semu
 all: $(BIN) minimal.dtb
 

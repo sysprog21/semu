@@ -12,6 +12,9 @@
 #define DTB_SIZE (1 * 1024 * 1024)
 #define INITRD_SIZE (8 * 1024 * 1024)
 
+#define SCREEN_WIDTH 1024
+#define SCREEN_HEIGHT 768
+
 void ram_read(hart_t *core,
               uint32_t *mem,
               const uint32_t addr,
@@ -229,6 +232,67 @@ void virtio_rng_write(hart_t *vm,
 void virtio_rng_init(void);
 #endif /* SEMU_HAS(VIRTIORNG) */
 
+/* VirtIO Input */
+
+#if SEMU_HAS(VIRTIOINPUT)
+
+#define IRQ_VINPUT_KEYBOARD 7
+#define IRQ_VINPUT_KEYBOARD_BIT (1 << IRQ_VINPUT_KEYBOARD)
+
+#define IRQ_VINPUT_MOUSE 8
+#define IRQ_VINPUT_MOUSE_BIT (1 << IRQ_VINPUT_MOUSE)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_input_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_input_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    /* implementation-specific */
+    void *priv;
+} virtio_input_state_t;
+
+void virtio_input_read(hart_t *vm,
+                       virtio_input_state_t *vinput,
+                       uint32_t addr,
+                       uint8_t width,
+                       uint32_t *value);
+
+void virtio_input_write(hart_t *vm,
+                        virtio_input_state_t *vinput,
+                        uint32_t addr,
+                        uint8_t width,
+                        uint32_t value);
+
+void virtio_input_init(virtio_input_state_t *vinput);
+
+/* Drain translated host window events and update guest-visible virtio-input
+ * device state. Must be called from the emulator thread.
+ */
+void virtio_input_drain_host_events(void);
+
+/* Returns true if the device has a pending interrupt. Safe to call from
+ * the emulator thread without holding any lock internally.
+ */
+bool virtio_input_irq_pending(virtio_input_state_t *vinput);
+#endif /* SEMU_HAS(VIRTIOINPUT) */
+
 /* ACLINT MTIMER */
 typedef struct {
     /* A MTIMER device has two separate base addresses: one for the MTIME
@@ -433,6 +497,7 @@ bool virtio_fs_init(virtio_fs_state_t *vfs, char *mtag, char *dir);
 
 /* memory mapping */
 typedef struct {
+    int exit_code;
     bool debug;
     bool stopped;
     uint32_t *ram;
@@ -458,6 +523,24 @@ typedef struct {
 #endif
 #if SEMU_HAS(VIRTIOFS)
     virtio_fs_state_t vfs;
+#endif
+#if SEMU_HAS(VIRTIOINPUT)
+    virtio_input_state_t vkeyboard;
+    virtio_input_state_t vmouse;
+    /* Use self-pipe trick to unblock the emulator loop when the
+     * window backend has queued work, such as input events or
+     * window shutdown. When all harts are idle, semu_run() calls
+     * poll(-1) and blocks indefinitely waiting for timer or UART
+     * events. The window-event thread has no way to wake that
+     * blocked poll() other than writing to a file descriptor it is
+     * watching.
+     *
+     * wake_fd[0] (read end) is added to pfds[] so poll() monitors it.
+     * wake_fd[1] (write end) is handed to the window backend, which
+     * writes one byte when backend work arrives to make wake_fd[0]
+     * readable and return poll() immediately.
+     */
+    int wake_fd[2];
 #endif
 
     uint32_t peripheral_update_ctr;
