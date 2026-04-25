@@ -1,0 +1,39 @@
+virtio-snd.c
+  08349defc12ad5f0 273,443,446,483,670-671,764-768,808,811-816,966,969-972,1062,1078-1079
+  a3dd0d686483f4fe 479-482,484,499,1004-1006,1009,1060,1063,1114,1117,1210
+main.c
+  08349defc12ad5f0 162,230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "563da69e8d46adb0f34715ad935041f3296cb389",
+  "prompts": {
+    "08349defc12ad5f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "247eddb7-dc41-482e-aa46-d86b8f3ed45f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 12,
+      "accepted_lines": 29,
+      "overriden_lines": 0
+    },
+    "a3dd0d686483f4fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dc5bd-b0dd-7f52-b8f5-b624d30f20f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 12,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
