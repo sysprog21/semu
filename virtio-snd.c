@@ -270,6 +270,7 @@ typedef struct {
 typedef struct {
     pthread_cond_t readable, writable;
     int buf_ev_notify;
+    int releasing;
     pthread_mutex_t lock;
 } virtio_snd_queue_lock_t;
 
@@ -439,9 +440,10 @@ static uint32_t flush_stream_id = 0;
             goto finally;                                                      \
         IIF(WRITE)(/* enque frames */                                          \
                    virtio_snd_prop_t *props = &vsnd_props[stream_id];          \
+                   pthread_mutex_lock(&props->lock.lock);                      \
                    props->lock.buf_ev_notify++;                                \
                    pthread_cond_signal(&props->lock.readable);                 \
-                   , /* flush queue */                                         \
+                   pthread_mutex_unlock(&props->lock.lock);, /* flush queue */ \
                    )                                                           \
                                                                                \
             /* Tear down the descriptor list and free space. */                \
@@ -473,9 +475,11 @@ static int virtio_snd_io_desc_flush_handler(virtio_snd_state_t *vsnd,
 
 static void virtio_snd_set_fail(virtio_snd_state_t *vsnd)
 {
-    vsnd->Status |= VIRTIO_STATUS__DEVICE_NEEDS_RESET;
-    if (vsnd->Status & VIRTIO_STATUS__DRIVER_OK)
-        vsnd->InterruptStatus |= VIRTIO_INT__CONF_CHANGE;
+    uint32_t status = __atomic_fetch_or(
+        &vsnd->Status, VIRTIO_STATUS__DEVICE_NEEDS_RESET, __ATOMIC_ACQ_REL);
+    if (status & VIRTIO_STATUS__DRIVER_OK)
+        __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__CONF_CHANGE,
+                          __ATOMIC_RELEASE);
 }
 
 /* Check whether the address is valid or not */
@@ -490,7 +494,7 @@ static inline uint32_t vsnd_preprocess(virtio_snd_state_t *vsnd, uint32_t addr)
 
 static void virtio_snd_update_status(virtio_snd_state_t *vsnd, uint32_t status)
 {
-    vsnd->Status |= status;
+    __atomic_fetch_or(&vsnd->Status, status, __ATOMIC_RELEASE);
     if (status)
         return;
 
@@ -661,6 +665,8 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     uint32_t cnfa_period_frames = cnfa_period_bytes / VSND_CNFA_FRAME_SZ;
 
     INIT_LIST_HEAD(&props->buf_queue_head);
+    props->lock.releasing = 0;
+    props->lock.buf_ev_notify = 0;
     PaStreamParameters params = {
         .device = Pa_GetDefaultOutputDevice(),
         .channelCount = props->pp.channels,
@@ -753,8 +759,11 @@ static void virtio_snd_read_pcm_release(const virtio_snd_pcm_hdr_t *query,
 
     props->pp.hdr.hdr.code = VIRTIO_SND_R_PCM_RELEASE;
 
-    /* Tear down PCM buffer related locking attributes. */
-    /* Explicitly unlock the CVs and mutex. */
+    /* Signal the release flag so enqueue/dequeue waiters bail out,
+     * then broadcast both condvars to wake any blocked threads.
+     */
+    pthread_mutex_lock(&props->lock.lock);
+    props->lock.releasing = 1;
     pthread_cond_broadcast(&props->lock.readable);
     pthread_cond_broadcast(&props->lock.writable);
     pthread_mutex_unlock(&props->lock.lock);
@@ -794,8 +803,14 @@ static void __virtio_snd_frame_dequeue(void *out,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (props->lock.buf_ev_notify < 1)
+    while (props->lock.buf_ev_notify < 1 && !props->lock.releasing)
         pthread_cond_wait(&props->lock.readable, &props->lock.lock);
+
+    if (props->lock.releasing) {
+        pthread_mutex_unlock(&props->lock.lock);
+        memset(out, 0, n);
+        return;
+    }
 
     /* Get the PCM frames from queue */
     uint32_t written_bytes = 0;
@@ -946,8 +961,13 @@ static void __virtio_snd_frame_enqueue(void *payload,
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
 
     pthread_mutex_lock(&props->lock.lock);
-    while (props->lock.buf_ev_notify > 0)
+    while (props->lock.buf_ev_notify > 0 && !props->lock.releasing)
         pthread_cond_wait(&props->lock.writable, &props->lock.lock);
+
+    if (props->lock.releasing) {
+        pthread_mutex_unlock(&props->lock.lock);
+        return;
+    }
 
     /* Add a PCM frame to queue */
     /* As stated in Linux Kernel mailing list [1], we keep the pointer
@@ -979,10 +999,12 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
 {
     uint32_t *ram = vsnd->ram;
     virtio_snd_queue_t *queue = &vsnd->queues[index & 0x03];
-    if (vsnd->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
+    uint32_t status = __atomic_load_n(&vsnd->Status, __ATOMIC_ACQUIRE);
+
+    if (status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
         return;
 
-    if (!((vsnd->Status & VIRTIO_STATUS__DRIVER_OK) && queue->ready))
+    if (!((status & VIRTIO_STATUS__DRIVER_OK) && queue->ready))
         return virtio_snd_set_fail(vsnd);
 
     /* Check for new buffers */
@@ -1033,9 +1055,10 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
     vsnd->ram[queue->QueueUsed] &= MASK(16); /* Reset low 16 bits to zero */
     vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
 
-    /* Send interrupt, unless VIRTQ_AVAIL_F_NO_INTERRUPT is set */
+    /* Publish used-ring writes before making the IRQ visible to the guest. */
     if (!(ram[queue->QueueAvail] & 1))
-        vsnd->InterruptStatus |= VIRTIO_INT__USED_RING;
+        __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
+                          __ATOMIC_RELEASE);
 }
 
 /* TX thread context */
@@ -1049,9 +1072,9 @@ static void *func(void *args)
             pthread_cond_wait(&virtio_snd_tx_cond, &virtio_snd_mutex);
 
         tx_ev_notify--;
-        virtio_queue_notify_handler(vsnd, 2);
-
         pthread_mutex_unlock(&virtio_snd_mutex);
+
+        virtio_queue_notify_handler(vsnd, 2);
     }
     pthread_exit(NULL);
 }
@@ -1086,10 +1109,10 @@ static bool virtio_snd_reg_read(virtio_snd_state_t *vsnd,
         *value = vsndq.ready ? 1 : 0;
         return true;
     case _(InterruptStatus):
-        *value = vsnd->InterruptStatus;
+        *value = __atomic_load_n(&vsnd->InterruptStatus, __ATOMIC_ACQUIRE);
         return true;
     case _(Status):
-        *value = vsnd->Status;
+        *value = __atomic_load_n(&vsnd->Status, __ATOMIC_ACQUIRE);
         return true;
     case _(ConfigGeneration):
         *value = 0;
@@ -1182,7 +1205,7 @@ static bool virtio_snd_reg_write(virtio_snd_state_t *vsnd,
 
         return true;
     case _(InterruptACK):
-        vsnd->InterruptStatus &= ~value;
+        __atomic_fetch_and(&vsnd->InterruptStatus, ~value, __ATOMIC_ACQ_REL);
         return true;
     case _(Status):
         virtio_snd_update_status(vsnd, value);

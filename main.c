@@ -159,7 +159,7 @@ static void emu_update_swi_interrupt(hart_t *hart)
 static void emu_update_vsnd_interrupts(vm_t *vm)
 {
     emu_state_t *data = PRIV(vm->hart[0]);
-    if (data->vsnd.InterruptStatus)
+    if (__atomic_load_n(&data->vsnd.InterruptStatus, __ATOMIC_ACQUIRE))
         data->plic.active |= IRQ_VSND_BIT;
     else
         data->plic.active &= ~IRQ_VSND_BIT;
@@ -227,7 +227,7 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
 #endif
 
 #if SEMU_HAS(VIRTIOSND)
-        if (emu->vsnd.InterruptStatus)
+        if (__atomic_load_n(&emu->vsnd.InterruptStatus, __ATOMIC_ACQUIRE))
             emu_update_vsnd_interrupts(vm);
 #endif
 
