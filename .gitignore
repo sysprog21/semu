@@ -18,3 +18,9 @@ rootfs_full.cpio
 buildroot/
 linux/
 rootfs/
+directfb/
+extra_packages/
+
+# DirectFB build
+DirectFB2/
+DirectFB-examples/

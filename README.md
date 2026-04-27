@@ -9,7 +9,7 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- Four types of I/O support using VirtIO standard:
+- I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
     - virtio-net is mapped as TAP interface.
     - virtio-snd uses [PortAudio](https://github.com/PortAudio/portaudio) for sound playback on the host with one limitations:
@@ -19,7 +19,11 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
             - For instance, the following buffer/period size settings on `aplay` has been tested
               with broken and stutter effects yet complete with no any errors: `aplay --buffer-size=32768 --period-size=4096 /usr/share/sounds/alsa/Front_Center.wav`.
     - virtio-input exposes SDL-backed keyboard and mouse devices to the guest.
-      - You can exit the SDL window by pressing Ctrl+A+G
+    - virtio-gpu exposes a minimal 2D DRM/KMS device to the guest. Linux can
+      bind the `virtio_gpu` driver and create `/dev/dri/card0`.
+      - Only 2D scanout is currently supported; 3D, virgl, and blob resources
+        are not implemented yet.
+    - Press Ctrl+Alt+G to release the mouse cursor from the SDL window.
 
 ## Prerequisites
 
@@ -125,12 +129,13 @@ This command invokes the underlying script: `scripts/build-image.sh`, which also
 ### Script Usage
 
 ```
-./scripts/build-image.sh [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+./scripts/build-image.sh [--buildroot] [--linux] [--directfb2-test] [--all] [--external-root] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --directfb2-test     Build an ext4 guest disk with the DirectFB2 test payload
   --linux             Build Linux kernel
-  --all               Build both Buildroot and Linux
+  --all               Build both Buildroot and Linux kernel
   --external-root     Use external rootfs instead of initramfs
   --clean-build       Remove entire buildroot/ and/or linux/ directories before build
   --help              Show this message
@@ -154,6 +159,12 @@ Build Buildroot and generate an external root file system (ext4 image):
 
 ```
 $ scripts/build-image.sh --buildroot --external-root
+```
+
+Build an ext4 guest disk with the DirectFB2 test payload:
+
+```
+$ scripts/build-image.sh --directfb2-test
 ```
 
 Force a clean build:

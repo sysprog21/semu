@@ -20,18 +20,10 @@ LDFLAGS :=
 ENABLE_VIRTIOBLK ?= 1
 $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
-MKFS_EXT4 ?= mkfs.ext4
 ifeq ($(call has, VIRTIOBLK), 1)
     OBJS_EXTRA += virtio-blk.o
     DISKIMG_FILE := ext4.img
     OPTS += -d $(DISKIMG_FILE)
-    MKFS_EXT4 := $(shell which $(MKFS_EXT4))
-    ifndef MKFS_EXT4
-	MKFS_EXT4 := $(shell which $$(brew --prefix e2fsprogs)/sbin/mkfs.ext4)
-    endif
-    ifndef MKFS_EXT4
-        $(error "No mkfs.ext4 found.")
-    endif
 endif
 
 # virtio-rng
@@ -168,7 +160,8 @@ ifeq ($(ENABLE_SDL),1)
     CFLAGS += $(shell sdl2-config --cflags)
     LDFLAGS += $(shell sdl2-config --libs)
 else
-    # Disable virtio-input if SDL is not set
+    # Disable window-backed virtio devices if SDL is not set.
+    override ENABLE_VIRTIOGPU := 0
     override ENABLE_VIRTIOINPUT := 0
 endif
 
@@ -180,6 +173,18 @@ $(call set-feature, VIRTIOINPUT)
 ifeq ($(call has, VIRTIOINPUT), 1)
     OBJS_EXTRA += virtio-input-event.o
     OBJS_EXTRA += virtio-input.o
+endif
+
+# virtio-gpu
+ENABLE_VIRTIOGPU ?= 1
+$(call set-feature, VIRTIOGPU)
+ifeq ($(call has, VIRTIOGPU), 1)
+    OBJS_EXTRA += virtio-gpu.o
+    OBJS_EXTRA += virtio-gpu-sw.o
+    OBJS_EXTRA += vgpu-display.o
+endif
+
+ifneq ($(filter 1,$(call has, VIRTIOGPU) $(call has, VIRTIOINPUT)),)
     OBJS_EXTRA += window-sw.o
 endif
 
@@ -281,12 +286,8 @@ minimal.dtb: minimal.dts riscv-harts.dtsi
 .PHONY: FORCE
 FORCE:
 
-# Rules for downloading prebuilt Linux kernel image
+# Rules for downloading prebuilt guest artifacts
 include mk/external.mk
-
-ext4.img:
-	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
-	$(Q)$(MKFS_EXT4) -F $@
 
 .PHONY: $(DIRECTORY)
 $(SHARED_DIRECTORY):

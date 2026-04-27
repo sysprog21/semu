@@ -115,3 +115,7 @@ static inline void list_del_init(struct list_head *node)
         safe = list_entry(entry->member.next, __typeof__(*entry), member); \
          &entry->member != (head); entry = safe,                           \
         safe = list_entry(safe->member.next, __typeof__(*entry), member))
+
+#define LIST_HEAD_INIT(name) {.prev = (&name), .next = (&name)}
+
+#define LIST_HEAD(name) struct list_head name = LIST_HEAD_INIT(name)

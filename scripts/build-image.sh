@@ -31,6 +31,22 @@ function safe_copy {
     fi
 }
 
+function copy_buildroot_config
+{
+    local buildroot_config="configs/buildroot.config"
+    local x11_config="configs/x11.config"
+    local output_config="buildroot/.config"
+    local merge_tool="buildroot/support/kconfig/merge_config.sh"
+
+    echo "Preparing Buildroot config..."
+
+    if [[ $BUILD_X11 -eq 1 ]]; then
+        ASSERT "$merge_tool" -m -r -O buildroot "$buildroot_config" "$x11_config"
+    else
+        ASSERT cp -f "$buildroot_config" "$output_config"
+    fi
+}
+
 function do_buildroot
 {
     if [ ! -d buildroot ]; then
@@ -40,10 +56,10 @@ function do_buildroot
         echo "buildroot/ already exists, skipping clone"
     fi
 
-    safe_copy configs/buildroot.config buildroot/.config
+    copy_buildroot_config
     safe_copy configs/busybox.config buildroot/busybox.config
     cp -f target/init buildroot/fs/cpio/init
-    
+
     # Otherwise, the error below raises:
     #   You seem to have the current working directory in your
     #   LD_LIBRARY_PATH environment variable. This doesn't work.
@@ -52,6 +68,10 @@ function do_buildroot
     ASSERT make olddefconfig
     ASSERT make $PARALLEL
     popd
+
+    if [[ $BUILD_DIRECTFB_TEST -eq 1 ]]; then
+        do_extra_packages
+    fi
 
     if [[ $EXTERNAL_ROOT -eq 1 ]]; then
         echo "Copying rootfs.cpio to rootfs_full.cpio (external root mode)"
@@ -86,12 +106,14 @@ function do_linux
 
 function show_help {
     cat << EOF
-Usage: $0 [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+Usage: $0 [--buildroot] [--x11] [--linux] [--directfb2-test] [--all] [--external-root] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot rootfs
+  --x11               Build Buildroot with X11
+  --directfb2-test     Build an ext4 guest disk with the DirectFB2 test payload
   --linux             Build Linux kernel
-  --all               Build both Buildroot and Linux
+  --all               Build both Buildroot and Linux kernel
   --external-root     Use external rootfs instead of initramfs
   --clean-build       Remove entire buildroot/ and/or linux/ directories before build
   --help              Show this message
@@ -100,6 +122,8 @@ EOF
 }
 
 BUILD_BUILDROOT=0
+BUILD_X11=0
+BUILD_DIRECTFB_TEST=0
 BUILD_LINUX=0
 EXTERNAL_ROOT=0
 CLEAN_BUILD=0
@@ -108,6 +132,14 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --buildroot)
             BUILD_BUILDROOT=1
+            ;;
+        --x11)
+            BUILD_X11=1
+            ;;
+        --directfb2-test)
+            BUILD_BUILDROOT=1
+            BUILD_DIRECTFB_TEST=1
+            EXTERNAL_ROOT=1
             ;;
         --linux)
             BUILD_LINUX=1
@@ -133,8 +165,70 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+function do_directfb
+{
+    export PATH=$PATH:$PWD/buildroot/output/host/bin
+    export BUILDROOT_OUT=$PWD/buildroot/output/
+    export DIRECTFB_STAGE=$PWD/directfb
+    mkdir -p directfb
+
+    # Build DirectFB2
+    if [ ! -d DirectFB2 ]; then
+        echo "Cloning DirectFB2..."
+        ASSERT git clone https://github.com/directfb2/DirectFB2
+    else
+        echo "DirectFB2 already exists, skipping clone..."
+    fi
+    pushd DirectFB2
+    cp ../configs/riscv-cross-file .
+    ASSERT meson -Ddrmkms=true --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    ASSERT env DESTDIR=$BUILDROOT_OUT/host/riscv32-buildroot-linux-gnu/sysroot meson install -C build/riscv
+    ASSERT env DESTDIR=$DIRECTFB_STAGE meson install -C build/riscv
+    popd
+
+    # Build DirectFB2 examples
+    if [ ! -d DirectFB-examples ]; then
+        echo "Cloning DirectFB-examples..."
+        ASSERT git clone https://github.com/directfb2/DirectFB-examples
+    else
+        echo "DirectFB-examples already exists, skipping clone..."
+    fi
+    pushd DirectFB-examples/
+    cp ../configs/riscv-cross-file .
+    ASSERT meson --cross-file riscv-cross-file build/riscv
+    ASSERT meson compile -C build/riscv
+    ASSERT env DESTDIR=$DIRECTFB_STAGE meson install -C build/riscv
+    popd
+}
+
+function do_extra_packages
+{
+    export PATH="$PWD/buildroot/output/host/bin:$PATH"
+    export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
+
+    rm -rf extra_packages
+    mkdir -p extra_packages
+    mkdir -p extra_packages/root
+
+    do_directfb && OK
+
+    if ! find directfb -mindepth 1 -print -quit | grep -q .; then
+        echo "Error: DirectFB staging tree is empty."
+        exit 1
+    fi
+
+    ASSERT cp -r directfb/. extra_packages/
+    ASSERT cp target/run.sh extra_packages/root/
+}
+
 if [[ $BUILD_BUILDROOT -eq 0 && $BUILD_LINUX -eq 0 ]]; then
     echo "Error: No build target specified. Use --buildroot, --linux, or --all."
+    show_help
+fi
+
+if [[ $BUILD_X11 -eq 1 && $BUILD_BUILDROOT -eq 0 ]]; then
+    echo "Error: --x11 requires --buildroot to be specified."
     show_help
 fi
 
