@@ -79,14 +79,58 @@ You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwar
 ## Usage
 
 ```shell
-./semu -k linux-image [-b dtb-file] [-i initrd-image] [-d disk-image] [-s shared-directory]
+./semu -k linux-image [-b dtb-file] [-d disk-image] [-i initrd-image] [-s shared-directory] [-H]
 ```
 
 * `linux-image` is the path to the Linux kernel `Image`.
 * `dtb-file` is optional, as it specifies the user-specified device tree blob.
-* `initrd-image` is optional, as it specifies the user-specified initial RAM disk image.
-* `disk-image` is optional, as it specifies the path of a disk image in ext4 file system for the virtio-blk device.
+* `disk-image` is the ext4 image exposed as `/dev/vda` to the guest. The
+  default boot path mounts this as the root filesystem; `make` builds it
+  from `rootfs.cpio` via `scripts/rootfs_ext4.sh`.
 * `shared-directory` is optional, as it specifies the path of a directory on the host that will be shared with the guest operating system through virtio-fs, enabling file access from the guest via a virtual filesystem mount.
+* `-H` (or `--headless`) skips SDL window creation; useful for CI and `make check`.
+* `initrd-image` is optional and only used on the *legacy* boot path.
+  The default `minimal.dtb` built with `ENABLE_EXTERNAL_ROOT=1` does not
+  advertise initrd placement, so `-i` there requires either
+  `ENABLE_EXTERNAL_ROOT=0` or a custom DTB passed with `-b`. See *Boot mode*
+  below.
+
+### Boot mode
+
+The default build (`make`) boots the kernel directly from `/dev/vda` and
+runs `/sbin/init` from the ext4 root, skipping the initramfs unpack step
+entirely. This is faster, avoids the RCU-stall the kernel hits when
+unpacking a large cpio, and matches how real systems deploy. The
+`ext4.img` is built from `rootfs.cpio` via `scripts/rootfs_ext4.sh`,
+which requires `fakeroot` and `mkfs.ext4`.
+
+If `fakeroot` is missing, the build falls back to the legacy initramfs
+path (`-i rootfs.cpio`) automatically and prints a one-line warning. To
+force the legacy path explicitly:
+
+```shell
+$ make ENABLE_EXTERNAL_ROOT=0
+$ make ENABLE_EXTERNAL_ROOT=0 check
+```
+
+The legacy path uses what the flag is still spelled as: `-i initrd-image`.
+That is a runtime choice only when the DTB also carries
+`linux,initrd-{start,end}`. semu's default external-root build emits a DTB
+that always boots from `/dev/vda`, so `-i` is rejected there unless you
+replace the DTB with one that describes the initrd layout.
+The classical *initrd* (a filesystem image mounted as `/dev/ram0`,
+pivoted into via `pivot_root`) is effectively obsolete -- it required
+`CONFIG_BLK_DEV_INITRD` plus the legacy ramdisk block driver, an
+in-kernel filesystem driver to mount the image before any userspace code
+ran, and a `/linuxrc` handoff. Mainstream distros and embedded builds
+dropped that path more than a decade ago. Linux 2.6+ kept the flag and
+the `linux,initrd-{start,end}` device-tree properties, but the kernel
+inspects the loaded blob: a cpio archive is unpacked into the in-memory
+`rootfs` (initramfs path, runs `/init`); a filesystem image still falls
+back to the legacy initrd path if that driver is configured in. semu
+ships and consumes a cpio (`rootfs.cpio`), so the legacy build is
+exercising the initramfs path even though the CLI flag spelling stayed
+`-i initrd-image`.
 
 For detailed networking guidance, see [`docs/networking.md`](docs/networking.md).
 
@@ -125,14 +169,16 @@ This command invokes the underlying script: `scripts/build-image.sh`, which also
 ### Script Usage
 
 ```
-./scripts/build-image.sh [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+./scripts/build-image.sh [--buildroot] [--linux] [--all] [--no-ext4] [--clean-build] [--help]
 
 Options:
-  --buildroot         Build Buildroot rootfs
-  --linux             Build Linux kernel
+  --buildroot         Build Buildroot userland (produces rootfs.cpio and,
+                      unless --no-ext4 is given, ext4.img for vda boot)
+  --linux             Build the Linux kernel
   --all               Build both Buildroot and Linux
-  --external-root     Use external rootfs instead of initramfs
-  --clean-build       Remove entire buildroot/ and/or linux/ directories before build
+  --no-ext4           Skip ext4.img generation; produce only rootfs.cpio
+                      (matches the legacy ENABLE_EXTERNAL_ROOT=0 path)
+  --clean-build       Remove buildroot/ and/or linux/ before building
   --help              Show this message
 ```
 
@@ -144,16 +190,16 @@ Build the Linux kernel only:
 $ scripts/build-image.sh --linux
 ```
 
-Build Buildroot only:
+Build Buildroot (produces both `rootfs.cpio` and `ext4.img`):
 
 ```
 $ scripts/build-image.sh --buildroot
 ```
 
-Build Buildroot and generate an external root file system (ext4 image):
+Build Buildroot for the legacy initramfs-only path (no ext4):
 
 ```
-$ scripts/build-image.sh --buildroot --external-root
+$ scripts/build-image.sh --buildroot --no-ext4
 ```
 
 Force a clean build:

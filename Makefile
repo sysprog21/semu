@@ -16,8 +16,31 @@ OPTS :=
 
 LDFLAGS :=
 
+# external rootfs: boot from /dev/vda instead of unpacking initramfs.
+# Implies VIRTIOBLK and pulls the userland from rootfs.cpio into ext4.img.
+# Default-on. If fakeroot is missing or non-functional, fall back to the
+# initramfs path so the build still succeeds without forcing a new
+# dependency on the user. The probe must exec a real binary -- `fakeroot
+# true` looks correct but `true` is a bash builtin, so the wrapper
+# script never actually runs the DYLD_INSERT_LIBRARIES path. On macOS
+# arm64 the brew fakeroot dylib is built for arm64 and refuses to load
+# into arm64e system binaries (cpio, mkfs.ext4); using `/bin/sh -c :`
+# forces an exec so we catch that failure here instead of mid-build.
+ENABLE_EXTERNAL_ROOT ?= 1
+ifeq ($(call has, EXTERNAL_ROOT), 1)
+    ifneq (0,$(shell fakeroot /bin/sh -c : >/dev/null 2>&1; echo $$?))
+        $(warning fakeroot not usable; falling back to initramfs boot.)
+        $(warning Install a working fakeroot to enable /dev/vda boot.)
+        override ENABLE_EXTERNAL_ROOT := 0
+    endif
+endif
+$(call set-feature, EXTERNAL_ROOT)
+
 # virtio-blk
 ENABLE_VIRTIOBLK ?= 1
+ifeq ($(call has, EXTERNAL_ROOT), 1)
+    ENABLE_VIRTIOBLK := 1
+endif
 $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
 MKFS_EXT4 ?= mkfs.ext4
@@ -186,10 +209,6 @@ endif
 BIN = semu
 all: $(BIN) minimal.dtb
 
-.PHONY: bench-login
-bench-login: $(BIN) minimal.dtb
-	$(Q)/usr/bin/time -p expect scripts/bench-login.expect ./$(BIN) -k Image -b minimal.dtb -i rootfs.cpio
-
 OBJS := \
 	riscv.o \
 	ram.o \
@@ -202,6 +221,7 @@ OBJS := \
 	$(OBJS_EXTRA)
 
 deps := $(OBJS:%.o=.%.o.d)
+BUILD_CONFIG := CC=$(CC) $(strip $(CFLAGS))
 
 GDBSTUB_LIB := mini-gdbstub/build/libgdbstub.a
 LDFLAGS += $(GDBSTUB_LIB)
@@ -232,7 +252,13 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
-%.o: %.c
+.build-config.stamp: FORCE
+	@if [ ! -f $@ ] || [ "$$(cat $@ 2>/dev/null)" != "$(BUILD_CONFIG)" ]; then \
+	    printf '%s\n' "$(BUILD_CONFIG)" > $@; \
+	    rm -f $(OBJS) $(deps); \
+	fi
+
+%.o: %.c .build-config.stamp
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF .$@.d $<
 
@@ -247,6 +273,11 @@ DTC ?= dtc
 E :=
 S := $E $E
 
+DT_FEATURE_CPPFLAGS := $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, \
+	$(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS))))
+DT_CPPFLAGS := $(DT_CFLAGS) $(DT_FEATURE_CPPFLAGS)
+DTB_CONFIG := SMP=$(SMP) CLOCK_FREQ=$(CLOCK_FREQ) $(strip $(DT_CPPFLAGS))
+
 # During boot process, the emulator manually manages the growth of ticks to
 # suppress RCU CPU stall warnings. Thus, we need an target time to set the
 # increment of ticks. According to Using RCU’s CPU Stall Detector[1], the
@@ -259,23 +290,22 @@ CFLAGS += -D SEMU_BOOT_TARGET_TIME=10
 
 SMP ?= 1
 
-# Track SMP value changes to force DTB regeneration
-.smp_stamp: FORCE
-	@if [ ! -f .smp_stamp ] || [ "$$(cat .smp_stamp 2>/dev/null)" != "$(SMP)" ]; then \
-	    echo "$(SMP)" > .smp_stamp; \
+# Track DTB inputs so config changes regenerate both the hart DTSI and DTB.
+.dtb-config.stamp: FORCE
+	@if [ ! -f $@ ] || [ "$$(cat $@ 2>/dev/null)" != "$(DTB_CONFIG)" ]; then \
+	    printf '%s\n' "$(DTB_CONFIG)" > $@; \
 	    rm -f riscv-harts.dtsi minimal.dtb; \
 	fi
 
 .PHONY: riscv-harts.dtsi
-riscv-harts.dtsi: .smp_stamp
+riscv-harts.dtsi: .dtb-config.stamp
 	$(Q)python3 scripts/gen-hart-dts.py $@ $(SMP) $(CLOCK_FREQ)
 
-minimal.dtb: minimal.dts riscv-harts.dtsi
+minimal.dtb: minimal.dts riscv-harts.dtsi .dtb-config.stamp
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(RM) $@
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef \
-	    $(DT_CFLAGS) \
-	    $(subst ^,$S,$(filter -D^SEMU_FEATURE_%, $(subst -D$(S)SEMU_FEATURE,-D^SEMU_FEATURE,$(CFLAGS)))) $< \
+	    $(DT_CPPFLAGS) $< \
 	    | $(DTC) - > $@
 
 .PHONY: FORCE
@@ -284,9 +314,14 @@ FORCE:
 # Rules for downloading prebuilt Linux kernel image
 include mk/external.mk
 
+ifeq ($(call has, EXTERNAL_ROOT), 1)
+ext4.img: $(INITRD_DATA) scripts/rootfs_ext4.sh
+	$(Q)MKFS_EXT4="$(MKFS_EXT4)" scripts/rootfs_ext4.sh $(INITRD_DATA) $@
+else
 ext4.img:
 	$(Q)dd if=/dev/zero of=$@ bs=4k count=600
 	$(Q)$(MKFS_EXT4) -F $@
+endif
 
 .PHONY: $(DIRECTORY)
 $(SHARED_DIRECTORY):
@@ -295,9 +330,22 @@ $(SHARED_DIRECTORY):
 		mkdir -p $@; \
 	fi
 
-check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DATA) $(DISKIMG_FILE) $(SHARED_DIRECTORY)
+ifeq ($(call has, EXTERNAL_ROOT), 1)
+INITRD_DEP :=
+INITRD_OPT :=
+else
+INITRD_DEP := $(INITRD_DATA)
+INITRD_OPT := -i $(INITRD_DATA)
+endif
+
+.PHONY: bench-login
+bench-login: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DEP) $(DISKIMG_FILE)
+	$(Q)/usr/bin/time -p expect scripts/bench-login.expect \
+	    ./$(BIN) -k $(KERNEL_DATA) -b minimal.dtb -H $(INITRD_OPT) $(OPTS)
+
+check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DEP) $(DISKIMG_FILE) $(SHARED_DIRECTORY)
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
-	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -i $(INITRD_DATA) $(if $(NETDEV),-n $(NETDEV)) $(OPTS)
+	$(Q)./$(BIN) -k $(KERNEL_DATA) -c $(SMP) -b minimal.dtb -H $(INITRD_OPT) $(if $(NETDEV),-n $(NETDEV)) $(OPTS)
 
 build-image:
 	scripts/build-image.sh
@@ -312,7 +360,8 @@ clean:
 distclean: clean
 	$(Q)$(RM) riscv-harts.dtsi
 	$(Q)$(RM) minimal.dtb
-	$(Q)$(RM) .smp_stamp
+	$(Q)$(RM) .dtb-config.stamp
+	$(Q)$(RM) .build-config.stamp
 	$(Q)$(RM) Image rootfs.cpio
 	$(Q)$(RM) ext4.img
 

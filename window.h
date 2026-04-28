@@ -6,7 +6,11 @@
 
 #if SEMU_HAS(VIRTIOINPUT)
 struct window_backend {
-    void (*window_init)(void);
+    /* When headless is true, the backend skips SDL_Init / window creation and
+     * behaves as if SDL had failed -- useful for batch runs (CI, 'make check')
+     * that have no display attached.
+     */
+    void (*window_init)(bool headless);
     /* Main loop function that runs on the main thread (for macOS SDL2).
      * If non-NULL, the emulator runs in a background thread while this
      * function handles window events on the main thread.
