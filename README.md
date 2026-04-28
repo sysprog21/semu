@@ -18,6 +18,7 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
           the program cannot write the PCM frames into guest OS ALSA stack.
             - For instance, the following buffer/period size settings on `aplay` has been tested
               with broken and stutter effects yet complete with no any errors: `aplay --buffer-size=32768 --period-size=4096 /usr/share/sounds/alsa/Front_Center.wav`.
+        - For capture, ALSA usually gets stuck in XRUN state, so you may need to try multiple times.
     - virtio-input exposes SDL-backed keyboard and mouse devices to the guest.
       - You can exit the SDL window by pressing Ctrl+A+G
 
