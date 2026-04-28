@@ -1,0 +1,153 @@
+window-sw.c
+  db0cc33ed56f7a94 123,125-129
+scripts/rootfs_ext4.sh
+  d1b9c5e9b6ad7366 16,28,33-34
+  db0cc33ed56f7a94 1-9,11,13-15,18-21,23-26,29-31,35-38,40-57
+.ci/publish-prebuilt.sh
+  db0cc33ed56f7a94 1-80
+scripts/build-image.sh
+  db0cc33ed56f7a94 46,56-67,69,96,99-101,103-105,113,128-129
+main.c
+  30cc180b849a0ba4 1745-1750
+  db0cc33ed56f7a94 706,719,734,752-768,770,777-779,843,849-855,865-869,883-901,904,906-907,910-911,914,925-928,996,1208-1219,1221-1222,1225-1233,1236,1401-1402,1425-1433,1636-1640,1659,1756-1757,1869-1886,1889-1894
+  4cd62012773cdf6d 803-814
+  e7522f7b83f35ca8 726-731
+Makefile
+  db0cc33ed56f7a94 19-32,35-37,270-274,287-290,295,298,302,311-312,314,318,327-340,342,357
+  d1b9c5e9b6ad7366 313
+  8494bf2672813de4 218,249-255,358
+minimal.dts
+  db0cc33ed56f7a94 18-30,35
+mk/external.mk
+  db0cc33ed56f7a94 5-10,12,34-81
+window.h
+  e7522f7b83f35ca8 9-11
+  db0cc33ed56f7a94 12-13
+feature.h
+  db0cc33ed56f7a94 30-34
+.github/workflows/prebuilt.yml
+  db0cc33ed56f7a94 1-110
+README.md
+  db0cc33ed56f7a94 82,87-89,91-133,172,175-177,179-181,193,199,202
+.github/workflows/main.yml
+  db0cc33ed56f7a94 34-39,84-132,145-150,225
+virtio-blk.c
+  db0cc33ed56f7a94 70-91,492-496,512-517
+.github/actions/setup-semu/action.yml
+  db0cc33ed56f7a94 16,28
+.ci/suggest-format.sh
+  db0cc33ed56f7a94 3-13
+scripts/bench-login.expect
+  db0cc33ed56f7a94 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3b058133cfba221246e2d3d314b95105a9e6f406",
+  "prompts": {
+    "08349defc12ad5f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "247eddb7-dc41-482e-aa46-d86b8f3ed45f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 204,
+      "total_deletions": 28,
+      "accepted_lines": 160,
+      "overriden_lines": 0
+    },
+    "30cc180b849a0ba4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dc883-85a7-7e23-81b2-373865a611ff",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 0,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    },
+    "4cd62012773cdf6d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd144-4116-7111-8d79-e0b508a2826c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 3,
+      "accepted_lines": 12,
+      "overriden_lines": 0
+    },
+    "8494bf2672813de4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd130-bcaf-78b3-b862-53ffee6822fb",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 3,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "d1b9c5e9b6ad7366": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dc7b5-8add-7b20-86d2-57348a942cb2",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "db0cc33ed56f7a94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "925d7a56-aa46-4cfd-9e32-1d157ff7ce35",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 1005,
+      "total_deletions": 332,
+      "accepted_lines": 787,
+      "overriden_lines": 2
+    },
+    "e7522f7b83f35ca8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dc7b5-9560-7280-b0e8-309fcb0104c5",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 9,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "ff46cd9b914e674c": {
+      "agent_id": {
+        "tool": "gemini",
+        "id": "90d257e6-9f9f-4b59-9f57-7c0ce76adf6a",
+        "model": "gemini-3-flash-preview"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
