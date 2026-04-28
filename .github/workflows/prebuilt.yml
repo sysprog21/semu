@@ -1,14 +1,14 @@
 name: Publish prebuilt images
 
-# Builds the Linux kernel and Buildroot rootfs that the rest of CI (and
-# `make` on a fresh checkout) consumes, then publishes them as assets on a
+# Builds the Linux kernel and Buildroot rootfs that the rest of CI and
+# make on a fresh checkout consumes, then publishes them as assets on a
 # fixed-tag GitHub prerelease so the download URL stays stable across
-# rebuilds. This replaces the old `blob` branch convention, which forced
-# us to push large binary artifacts into the source tree.
+# rebuilds, keeping large binary artifacts out of the source tree.
 #
-# The workflow is manual by default (workflow_dispatch). Run it whenever
-# the kernel config, buildroot config, or build-image.sh changes; the
-# resulting SHA1 sums must be reflected in mk/external.mk.
+# Triggers automatically on master pushes that touch any input listed
+# in the paths filter below, and can be invoked manually via
+# workflow_dispatch. The resulting SHA1 sums must be reflected in
+# mk/external.mk (KERNEL_DATA_SHA1, INITRD_DATA_SHA1, PREBUILT_INPUTS_SHA1).
 
 on:
   workflow_dispatch:
@@ -76,7 +76,7 @@ jobs:
           tag_name: prebuilt
           name: Prebuilt images (rolling)
           prerelease: true
-          # Replace existing assets at the `prebuilt` tag rather than
+          # Replace existing assets at the prebuilt tag rather than
           # appending duplicates with new names.
           fail_on_unmatched_files: true
           files: |
