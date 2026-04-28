@@ -3,32 +3,48 @@
 #   _DATA : the file to be read by specific executable.
 #   _DATA_SHA1 : the checksum of the content in _DATA
 #
-# Artifacts live on the orphan `blob` branch of this repository. The
-# `Publish prebuilt images` workflow (see .github/workflows/prebuilt.yml)
-# will eventually republish them to a fixed-tag GitHub prerelease; once
-# that release exists, switch COMMON_URL to
-# https://github.com/sysprog21/semu/releases/download/prebuilt and update
-# KERNEL_DATA_SHA1, INITRD_DATA_SHA1, and PREBUILT_INPUTS_SHA1 from the
-# release body.
+# Artifacts are published as assets on the fixed-tag prebuilt GitHub
+# prerelease by .github/workflows/prebuilt.yml. Update the SHA1 values
+# below from the release body whenever the workflow republishes a new
+# build.
 
-COMMON_URL = https://github.com/sysprog21/semu/raw/blob
+COMMON_URL = https://github.com/sysprog21/semu/releases/download/prebuilt
 
 # kernel
 KERNEL_DATA_URL = $(COMMON_URL)/Image.bz2
 KERNEL_DATA = Image
-KERNEL_DATA_SHA1 = f33badc277a88c17ce36b28d229a3f99cbccef91
+KERNEL_DATA_SHA1 = 39d273097f21a1bf38fd93b96a3d7459f843bc84
 
 # initrd
 INITRD_DATA_URL = $(COMMON_URL)/rootfs.cpio.bz2
 INITRD_DATA = rootfs.cpio
-INITRD_DATA_SHA1 = a63336a28e484ed9cd560652c336b93affe50126
+INITRD_DATA_SHA1 = 9df154cdf58103e953ccdf0d40736cadf9318b12
 
 define download
+# Download to a .part file so an interrupted curl never lands a
+# corrupt or incomplete .bz2 that a later run mistakes for valid input.
+# Curl resume (-C -) is intentionally NOT used: a fully-downloaded .part
+# left over from a previous run, e.g. interrupted before sha1 verify,
+# would make curl request a byte range past EOF, the server replies
+# HTTP 416, and curl exits non-zero, a permanent self-inflicted
+# deadlock. These files are 5 to 7 MiB; a fresh GET is cheap.
+#
+# Decompress to a .tmp file and rename only on success, so an
+# interrupted bunzip2 cannot leave a half-decompressed Image or
+# rootfs.cpio that make would treat as a valid up-to-date target on the
+# next invocation.
 $($(T)_DATA):
 	$(VECHO) "  GET\t$$@\n"
-	$(Q)curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
-	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@.bz2" | $(SHA1SUM) -c -
-	$(Q)bunzip2 $$@.bz2
+	$(Q)curl --fail --retry 3 --retry-delay 1 --progress-bar \
+	    -L -o "$$@.bz2.part" "$(strip $($(T)_DATA_URL))" \
+	    || { rm -f "$$@.bz2.part"; exit 1; }
+	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@.bz2.part" | $(SHA1SUM) -c - \
+	    || { rm -f "$$@.bz2.part"; exit 1; }
+	$(Q)mv "$$@.bz2.part" "$$@.bz2"
+	$(Q)bunzip2 -c "$$@.bz2" > "$$@.tmp" \
+	    || { rm -f "$$@.tmp"; exit 1; }
+	$(Q)mv "$$@.tmp" "$$@"
+	$(Q)rm -f "$$@.bz2"
 endef
 
 EXTERNAL_DATA = KERNEL INITRD
@@ -40,13 +56,13 @@ $(foreach T,$(EXTERNAL_DATA),$(eval $(download)))
 # input files (kernel/buildroot/busybox configs, the build script, and
 # the init stub). When any of those change locally the prebuilt may no
 # longer reflect the user's intent, so we compute the SHA1 of those
-# inputs and compare against PREBUILT_INPUTS_SHA1 -- the value the
-# `Publish prebuilt images` workflow recorded for the live release.
+# inputs and compare against PREBUILT_INPUTS_SHA1, the value the
+# Publish prebuilt images workflow recorded for the live release.
 #
 # Mismatch -> warn but do not auto-rebuild: a buildroot run takes the
-# better part of an hour, so we let the user opt in via `make build-image`.
+# better part of an hour, so we let the user opt in via make build-image.
 # Keep this list in sync with the INPUTS array in .ci/publish-prebuilt.sh
-# and the `paths:` filter in .github/workflows/prebuilt.yml.
+# and the paths filter in .github/workflows/prebuilt.yml.
 PREBUILT_INPUTS := \
     configs/linux.config \
     configs/busybox.config \
