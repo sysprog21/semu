@@ -1,0 +1,14 @@
+#!/usr/bin/env expect
+
+set timeout 40
+
+if {$argc < 1} {
+    puts stderr "usage: bench-login.expect <command> [args...]"
+    exit 2
+}
+
+log_user 0
+spawn {*}$argv
+expect "buildroot login:"
+exec kill [exp_pid]
+expect eof

@@ -13,6 +13,7 @@ runs:
           build-essential \
           device-tree-compiler \
           expect \
+          fakeroot \
           libasound2-dev \
           libudev-dev \
           libsdl2-dev
@@ -24,4 +25,4 @@ runs:
         HOMEBREW_NO_AUTO_UPDATE: 1
         HOMEBREW_NO_ANALYTICS: 1
       run: |
-        brew install make dtc expect e2fsprogs sdl2
+        brew install make dtc expect fakeroot e2fsprogs sdl2

@@ -43,7 +43,7 @@ function do_buildroot
     safe_copy configs/buildroot.config buildroot/.config
     safe_copy configs/busybox.config buildroot/busybox.config
     cp -f target/init buildroot/fs/cpio/init
-    
+
     # Otherwise, the error below raises:
     #   You seem to have the current working directory in your
     #   LD_LIBRARY_PATH environment variable. This doesn't work.
@@ -53,13 +53,20 @@ function do_buildroot
     ASSERT make $PARALLEL
     popd
 
-    if [[ $EXTERNAL_ROOT -eq 1 ]]; then
-        echo "Copying rootfs.cpio to rootfs_full.cpio (external root mode)"
-        cp -f buildroot/output/images/rootfs.cpio ./rootfs_full.cpio
-        ASSERT ./scripts/rootfs_ext4.sh
+    # Always publish the cpio. It is the canonical buildroot output and
+    # serves both as the source for the ext4 image and as the legacy
+    # initramfs payload (when ENABLE_EXTERNAL_ROOT=0).
+    echo "Publishing rootfs.cpio"
+    cp -f buildroot/output/images/rootfs.cpio ./rootfs.cpio
+
+    # Build ext4.img unless --no-ext4 was passed. The make default
+    # (ENABLE_EXTERNAL_ROOT=1) boots from /dev/vda and needs this image.
+    # --no-ext4 is the escape hatch for users who only want the legacy
+    # initramfs path or do not have fakeroot/mkfs.ext4 installed.
+    if [[ $NO_EXT4 -eq 1 ]]; then
+        echo "Skipping ext4.img build (--no-ext4)"
     else
-        echo "Copying rootfs.cpio to rootfs.cpio (initramfs mode)"
-        cp -f buildroot/output/images/rootfs.cpio ./rootfs.cpio
+        ASSERT ./scripts/rootfs_ext4.sh ./rootfs.cpio ./ext4.img
     fi
 }
 
@@ -86,14 +93,16 @@ function do_linux
 
 function show_help {
     cat << EOF
-Usage: $0 [--buildroot] [--linux] [--all] [--external-root] [--clean-build] [--help]
+Usage: $0 [--buildroot] [--linux] [--all] [--no-ext4] [--clean-build] [--help]
 
 Options:
-  --buildroot         Build Buildroot rootfs
-  --linux             Build Linux kernel
+  --buildroot         Build Buildroot userland (produces rootfs.cpio and,
+                      unless --no-ext4 is given, ext4.img for vda boot)
+  --linux             Build the Linux kernel
   --all               Build both Buildroot and Linux
-  --external-root     Use external rootfs instead of initramfs
-  --clean-build       Remove entire buildroot/ and/or linux/ directories before build
+  --no-ext4           Skip ext4.img generation; produce only rootfs.cpio
+                      (matches the legacy ENABLE_EXTERNAL_ROOT=0 path)
+  --clean-build       Remove buildroot/ and/or linux/ before building
   --help              Show this message
 EOF
     exit 1
@@ -101,7 +110,7 @@ EOF
 
 BUILD_BUILDROOT=0
 BUILD_LINUX=0
-EXTERNAL_ROOT=0
+NO_EXT4=0
 CLEAN_BUILD=0
 
 while [[ $# -gt 0 ]]; do
@@ -116,8 +125,8 @@ while [[ $# -gt 0 ]]; do
             BUILD_BUILDROOT=1
             BUILD_LINUX=1
             ;;
-        --external-root)
-            EXTERNAL_ROOT=1
+        --no-ext4)
+            NO_EXT4=1
             ;;
         --clean-build)
             CLEAN_BUILD=1

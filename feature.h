@@ -27,5 +27,10 @@
 #define SEMU_FEATURE_VIRTIOINPUT 1
 #endif
 
+/* external rootfs: kernel boots /dev/vda, no initramfs. Default off. */
+#ifndef SEMU_FEATURE_EXTERNAL_ROOT
+#define SEMU_FEATURE_EXTERNAL_ROOT 0
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x

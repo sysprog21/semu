@@ -703,7 +703,7 @@ static void usage(const char *execpath)
 {
     fprintf(stderr,
             "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d "
-            "disk-image] [-s shared-directory]\n",
+            "disk-image] [-s shared-directory] [-H]\n",
             execpath);
 }
 
@@ -716,20 +716,22 @@ static void handle_options(int argc,
                            char **net_dev,
                            int *hart_count,
                            bool *debug,
+                           bool *headless,
                            char **shared_dir)
 {
     *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev =
         *shared_dir = NULL;
 
     int optidx = 0;
-    struct option opts[] = {{"kernel", 1, NULL, 'k'},    {"dtb", 1, NULL, 'b'},
-                            {"initrd", 1, NULL, 'i'},    {"disk", 1, NULL, 'd'},
-                            {"netdev", 1, NULL, 'n'},    {"smp", 1, NULL, 'c'},
-                            {"gdbstub", 0, NULL, 'g'},   {"help", 0, NULL, 'h'},
-                            {"shared_dir", 1, NULL, 's'}};
+    struct option opts[] = {
+        {"kernel", 1, NULL, 'k'},     {"dtb", 1, NULL, 'b'},
+        {"initrd", 1, NULL, 'i'},     {"disk", 1, NULL, 'd'},
+        {"netdev", 1, NULL, 'n'},     {"smp", 1, NULL, 'c'},
+        {"gdbstub", 0, NULL, 'g'},    {"help", 0, NULL, 'h'},
+        {"shared_dir", 1, NULL, 's'}, {"headless", 0, NULL, 'H'}};
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:s:gh", opts, &optidx)) !=
+    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:s:ghH", opts, &optidx)) !=
            -1) {
         switch (c) {
         case 'k':
@@ -747,14 +749,33 @@ static void handle_options(int argc,
         case 'n':
             *net_dev = optarg;
             break;
-        case 'c':
-            *hart_count = atoi(optarg);
+        case 'c': {
+            /* strtol over atoi: well-defined behavior on overflow plus
+             * trailing-junk detection. Upper bound is 32 because
+             * plic_state_t.ie[] is sized for 32 contexts (one per hart);
+             * see device.h.
+             */
+            char *end;
+            errno = 0;
+            long n = strtol(optarg, &end, 10);
+            if (errno || *end || end == optarg || n < 1 || n > 32) {
+                fprintf(stderr,
+                        "%s: -c expects an integer hart count in [1,32], "
+                        "got '%s'\n",
+                        argv[0], optarg);
+                exit(2);
+            }
+            *hart_count = (int) n;
             break;
+        }
         case 's':
             *shared_dir = optarg;
             break;
         case 'g':
             *debug = true;
+            break;
+        case 'H':
+            *headless = true;
             break;
         case 'h':
             usage(argv[0]);
@@ -775,6 +796,24 @@ static void handle_options(int argc,
     if (!*dtb_file)
         *dtb_file = "minimal.dtb";
 }
+
+#if SEMU_HAS(EXTERNAL_ROOT)
+static bool uses_default_minimal_dtb(const char *dtb_file)
+{
+    const char *name;
+
+    if (!dtb_file)
+        return false;
+
+    name = strrchr(dtb_file, '/');
+    if (name)
+        name++;
+    else
+        name = dtb_file;
+
+    return strcmp(name, "minimal.dtb") == 0;
+}
+#endif
 
 #define INIT_HART(hart, emu, id)                  \
     do {                                          \
@@ -801,12 +840,33 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     char *shared_dir;
     int hart_count = 1;
     bool debug = false;
+    bool headless = false;
 #if SEMU_HAS(VIRTIONET)
     bool netdev_ready = false;
 #endif
     vm_t *vm = &emu->vm;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
-                   &disk_file, &netdev, &hart_count, &debug, &shared_dir);
+                   &disk_file, &netdev, &hart_count, &debug, &headless,
+                   &shared_dir);
+#if !SEMU_HAS(VIRTIOINPUT)
+    (void) headless;
+#endif
+
+#if SEMU_HAS(EXTERNAL_ROOT)
+    if (initrd_file && uses_default_minimal_dtb(dtb_file)) {
+        fprintf(stderr,
+                "-i requires a DTB with linux,initrd-start/end. "
+                "Rebuild with ENABLE_EXTERNAL_ROOT=0 or pass -b "
+                "<dtb-with-initrd>.\n");
+        return 2;
+    }
+
+    if (!disk_file && uses_default_minimal_dtb(dtb_file)) {
+        fprintf(stderr,
+                "warning: EXTERNAL_ROOT build expects -d <disk-image>; "
+                "without it the kernel will hang in rootwait.\n");
+    }
+#endif
 
     /* Initialize the emulator */
     memset(emu, 0, sizeof(*emu));
@@ -820,24 +880,38 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     }
     assert(!(((uintptr_t) emu->ram) & 0b11));
 
-    /* *-----------------------------------------*
-     * |              Memory layout              |
-     * *----------------*----------------*-------*
-     * |  kernel image  |  initrd image  |  dtb  |
-     * *----------------*----------------*-------*
+    /* Memory layout. Two shapes depending on whether `-i` was given:
+     *
+     *   Default (vda boot, no -i):
+     *     0                                         RAM_SIZE - 1MiB
+     *     +------------------+--------//-----+-----+
+     *     |   kernel image   |   free RAM    | dtb |
+     *     +------------------+--------//-----+-----+
+     *                                               (dtb at top)
+     *
+     *   Legacy initramfs (-i present):
+     *     0                       RAM-9MiB  RAM-1MiB
+     *     +------------------+----+---------+-----+
+     *     |   kernel image   | .. | initrd  | dtb |
+     *     +------------------+----+---------+-----+
+     *                              (8 MiB)  (1 MiB)
+     *
+     * dtb sits in the last 1 MiB and initrd, when present, in the 8 MiB
+     * just below it -- both placements keep the kernel from clobbering
+     * them as it allocates downward from RAM_SIZE.
      */
     char *ram_loc = (char *) emu->ram;
-    /* Load Linux kernel image */
+    /* Load Linux kernel image at the base of RAM */
     map_file(&ram_loc, kernel_file);
-    /* Load at last 1 MiB to prevent kernel from overwriting it */
-    uint32_t dtb_addr = RAM_SIZE - DTB_SIZE; /* Device tree */
+    /* Load dtb at the last 1 MiB so the kernel will not overwrite it */
+    uint32_t dtb_addr = RAM_SIZE - DTB_SIZE;
     ram_loc = ((char *) emu->ram) + dtb_addr;
     map_file(&ram_loc, dtb_file);
-    /* Load optional initrd image at last 8 MiB before the dtb region to
-     * prevent kernel from overwritting it
+    /* Load optional initrd image in the 8 MiB just below the dtb region
+     * (legacy boot path; not used when the guest boots from /dev/vda).
      */
     if (initrd_file) {
-        uint32_t initrd_addr = dtb_addr - INITRD_SIZE; /* Init RAM disk */
+        uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
         ram_loc = ((char *) emu->ram) + initrd_addr;
         map_file(&ram_loc, initrd_file);
     }
@@ -848,6 +922,10 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     /* Set up RISC-V harts */
     vm->n_hart = hart_count;
     vm->hart = malloc(sizeof(hart_t *) * vm->n_hart);
+    if (!vm->hart) {
+        fprintf(stderr, "Failed to allocate %u hart slots.\n", vm->n_hart);
+        return 1;
+    }
     for (uint32_t i = 0; i < vm->n_hart; i++) {
         hart_t *newhart = calloc(1, sizeof(hart_t));
         if (!newhart) {
@@ -915,7 +993,7 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
 #endif
 
 #if SEMU_HAS(VIRTIOINPUT)
-    g_window.window_init();
+    g_window.window_init(headless);
 
     emu->vkeyboard.ram = emu->ram;
     virtio_input_init(&(emu->vkeyboard));
@@ -1127,18 +1205,35 @@ static int semu_step_chunk(emu_state_t *emu, hart_t *hart, int steps)
     return 0;
 }
 
-#ifdef MMU_CACHE_STATS
+/* Async-signal-safe SIGINT/SIGTERM handler. Setting this flag lets the
+ * event loops break out cleanly so atexit hooks (e.g., the virtio-blk
+ * msync) actually run instead of being skipped by an immediate process
+ * death. The MMU_CACHE_STATS build additionally uses the flag to defer
+ * stats printing out of the signal handler.
+ *
+ * When VIRTIOINPUT runs the emulator in a background thread, the signal
+ * is typically delivered to the main thread. The emu thread can be
+ * blocked in poll(-1), so we also write a byte to its wake pipe; that
+ * guarantees the loop notices `signal_received` and exits, which in
+ * turn unblocks the window main loop via window_shutdown().
+ */
 static volatile sig_atomic_t signal_received = 0;
-
-/* Forward declaration */
-static void print_mmu_cache_stats(vm_t *vm);
-
-/* Async-signal-safe handler: only set flag, defer printing */
-static void signal_handler_stats(int sig UNUSED)
+static volatile sig_atomic_t signal_wake_fd = -1;
+static void signal_handler(int sig UNUSED)
 {
     signal_received = 1;
+    int fd = signal_wake_fd;
+    if (fd >= 0) {
+        char byte = 1;
+        /* write() is async-signal-safe; pipe is non-blocking so this
+         * cannot stall the handler.
+         */
+        ssize_t n = write(fd, &byte, 1);
+        (void) n;
+    }
 }
 
+#ifdef MMU_CACHE_STATS
 static void print_mmu_cache_stats(vm_t *vm)
 {
     fprintf(stderr, "\n=== MMU Cache Statistics ===\n");
@@ -1303,13 +1398,11 @@ static void semu_run(emu_state_t *emu)
         size_t poll_capacity = 0;
 
         while (!emu->stopped) {
-#ifdef MMU_CACHE_STATS
-            /* Check if signal received (SIGINT/SIGTERM).
-             * Break to cleanup resources, stats printed at end of main().
+            /* Break out on SIGINT/SIGTERM so main() returns and atexit
+             * hooks (e.g., virtio-blk msync) run before the process dies.
              */
             if (signal_received)
                 break;
-#endif
             /* Only need fds for timer and UART (no coroutine I/O),
              * plus an optional wake pipe when VIRTIOINPUT is enabled.
              */
@@ -1329,6 +1422,15 @@ static void semu_run(emu_state_t *emu)
                     close(kq);
 #else
                     close(wfi_timer_fd);
+#endif
+#if SEMU_HAS(VIRTIOINPUT)
+                    /* Mirror the normal-exit cleanup so the wake pipe
+                     * does not leak across the early return.
+                     */
+                    if (emu->wake_fd[0] >= 0)
+                        close(emu->wake_fd[0]);
+                    if (emu->wake_fd[1] >= 0)
+                        close(emu->wake_fd[1]);
 #endif
                     emu->exit_code = -1;
                     return;
@@ -1531,6 +1633,11 @@ static void semu_run(emu_state_t *emu)
         if (emu->wake_fd[1] >= 0)
             close(emu->wake_fd[1]);
 #endif
+        /* Free coroutine stacks/contexts from coro_init() above so the
+         * graceful-exit path matches what coro_create_hart()'s failure
+         * path already does. Idempotent against !initialized.
+         */
+        coro_cleanup();
 
         /* A closed window is a normal user action, not an error. */
 #if SEMU_HAS(VIRTIOINPUT)
@@ -1549,13 +1656,9 @@ static void semu_run(emu_state_t *emu)
 
     /* Single-hart mode: use original scheduling */
     while (!emu->stopped) {
-#ifdef MMU_CACHE_STATS
-        /* Check if signal received (SIGINT/SIGTERM).
-         * Break to exit loop, stats printed at end of main().
-         */
+        /* Break out on SIGINT/SIGTERM so atexit hooks fire on graceful exit. */
         if (signal_received)
             break;
-#endif
 #if SEMU_HAS(VIRTIONET)
         int i = 0;
         if (emu->vnet.peer.type == NETDEV_IMPL_user && boot_complete) {
@@ -1639,18 +1742,22 @@ static int semu_read_mem(void *args, size_t addr, size_t len, void *val)
 static gdb_action_t semu_cont(void *args)
 {
     emu_state_t *emu = (emu_state_t *) args;
+
+    /* A previous terminal interrupt should stop only the active continue.
+     * Clear the sticky global flag before resuming so later GDB `continue`
+     * commands can run guest code again.
+     */
+    signal_received = 0;
 #if SEMU_HAS(VIRTIOINPUT)
     while (!semu_is_interrupt(emu) && !g_window.window_is_closed()) {
 #else
     while (!semu_is_interrupt(emu)) {
 #endif
-#ifdef MMU_CACHE_STATS
-        /* Check if signal received (SIGINT/SIGTERM).
-         * Break to return control to gdbstub, stats printed at end of main().
+        /* Break out on SIGINT/SIGTERM so the gdbstub regains control
+         * and main() returns through the atexit hooks.
          */
         if (signal_received)
             break;
-#endif
         semu_step(emu);
     }
 
@@ -1759,12 +1866,32 @@ int main(int argc, char **argv)
     if (ret)
         return ret;
 
-#ifdef MMU_CACHE_STATS
-    signal(SIGINT, signal_handler_stats);
-    signal(SIGTERM, signal_handler_stats);
-#endif
+    /* Install handlers unconditionally so SIGINT/SIGTERM let us return
+     * through main() and run atexit hooks (msync of MAP_SHARED disks,
+     * etc.) instead of being killed mid-flight. Use sigaction so the
+     * SA_RESTART flag stays clear -- otherwise glibc's `signal()` would
+     * auto-restart `poll()` and the loops would never see the flag.
+     */
+    /* Use sigaction so the SA_RESTART flag stays clear -- otherwise
+     * glibc's `signal()` would auto-restart `poll()` and the loops
+     * would never see the flag.
+     */
+    {
+        struct sigaction sa = {0};
+        sa.sa_handler = signal_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
+    }
 
 #if SEMU_HAS(VIRTIOINPUT)
+    /* Publish the wake pipe to the signal handler so SIGINT/SIGTERM can
+     * unblock the emulator thread's poll() in the threaded window path.
+     */
+    if (emu.wake_fd[1] >= 0)
+        signal_wake_fd = emu.wake_fd[1];
+
     /* If window backend has a main loop function, run emulator in background
      * thread and use main thread for window events (required for macOS SDL2).
      */

@@ -1,0 +1,110 @@
+name: Publish prebuilt images
+
+# Builds the Linux kernel and Buildroot rootfs that the rest of CI (and
+# `make` on a fresh checkout) consumes, then publishes them as assets on a
+# fixed-tag GitHub prerelease so the download URL stays stable across
+# rebuilds. This replaces the old `blob` branch convention, which forced
+# us to push large binary artifacts into the source tree.
+#
+# The workflow is manual by default (workflow_dispatch). Run it whenever
+# the kernel config, buildroot config, or build-image.sh changes; the
+# resulting SHA1 sums must be reflected in mk/external.mk.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    # Republish the prebuilt artifacts whenever any input that defines
+    # what gets baked into Image / rootfs.cpio actually changes. The list
+    # mirrors PREBUILT_INPUTS in mk/external.mk -- keep them in sync.
+    paths:
+      - 'configs/linux.config'
+      - 'configs/busybox.config'
+      - 'configs/buildroot.config'
+      - 'scripts/build-image.sh'
+      - 'scripts/rootfs_ext4.sh'
+      - 'target/**'
+      - '.github/workflows/prebuilt.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prebuilt
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            bc \
+            bison \
+            flex \
+            cpio \
+            fakeroot \
+            e2fsprogs \
+            git \
+            python3 \
+            libssl-dev \
+            libelf-dev \
+            wget
+
+      - name: Build Buildroot and Linux
+        run: ./scripts/build-image.sh --all
+
+      - name: Compress and checksum artifacts
+        id: checksum
+        # The shell logic lives in .ci/publish-prebuilt.sh so it can be
+        # exercised locally and stays out of the YAML.
+        run: |
+          set -euo pipefail
+          .ci/publish-prebuilt.sh >> "$GITHUB_OUTPUT"
+          ls -la Image.bz2 rootfs.cpio.bz2 prebuilt.sha1
+
+      - name: Update prebuilt prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: prebuilt
+          name: Prebuilt images (rolling)
+          prerelease: true
+          # Replace existing assets at the `prebuilt` tag rather than
+          # appending duplicates with new names.
+          fail_on_unmatched_files: true
+          files: |
+            Image.bz2
+            rootfs.cpio.bz2
+            prebuilt.sha1
+          body: |
+            Rolling prerelease of the Linux kernel and Buildroot rootfs
+            consumed by `mk/external.mk`. Re-published whenever any
+            input that defines the kernel/rootfs content changes.
+
+            ## Update `mk/external.mk`
+
+            Paste these three lines into `mk/external.mk` to pin a fresh
+            `make` checkout to this build. `PREBUILT_INPUTS_SHA1` is what
+            local checkouts compare against to detect when their configs
+            have drifted from the prebuilt.
+
+            ```make
+            KERNEL_DATA_SHA1      = ${{ steps.checksum.outputs.kernel_sha1 }}
+            INITRD_DATA_SHA1      = ${{ steps.checksum.outputs.initrd_sha1 }}
+            PREBUILT_INPUTS_SHA1  = ${{ steps.checksum.outputs.inputs_sha1 }}
+            ```
+
+            ## Raw checksums
+
+            ```
+            ${{ steps.checksum.outputs.kernel_sha1 }}  Image.bz2
+            ${{ steps.checksum.outputs.initrd_sha1 }}  rootfs.cpio.bz2
+            ${{ steps.checksum.outputs.inputs_sha1 }}  inputs (configs + scripts + target/init, concatenated)
+            ```

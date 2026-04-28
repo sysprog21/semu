@@ -67,6 +67,28 @@ PACKED(struct vblk_req_header {
 static struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
 static int vblk_dev_cnt = 0;
 
+/* Track each MAP_SHARED disk mapping so we can msync(MS_SYNC) on graceful
+ * exit. Without this, dirty pages live in the host page cache and rely on
+ * the kernel's writeback to land on disk. The guest cannot trigger a sync
+ * via VIRTIO_BLK_T_FLUSH today because we do not advertise
+ * VIRTIO_BLK_F_FLUSH; this hook is the best-effort substitute for that.
+ */
+static struct {
+    void *addr;
+    size_t size;
+} vblk_disks[VBLK_DEV_CNT_MAX];
+static int vblk_disks_cnt = 0;
+
+static void virtio_blk_sync_all(void)
+{
+    for (int i = 0; i < vblk_disks_cnt; i++) {
+        if (!vblk_disks[i].addr)
+            continue;
+        if (msync(vblk_disks[i].addr, vblk_disks[i].size, MS_SYNC) < 0)
+            perror("virtio-blk: msync");
+    }
+}
+
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {
     vblk->Status |= VIRTIO_STATUS__DEVICE_NEEDS_RESET;
@@ -466,7 +488,16 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 
     /* Get the disk image size */
     struct stat st;
-    fstat(disk_fd, &st);
+    if (fstat(disk_fd, &st) < 0) {
+        fprintf(stderr, "fstat(%s): %s\n", disk_file, strerror(errno));
+        close(disk_fd);
+        exit(2);
+    }
+    if (st.st_size <= 0) {
+        fprintf(stderr, "%s is empty or has invalid size\n", disk_file);
+        close(disk_fd);
+        exit(2);
+    }
     size_t disk_size = st.st_size;
 
     /* Set up the disk memory */
@@ -481,6 +512,12 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 
     vblk->disk = disk_mem;
     PRIV(vblk)->capacity = (disk_size - 1) / DISK_BLK_SIZE + 1;
+
+    if (vblk_disks_cnt == 0)
+        atexit(virtio_blk_sync_all);
+    vblk_disks[vblk_disks_cnt].addr = disk_mem;
+    vblk_disks[vblk_disks_cnt].size = disk_size;
+    vblk_disks_cnt++;
 
     return disk_mem;
 }

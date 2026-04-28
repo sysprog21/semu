@@ -120,8 +120,13 @@ static void window_main_loop_sw(void)
     }
 }
 
-static void window_init_sw(void)
+static void window_init_sw(bool headless)
 {
+    if (headless) {
+        headless_mode = true;
+        return;
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr,
                 "window_init_sw(): failed to initialize SDL: %s\n"

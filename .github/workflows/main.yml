@@ -31,7 +31,12 @@ jobs:
         path: |
           Image
           rootfs.cpio
-        key: external-${{ hashFiles('mk/external.mk') }}
+        # Invalidate the cached prebuilts whenever any input that defines
+        # their content changes. Keep this list in sync with
+        # PREBUILT_INPUTS in mk/external.mk and the `paths:` filter in
+        # .github/workflows/prebuilt.yml; otherwise CI will silently
+        # restore stale Image / rootfs.cpio after a config bump.
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
@@ -76,6 +81,55 @@ jobs:
       shell: bash
       timeout-minutes: 5
 
+  # Guard the legacy initramfs path so it does not bitrot now that the
+  # default boot mode is /dev/vda. Single slim job: fresh build with
+  # ENABLE_EXTERNAL_ROOT=0, then run autorun.
+  semu-linux-initramfs:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: cache external downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+        # Invalidate the cached prebuilts whenever any input that defines
+        # their content changes. Keep this list in sync with
+        # PREBUILT_INPUTS in mk/external.mk and the `paths:` filter in
+        # .github/workflows/prebuilt.yml; otherwise CI will silently
+        # restore stale Image / rootfs.cpio after a config bump.
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
+    - name: cache submodule builds
+      uses: actions/cache@v4
+      with:
+        path: |
+          mini-gdbstub/build
+          minislirp/src/*.a
+        key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules', 'mini-gdbstub/**', 'minislirp/**') }}
+        restore-keys: |
+          ${{ runner.os }}-submodules-
+    - name: cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/actions/setup-semu/action.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+    - name: install-dependencies
+      uses: ./.github/actions/setup-semu
+    - name: legacy initramfs build
+      run: make ENABLE_EXTERNAL_ROOT=0
+      shell: bash
+      timeout-minutes: 5
+    - name: legacy initramfs autorun
+      run: ENABLE_EXTERNAL_ROOT=0 .ci/autorun.sh
+      shell: bash
+      timeout-minutes: 10
+
   semu-macOS:
     runs-on: macos-latest
     steps:
@@ -88,7 +142,12 @@ jobs:
         path: |
           Image
           rootfs.cpio
-        key: external-${{ hashFiles('mk/external.mk') }}
+        # Invalidate the cached prebuilts whenever any input that defines
+        # their content changes. Keep this list in sync with
+        # PREBUILT_INPUTS in mk/external.mk and the `paths:` filter in
+        # .github/workflows/prebuilt.yml; otherwise CI will silently
+        # restore stale Image / rootfs.cpio after a config bump.
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
@@ -163,35 +222,7 @@ jobs:
       if: github.event_name == 'pull_request'
       env:
         REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        set -euo pipefail
-
-        # Get list of source files into array (POSIX-compatible for macOS bash 3.2)
-        SOURCES=()
-        while IFS= read -r file; do
-            SOURCES+=("$file")
-        done < <(git ls-files '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
-
-        # Register cleanup function to restore files on exit
-        cleanup_files() {
-          if [ ${#SOURCES[@]} -gt 0 ]; then
-            echo "Restoring files to original state..."
-            git checkout -- "${SOURCES[@]}" 2>/dev/null || true
-          fi
-        }
-        trap cleanup_files EXIT INT TERM
-
-        # Apply clang-format in-place to generate diff
-        clang-format-20 -i "${SOURCES[@]}"
-
-        # Generate diff and pipe to reviewdog
-        # Note: reviewdog exit code doesn't affect cleanup due to trap
-        git diff -u --no-color | reviewdog -f=diff \
-          -name="clang-format" \
-          -reporter=github-pr-review \
-          -filter-mode=added \
-          -fail-on-error=false \
-          -level=warning || true
+      run: .ci/suggest-format.sh
       shell: bash
       timeout-minutes: 5
     - name: Check formatting (fail on violations)
