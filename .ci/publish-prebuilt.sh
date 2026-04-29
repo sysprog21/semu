@@ -48,6 +48,7 @@ INPUTS=(
     configs/linux.config
     configs/busybox.config
     configs/buildroot.config
+    configs/x11.config
     configs/riscv-cross-file
     scripts/build-image.sh
     scripts/rootfs_ext4.sh
@@ -57,7 +58,7 @@ INPUTS=(
 
 for f in Image rootfs.cpio test-tools.img "${INPUTS[@]}"; do
     if [ ! -f "$f" ]; then
-        echo "[!] Missing $f -- run scripts/build-image.sh --all --directfb2-test first" >&2
+        echo "[!] Missing $f -- run scripts/build-image.sh --all --x11 --directfb2-test first" >&2
         exit 1
     fi
 done

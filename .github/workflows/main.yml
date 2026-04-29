@@ -60,6 +60,7 @@ jobs:
           configs/linux.config \
           configs/busybox.config \
           configs/buildroot.config \
+          configs/x11.config \
           configs/riscv-cross-file \
           scripts/build-image.sh \
           scripts/rootfs_ext4.sh \
@@ -85,7 +86,7 @@ jobs:
       timeout-minutes: 5
     - name: build kernel, rootfs, and test tools disk from source
       if: steps.detect.outputs.should_build == 'true'
-      run: ./scripts/build-image.sh --all --directfb2-test
+      run: ./scripts/build-image.sh --all --x11 --directfb2-test
       timeout-minutes: 180
     - name: upload PR-built artifacts
       if: steps.detect.outputs.should_build == 'true'
@@ -132,7 +133,7 @@ jobs:
           Image
           rootfs.cpio
           test-tools.img
-        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'configs/x11.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
@@ -205,7 +206,7 @@ jobs:
           Image
           rootfs.cpio
           test-tools.img
-        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'configs/x11.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
@@ -257,7 +258,7 @@ jobs:
           Image
           rootfs.cpio
           test-tools.img
-        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
+        key: external-${{ hashFiles('mk/external.mk', 'configs/linux.config', 'configs/busybox.config', 'configs/buildroot.config', 'configs/x11.config', 'scripts/build-image.sh', 'scripts/rootfs_ext4.sh', 'target/**') }}
     - name: cache submodule builds
       uses: actions/cache@v4
       with:
