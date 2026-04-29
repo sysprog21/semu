@@ -23,6 +23,7 @@ on:
       - 'configs/linux.config'
       - 'configs/busybox.config'
       - 'configs/buildroot.config'
+      - 'configs/x11.config'
       - 'configs/riscv-cross-file'
       - 'scripts/build-image.sh'
       - 'scripts/rootfs_ext4.sh'
@@ -66,7 +67,7 @@ jobs:
             pkg-config
 
       - name: Build Buildroot, Linux, and test tools disk
-        run: ./scripts/build-image.sh --all --directfb2-test
+        run: ./scripts/build-image.sh --all --x11 --directfb2-test
 
       - name: Compress and checksum artifacts
         id: checksum

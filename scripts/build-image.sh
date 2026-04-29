@@ -74,16 +74,27 @@ function meson_setup_or_reconfigure
     fi
 }
 
-function do_buildroot
+function configure_buildroot
 {
-    if [ ! -d buildroot ]; then
-        echo "Cloning Buildroot..."
-        ASSERT git clone https://github.com/buildroot/buildroot -b 2025.02.x --depth=1
-    else
-        echo "buildroot/ already exists, skipping clone"
-    fi
+    local mode="${1:-default}"
+    local buildroot_config="configs/buildroot.config"
+    local x11_config="configs/x11.config"
+    local merge_tool="buildroot/support/kconfig/merge_config.sh"
 
-    safe_copy configs/buildroot.config buildroot/.config
+    if [[ "$mode" == "x11" ]]; then
+        echo "Preparing Buildroot config with X11 fragment..."
+        ASSERT "$merge_tool" -m -r -O buildroot "$buildroot_config" "$x11_config"
+    else
+        echo "Preparing default Buildroot config..."
+        cp -f "$buildroot_config" buildroot/.config
+    fi
+}
+
+function build_buildroot_rootfs
+{
+    local mode="${1:-default}"
+
+    configure_buildroot "$mode"
     safe_copy configs/busybox.config buildroot/busybox.config
     cp -f target/init buildroot/fs/cpio/init
 
@@ -93,8 +104,25 @@ function do_buildroot
     unset LD_LIBRARY_PATH
     pushd buildroot
     ASSERT make olddefconfig
+    if [[ "$mode" == "x11" && \
+          ! -x output/host/bin/riscv32-buildroot-linux-gnu-g++ ]]; then
+        echo "Rebuilding Buildroot final GCC with C++ support..."
+        ASSERT make host-gcc-final-dirclean
+    fi
     ASSERT make $PARALLEL
     popd
+}
+
+function do_buildroot
+{
+    if [ ! -d buildroot ]; then
+        echo "Cloning Buildroot..."
+        ASSERT git clone https://github.com/buildroot/buildroot -b 2025.02.x --depth=1
+    else
+        echo "buildroot/ already exists, skipping clone"
+    fi
+
+    build_buildroot_rootfs default
 
     # Always publish the cpio. It is the canonical buildroot output and
     # serves both as the source for the ext4 image and as the legacy
@@ -110,9 +138,25 @@ function do_buildroot
         echo "Skipping ext4.img build (--no-ext4)"
     else
         ASSERT ./scripts/rootfs_ext4.sh ./rootfs.cpio ./ext4.img
+
+        local test_tools_rootfs=./rootfs.cpio
+        if [[ $BUILD_X11 -eq 1 ]]; then
+            build_buildroot_rootfs x11
+            test_tools_rootfs=./buildroot/output/images/rootfs.cpio
+        fi
+
         if [[ $BUILD_DIRECTFB_TEST -eq 1 ]]; then
             do_extra_packages
-            ASSERT ./scripts/rootfs_ext4.sh ./rootfs.cpio ./test-tools.img \
+            if [[ $BUILD_X11 -eq 1 ]]; then
+                stage_cxx_runtime
+            fi
+            ASSERT ./scripts/rootfs_ext4.sh "$test_tools_rootfs" ./test-tools.img \
+                "$TEST_TOOLS_SIZE_MB" ./extra_packages
+        elif [[ $BUILD_X11 -eq 1 ]]; then
+            rm -rf extra_packages
+            mkdir -p extra_packages
+            stage_cxx_runtime
+            ASSERT ./scripts/rootfs_ext4.sh "$test_tools_rootfs" ./test-tools.img \
                 "$TEST_TOOLS_SIZE_MB" ./extra_packages
         fi
     fi
@@ -189,14 +233,35 @@ function do_extra_packages
     ASSERT cp target/local-env.sh extra_packages/root/
 }
 
+function stage_cxx_runtime
+{
+    local toolchain_lib="buildroot/output/host/riscv32-buildroot-linux-gnu/lib"
+    local libstdcpp="$toolchain_lib/libstdc++.so.6"
+    local libstdcpp_real
+
+    if [ ! -e "$libstdcpp" ]; then
+        echo "Error: libstdc++.so.6 not found in $toolchain_lib"
+        exit 1
+    fi
+
+    libstdcpp_real="$(readlink "$libstdcpp" || basename "$libstdcpp")"
+    if [[ "$libstdcpp_real" != /* ]]; then
+        libstdcpp_real="$toolchain_lib/$libstdcpp_real"
+    fi
+    mkdir -p extra_packages/lib
+    ASSERT cp -a "$toolchain_lib/libstdc++.so" "$libstdcpp" \
+        "$libstdcpp_real" extra_packages/lib/
+}
+
 function show_help {
     cat << EOF
-Usage: $0 [--buildroot] [--linux] [--directfb2-test] [--all] [--no-ext4] [--clean-build] [--help]
+Usage: $0 [--buildroot] [--x11] [--linux] [--directfb2-test] [--all] [--no-ext4] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot userland (produces rootfs.cpio and,
                       unless --no-ext4 is given, ext4.img for vda boot)
-  --directfb2-test    Build test-tools.img with the DirectFB2 test payload
+  --x11               Build test-tools.img from an X11-enabled rootfs
+  --directfb2-test    Overlay the DirectFB2 test payload into test-tools.img
   --linux             Build the Linux kernel
   --all               Build both Buildroot and Linux
   --no-ext4           Skip ext4.img generation; produce only rootfs.cpio
@@ -209,6 +274,7 @@ EOF
 }
 
 BUILD_BUILDROOT=0
+BUILD_X11=0
 BUILD_DIRECTFB_TEST=0
 BUILD_LINUX=0
 NO_EXT4=0
@@ -218,6 +284,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --buildroot)
             BUILD_BUILDROOT=1
+            ;;
+        --x11)
+            BUILD_BUILDROOT=1
+            BUILD_X11=1
             ;;
         --directfb2-test)
             BUILD_BUILDROOT=1
@@ -252,8 +322,8 @@ if [[ $BUILD_BUILDROOT -eq 0 && $BUILD_LINUX -eq 0 ]]; then
     show_help
 fi
 
-if [[ $BUILD_DIRECTFB_TEST -eq 1 && $NO_EXT4 -eq 1 ]]; then
-    echo "Error: --directfb2-test requires an ext4 image; remove --no-ext4."
+if [[ ( $BUILD_DIRECTFB_TEST -eq 1 || $BUILD_X11 -eq 1 ) && $NO_EXT4 -eq 1 ]]; then
+    echo "Error: --x11/--directfb2-test requires an ext4 image; remove --no-ext4."
     show_help
 fi
 

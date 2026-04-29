@@ -144,10 +144,9 @@ unpacking a large cpio, and matches how real systems deploy. The
 `ext4.img` is built from `rootfs.cpio` via `scripts/rootfs_ext4.sh`,
 which requires `fakeroot` and `mkfs.ext4`.
 
-The rolling `prebuilt` release provides an optional `test-tools.img.bz2`,
-an ext4-formatted disk image for larger test/user tools that should not
-inflate `rootfs.cpio` or the default `ext4.img`. Use `make test-tools.img`
-to download it.
+The rolling `prebuilt` release provides an optional `test-tools.img.bz2` for
+larger test/user tools that should not inflate `rootfs.cpio` or the default
+`ext4.img`. Use `make test-tools.img` to download it.
 
 If `fakeroot` is missing, the build falls back to the legacy initramfs
 path (`-i rootfs.cpio`) automatically and prints a one-line warning. To
@@ -254,10 +253,11 @@ not live in the default `rootfs.cpio` or `ext4.img`. This keeps the default
 guest image small while still allowing larger tools to be collected in one
 place.
 
-Build Buildroot and the test tools image with the DirectFB2 test payload:
+Build Buildroot and the test tools image with the DirectFB2 test payload. Add
+`--x11` when the test tools image should use an X11-enabled rootfs:
 
 ```
-$ scripts/build-image.sh --directfb2-test
+$ scripts/build-image.sh --x11 --directfb2-test
 ```
 
 To add a new test tool, extend the `test-tools.img` build path in
