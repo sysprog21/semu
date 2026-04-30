@@ -1,0 +1,47 @@
+.ci/publish-prebuilt.sh
+  34c444f25105c771 17-22,31-32,43,69-73,77
+.github/workflows/prebuilt.yml
+  34c444f25105c771 10-13,29,94-97
+mk/external.mk
+  34c444f25105c771 6-8,12-14,22,24-31,33-39,51-55,61-63,81-83
+  a553734dde714d9c 23,32,40,56,97-115
+.github/workflows/main.yml
+  34c444f25105c771 43-58
+.gitignore
+  34c444f25105c771 11
+Makefile
+  34c444f25105c771 365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "07ac4c94dbd23804da80ebe83175339023a69881",
+  "prompts": {
+    "34c444f25105c771": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f06a2ce8-b213-4493-8ae6-5f5f40f8e4e4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 108,
+      "total_deletions": 62,
+      "accepted_lines": 75,
+      "overriden_lines": 0
+    },
+    "a553734dde714d9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddeee-9131-7c40-833e-6dbe4708e93d",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 35,
+      "accepted_lines": 23,
+      "overriden_lines": 0
+    }
+  }
+}
