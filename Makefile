@@ -362,7 +362,7 @@ distclean: clean
 	$(Q)$(RM) minimal.dtb
 	$(Q)$(RM) .dtb-config.stamp
 	$(Q)$(RM) .build-config.stamp
-	$(Q)$(RM) Image rootfs.cpio
+	$(Q)$(RM) Image rootfs.cpio prebuilt.sha1
 	$(Q)$(RM) ext4.img
 
 -include $(deps)

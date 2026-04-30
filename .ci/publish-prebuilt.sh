@@ -14,7 +14,12 @@
 # Outputs (in cwd):
 #   Image.bz2
 #   rootfs.cpio.bz2
-#   prebuilt.sha1   -- two-line manifest in standard `sha1sum` format
+#   prebuilt.sha1   -- three-line manifest in sha1sum format. The
+#                      first two lines verify the published archives;
+#                      the third uses the virtual name 'inputs' to
+#                      publish the SHA-1 of the concatenated input
+#                      files so drift-detection consumers can read it
+#                      directly from the release.
 #
 # Stdout (machine-readable, one assignment per line):
 #   kernel_sha1=<sha1 of Image.bz2>
@@ -23,8 +28,8 @@
 
 set -euo pipefail
 
-# Pick a SHA1 tool. macOS dropped `sha1sum` from the base system; the
-# coreutils-style `shasum -a 1` is the portable fallback.
+# Pick a SHA1 tool. macOS dropped sha1sum from the base system; the
+# coreutils-style 'shasum -a 1' is the portable fallback.
 if command -v sha1sum >/dev/null 2>&1; then
     SHA1=(sha1sum)
 elif command -v shasum >/dev/null 2>&1; then
@@ -35,7 +40,7 @@ else
 fi
 
 # Keep this list in sync with PREBUILT_INPUTS in mk/external.mk and the
-# `paths:` filter in .github/workflows/prebuilt.yml.
+# 'paths:' filter in .github/workflows/prebuilt.yml.
 INPUTS=(
     configs/linux.config
     configs/busybox.config
@@ -61,11 +66,15 @@ INITRD_SHA1=$("${SHA1[@]}" rootfs.cpio.bz2 | awk '{print $1}')
 # the make-time computation in mk/external.mk so they compare directly.
 INPUTS_SHA1=$(cat "${INPUTS[@]}" | "${SHA1[@]}" | awk '{print $1}')
 
-# Write the human-friendly checksum manifest. Format matches `sha1sum -c`
-# so the file works as input to that tool unchanged.
+# Write the manifest. The first two lines match 'sha1sum -c' format for
+# the real archives; the third line uses the virtual filename 'inputs'
+# to publish the input-fingerprint hash so consumers (mk/external.mk's
+# drift warning, .github/workflows/main.yml's PR drift detection) can
+# read it from the release without parsing the release-body markdown.
 {
     echo "$KERNEL_SHA1  Image.bz2"
     echo "$INITRD_SHA1  rootfs.cpio.bz2"
+    echo "$INPUTS_SHA1  inputs"
 } > prebuilt.sha1
 
 # Echo the manifest + inputs hash to stderr for visibility in CI logs

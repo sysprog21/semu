@@ -8,6 +8,7 @@ semu
 Image
 ext4.img
 rootfs.cpio
+prebuilt.sha1
 
 # intermediate
 riscv-harts.dtsi

@@ -1,24 +1,43 @@
 # For each external target, the following must be defined in advance:
 #   _DATA_URL : the hyperlink which points to archive.
 #   _DATA : the file to be read by specific executable.
-#   _DATA_SHA1 : the checksum of the content in _DATA
 #
 # Artifacts are published as assets on the fixed-tag prebuilt GitHub
-# prerelease by .github/workflows/prebuilt.yml. Update the SHA1 values
-# below from the release body whenever the workflow republishes a new
-# build.
+# prerelease by .github/workflows/prebuilt.yml. The expected SHA-1 of
+# each archive is read from the prebuilt.sha1 manifest published
+# alongside the archives, so checksum updates require no edit here.
 
 COMMON_URL = https://github.com/sysprog21/semu/releases/download/prebuilt
+
+PREBUILT_MANIFEST = prebuilt.sha1
+PREBUILT_MANIFEST_URL = $(COMMON_URL)/$(PREBUILT_MANIFEST)
 
 # kernel
 KERNEL_DATA_URL = $(COMMON_URL)/Image.bz2
 KERNEL_DATA = Image
-KERNEL_DATA_SHA1 = 39d273097f21a1bf38fd93b96a3d7459f843bc84
 
 # initrd
 INITRD_DATA_URL = $(COMMON_URL)/rootfs.cpio.bz2
 INITRD_DATA = rootfs.cpio
-INITRD_DATA_SHA1 = 9df154cdf58103e953ccdf0d40736cadf9318b12
+
+$(PREBUILT_MANIFEST): FORCE
+	$(VECHO) "  GET\t$@\n"
+	$(Q)if curl --fail --retry 3 --retry-delay 1 --progress-bar \
+	    -L -o "$@.part" "$(PREBUILT_MANIFEST_URL)"; then \
+	    if [ -f "$@" ] && cmp -s "$@" "$@.part"; then \
+	        rm -f "$@.part"; \
+	    else \
+	        mv "$@.part" "$@"; \
+	    fi; \
+	else \
+	    rm -f "$@.part"; \
+	    if [ -f "$@" ]; then \
+	        $(PRINTF) "  KEEP\t$@ (offline; using cached manifest)\n"; \
+	    else \
+	        echo "manifest fetch failed and no cached manifest; cannot proceed" >&2; \
+	        exit 1; \
+	    fi; \
+	fi
 
 define download
 # Download to a .part file so an interrupted curl never lands a
@@ -29,16 +48,19 @@ define download
 # HTTP 416, and curl exits non-zero, a permanent self-inflicted
 # deadlock. These files are 5 to 7 MiB; a fresh GET is cheap.
 #
-# Decompress to a .tmp file and rename only on success, so an
-# interrupted bunzip2 cannot leave a half-decompressed Image or
-# rootfs.cpio that make would treat as a valid up-to-date target on the
-# next invocation.
-$($(T)_DATA):
+# Look up the expected SHA-1 by archive basename in the release
+# manifest, then verify the .part against it. Decompress to a .tmp
+# file and rename only on success, so an interrupted bunzip2 cannot
+# leave a half-decompressed Image or rootfs.cpio that make would treat
+# as a valid up-to-date target on the next invocation.
+$($(T)_DATA): $(PREBUILT_MANIFEST) | prebuilt-check
 	$(VECHO) "  GET\t$$@\n"
 	$(Q)curl --fail --retry 3 --retry-delay 1 --progress-bar \
 	    -L -o "$$@.bz2.part" "$(strip $($(T)_DATA_URL))" \
 	    || { rm -f "$$@.bz2.part"; exit 1; }
-	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@.bz2.part" | $(SHA1SUM) -c - \
+	$(Q)expected=$$$$(awk -v f="$(notdir $($(T)_DATA_URL))" '$$$$2==f{print $$$$1}' $(PREBUILT_MANIFEST)); \
+	    [ -n "$$$$expected" ] || { echo "verify: no $(notdir $($(T)_DATA_URL)) entry in $(PREBUILT_MANIFEST)" >&2; rm -f "$$@.bz2.part"; exit 1; }; \
+	    echo "$$$$expected  $$@.bz2.part" | $(SHA1SUM) -c - \
 	    || { rm -f "$$@.bz2.part"; exit 1; }
 	$(Q)mv "$$@.bz2.part" "$$@.bz2"
 	$(Q)bunzip2 -c "$$@.bz2" > "$$@.tmp" \
@@ -56,8 +78,9 @@ $(foreach T,$(EXTERNAL_DATA),$(eval $(download)))
 # input files (kernel/buildroot/busybox configs, the build script, and
 # the init stub). When any of those change locally the prebuilt may no
 # longer reflect the user's intent, so we compute the SHA1 of those
-# inputs and compare against PREBUILT_INPUTS_SHA1, the value the
-# Publish prebuilt images workflow recorded for the live release.
+# inputs and compare against the publisher's recorded inputs hash --
+# the third line of prebuilt.sha1, written by .ci/publish-prebuilt.sh
+# under the virtual name 'inputs'.
 #
 # Mismatch -> warn but do not auto-rebuild: a buildroot run takes the
 # better part of an hour, so we let the user opt in via make build-image.
@@ -71,29 +94,22 @@ PREBUILT_INPUTS := \
     scripts/rootfs_ext4.sh \
     target/init
 
-PREBUILT_INPUTS_SHA1 = 1ae09da49a6d7ce44e10d04a682950b295b3b77c
-
-# Compute the live hash only when *every* input file exists. A partial
-# tree would otherwise silently hash the present subset and trip a bogus
-# "stale" warning instead of the more useful "your tree is incomplete"
-# signal. The shell-side count compare is portable across BSD/GNU.
-LIVE_INPUTS_SHA1 := $(shell \
-    expected=$(words $(PREBUILT_INPUTS)); \
-    found=0; \
-    for f in $(PREBUILT_INPUTS); do [ -f "$$f" ] && found=$$((found + 1)); done; \
-    if [ "$$found" -eq "$$expected" ]; then \
-        cat $(PREBUILT_INPUTS) | $(SHA1SUM) | awk '{print $$1}'; \
-    fi)
-
-# Skip the comparison until PREBUILT_INPUTS_SHA1 is real (the all-zero
-# placeholder is the bootstrap state before the first prebuilt run).
-ifneq ($(PREBUILT_INPUTS_SHA1),0000000000000000000000000000000000000000)
-ifneq ($(LIVE_INPUTS_SHA1),)
-ifneq ($(LIVE_INPUTS_SHA1),$(PREBUILT_INPUTS_SHA1))
-$(warning Local kernel/rootfs inputs ($(LIVE_INPUTS_SHA1)) differ from)
-$(warning the prebuilt's recorded inputs ($(PREBUILT_INPUTS_SHA1)).)
-$(warning The downloaded Image/rootfs.cpio do not reflect your local)
-$(warning configs. Run `make build-image` to rebuild from source.)
-endif
-endif
-endif
+# Read the publisher's inputs hash from the downloaded manifest at
+# recipe time, after the manifest refresh above has had a chance to run.
+.PHONY: prebuilt-check
+prebuilt-check: $(PREBUILT_MANIFEST)
+	$(Q)manifest_sha1=$$(awk '$$2 == "inputs" {print $$1}' $(PREBUILT_MANIFEST)); \
+	    if [ -n "$$manifest_sha1" ]; then \
+	        expected=$(words $(PREBUILT_INPUTS)); \
+	        found=0; \
+	        for f in $(PREBUILT_INPUTS); do [ -f "$$f" ] && found=$$((found + 1)); done; \
+	        if [ "$$found" -eq "$$expected" ]; then \
+	            live_sha1=$$(cat $(PREBUILT_INPUTS) | $(SHA1SUM) | awk '{print $$1}'); \
+	            if [ "$$live_sha1" != "$$manifest_sha1" ]; then \
+	                echo "warning: Local kernel/rootfs inputs ($$live_sha1) differ from" >&2; \
+	                echo "warning: the prebuilt's recorded inputs ($$manifest_sha1)." >&2; \
+	                echo "warning: The downloaded Image/rootfs.cpio do not reflect your local" >&2; \
+	                echo "warning: configs. Run \`make build-image\` to rebuild from source." >&2; \
+	            fi; \
+	        fi; \
+	    fi
