@@ -7,8 +7,10 @@ name: Publish prebuilt images
 #
 # Triggers automatically on master pushes that touch any input listed
 # in the paths filter below, and can be invoked manually via
-# workflow_dispatch. The resulting SHA1 sums must be reflected in
-# mk/external.mk (KERNEL_DATA_SHA1, INITRD_DATA_SHA1, PREBUILT_INPUTS_SHA1).
+# workflow_dispatch. The archive SHA1 sums and the input-fingerprint
+# hash are all read at make-time / CI-time from the prebuilt.sha1
+# manifest uploaded with the archives, so no source-tree edit is
+# needed on a republish.
 
 on:
   workflow_dispatch:
@@ -24,6 +26,7 @@ on:
       - 'scripts/build-image.sh'
       - 'scripts/rootfs_ext4.sh'
       - 'target/**'
+      - '.ci/publish-prebuilt.sh'
       - '.github/workflows/prebuilt.yml'
 
 permissions:
@@ -88,18 +91,10 @@ jobs:
             consumed by `mk/external.mk`. Re-published whenever any
             input that defines the kernel/rootfs content changes.
 
-            ## Update `mk/external.mk`
-
-            Paste these three lines into `mk/external.mk` to pin a fresh
-            `make` checkout to this build. `PREBUILT_INPUTS_SHA1` is what
-            local checkouts compare against to detect when their configs
-            have drifted from the prebuilt.
-
-            ```make
-            KERNEL_DATA_SHA1      = ${{ steps.checksum.outputs.kernel_sha1 }}
-            INITRD_DATA_SHA1      = ${{ steps.checksum.outputs.initrd_sha1 }}
-            PREBUILT_INPUTS_SHA1  = ${{ steps.checksum.outputs.inputs_sha1 }}
-            ```
+            All checksums (archive hashes plus the source-input
+            fingerprint used for drift detection) are published in the
+            `prebuilt.sha1` manifest below; consumers read it directly,
+            so no source-tree edit is needed on a republish.
 
             ## Raw checksums
 

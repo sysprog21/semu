@@ -40,7 +40,22 @@ jobs:
           echo "should_build=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        expected=$(awk '/^PREBUILT_INPUTS_SHA1/ {print $3}' mk/external.mk)
+        # The prebuilt's input-fingerprint lives on the release as the
+        # third line of prebuilt.sha1 (virtual name 'inputs'). Pull it
+        # from there instead of mirroring it in the source tree.
+        manifest_url="https://github.com/sysprog21/semu/releases/download/prebuilt/prebuilt.sha1"
+        curl --fail --silent --show-error --retry 3 --retry-delay 1 \
+          -L -o prebuilt.sha1 "$manifest_url"
+        expected=$(awk '$2 == "inputs" {print $1}' prebuilt.sha1)
+        if [ -z "$expected" ]; then
+          # Manifest predates the inputs line (transition window after
+          # this workflow lands). Skip drift detection until prebuilt.yml
+          # republishes with the new format; treat as no drift to avoid
+          # gratuitous 90-minute from-source rebuilds on every PR.
+          echo "manifest has no inputs hash yet; skipping drift detection"
+          echo "should_build=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         live=$(cat \
           configs/linux.config \
           configs/busybox.config \
