@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # PR-only: rebuild Image/rootfs.cpio/test-tools.img from source when local
+  # PR-only: rebuild or restore Image/rootfs.cpio/test-tools.img when local
   # guest-artifact inputs have drifted from the prebuilt's recorded inputs.
   # Without this, make check on a PR that touches configs, scripts, or
   # target would silently exercise the stale prebuilt instead of the
@@ -67,15 +67,26 @@ jobs:
           target/init \
           target/local-env.sh \
           | sha1sum | awk '{print $1}')
+        echo "live_hash=$live" >> "$GITHUB_OUTPUT"
         if [ "$live" = "$expected" ]; then
           echo "PR inputs match the prebuilt ($live); skipping rebuild"
           echo "should_build=false" >> "$GITHUB_OUTPUT"
         else
-          echo "PR inputs drifted ($live != $expected); will rebuild from source"
+          echo "PR inputs drifted ($live != $expected); will use PR artifacts"
           echo "should_build=true" >> "$GITHUB_OUTPUT"
         fi
-    - name: install build dependencies
+    - name: cache PR-built artifacts
       if: steps.detect.outputs.should_build == 'true'
+      id: pr_artifact_cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          Image
+          rootfs.cpio
+          test-tools.img
+        key: pr-prebuilt-${{ runner.os }}-${{ steps.detect.outputs.live_hash }}
+    - name: install build dependencies
+      if: steps.detect.outputs.should_build == 'true' && steps.pr_artifact_cache.outputs.cache-hit != 'true'
       run: |
         sudo apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -85,7 +96,7 @@ jobs:
           meson ninja-build pkg-config
       timeout-minutes: 5
     - name: build kernel, rootfs, and test tools disk from source
-      if: steps.detect.outputs.should_build == 'true'
+      if: steps.detect.outputs.should_build == 'true' && steps.pr_artifact_cache.outputs.cache-hit != 'true'
       run: ./scripts/build-image.sh --all --x11 --directfb2-test
       timeout-minutes: 180
     - name: upload PR-built artifacts

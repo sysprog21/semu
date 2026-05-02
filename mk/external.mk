@@ -53,11 +53,13 @@ define download
 # deadlock. These files are small enough that a fresh GET is cheap.
 #
 # Look up the expected SHA-1 by archive basename in the release
-# manifest, then verify the .part against it. Decompress to a .tmp
-# file and rename only on success, so an interrupted bunzip2 cannot
-# leave a half-decompressed artifact that make would treat as a valid
+# manifest, then verify the .part against it. Keep the manifest
+# order-only so an existing PR-built artifact is not considered stale
+# just because the manifest was refreshed. Decompress to a .tmp file
+# and rename only on success, so an interrupted bunzip2 cannot leave a
+# half-decompressed artifact that make would treat as a valid
 # up-to-date target on the next invocation.
-$($(T)_DATA): $(PREBUILT_MANIFEST) | prebuilt-check
+$($(T)_DATA): | $(PREBUILT_MANIFEST) prebuilt-check
 	$(VECHO) "  GET\t$$@\n"
 	$(Q)curl --fail --retry 3 --retry-delay 1 --progress-bar \
 	    -L -o "$$@.bz2.part" "$(strip $($(T)_DATA_URL))" \
