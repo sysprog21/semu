@@ -339,18 +339,15 @@ static void mem_load(hart_t *hart,
         case 0x49: /* virtio-input keyboard */
             virtio_input_read(hart, &data->vkeyboard, addr & 0xFFFFF, width,
                               value);
-            emu_update_vinput_keyboard_interrupts(hart->vm);
             return;
         case 0x4A: /* virtio-input mouse */
             virtio_input_read(hart, &data->vmouse, addr & 0xFFFFF, width,
                               value);
-            emu_update_vinput_mouse_interrupts(hart->vm);
             return;
 #endif
 #if SEMU_HAS(VIRTIOGPU)
         case 0x4B: /* virtio-gpu */
             virtio_gpu_read(hart, &data->vgpu, addr & 0xFFFFF, width, value);
-            emu_update_vgpu_interrupts(hart->vm);
             return;
 #endif
         }
