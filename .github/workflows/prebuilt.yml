@@ -1,9 +1,9 @@
 name: Publish prebuilt images
 
-# Builds the Linux kernel and Buildroot rootfs that the rest of CI and
-# make on a fresh checkout consumes, then publishes them as assets on a
-# fixed-tag GitHub prerelease so the download URL stays stable across
-# rebuilds, keeping large binary artifacts out of the source tree.
+# Builds the Linux kernel, Buildroot rootfs, and optional test tools disk that the
+# rest of CI and make on a fresh checkout consume, then publishes them as
+# assets on a fixed-tag GitHub prerelease so the download URL stays stable
+# across rebuilds, keeping large binary artifacts out of the source tree.
 #
 # Triggers automatically on master pushes that touch any input listed
 # in the paths filter below, and can be invoked manually via
@@ -23,6 +23,8 @@ on:
       - 'configs/linux.config'
       - 'configs/busybox.config'
       - 'configs/buildroot.config'
+      - 'configs/x11.config'
+      - 'configs/riscv-cross-file'
       - 'scripts/build-image.sh'
       - 'scripts/rootfs_ext4.sh'
       - 'target/**'
@@ -59,10 +61,13 @@ jobs:
             python3 \
             libssl-dev \
             libelf-dev \
-            wget
+            wget \
+            meson \
+            ninja-build \
+            pkg-config
 
-      - name: Build Buildroot and Linux
-        run: ./scripts/build-image.sh --all
+      - name: Build Buildroot, Linux, and test tools disk
+        run: ./scripts/build-image.sh --all --x11 --directfb2-test
 
       - name: Compress and checksum artifacts
         id: checksum
@@ -71,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           .ci/publish-prebuilt.sh >> "$GITHUB_OUTPUT"
-          ls -la Image.bz2 rootfs.cpio.bz2 prebuilt.sha1
+          ls -la Image.bz2 rootfs.cpio.bz2 test-tools.img.bz2 prebuilt.sha1
 
       - name: Update prebuilt prerelease
         uses: softprops/action-gh-release@v2
@@ -85,11 +90,13 @@ jobs:
           files: |
             Image.bz2
             rootfs.cpio.bz2
+            test-tools.img.bz2
             prebuilt.sha1
           body: |
-            Rolling prerelease of the Linux kernel and Buildroot rootfs
-            consumed by `mk/external.mk`. Re-published whenever any
-            input that defines the kernel/rootfs content changes.
+            Rolling prerelease of the Linux kernel, Buildroot rootfs,
+            and optional test tools disk consumed by `mk/external.mk`.
+            Re-published whenever any input that defines the prebuilt
+            content changes.
 
             All checksums (archive hashes plus the source-input
             fingerprint used for drift detection) are published in the
@@ -101,5 +108,6 @@ jobs:
             ```
             ${{ steps.checksum.outputs.kernel_sha1 }}  Image.bz2
             ${{ steps.checksum.outputs.initrd_sha1 }}  rootfs.cpio.bz2
-            ${{ steps.checksum.outputs.inputs_sha1 }}  inputs (configs + scripts + target/init, concatenated)
+            ${{ steps.checksum.outputs.test_tools_sha1 }}  test-tools.img.bz2
+            ${{ steps.checksum.outputs.inputs_sha1 }}  inputs (configs + scripts + target files, concatenated)
             ```

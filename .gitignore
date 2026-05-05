@@ -7,14 +7,23 @@ semu
 *.dtb
 Image
 ext4.img
+test-tools.img
 rootfs.cpio
 prebuilt.sha1
 
 # intermediate
 riscv-harts.dtsi
 .smp_stamp
+.dtb-config.stamp
+.build-config.stamp
 
 # Build directories
 buildroot/
 linux/
 rootfs/
+directfb/
+extra_packages/
+
+# DirectFB build
+DirectFB2/
+DirectFB-examples/
