@@ -95,33 +95,29 @@ void *virtio_gpu_get_request(virtio_gpu_state_t *vgpu,
                                         (uint32_t) request_size);
 }
 
-int virtio_gpu_get_response_desc(struct virtq_desc *vq_desc,
-                                 int max_desc,
-                                 size_t response_size)
+const struct virtq_desc *virtio_gpu_get_response_desc(
+    struct virtq_desc *vq_desc,
+    size_t response_size)
 {
-    if (response_size > UINT32_MAX)
-        return -1;
-
-    /* This helper works with the current fixed-shape descriptor parser:
-     * 'vq_desc[0]' is the request, optional command data follows, and the
-     * first writable descriptor is the response buffer. A writable descriptor
-     * that is too small therefore means the expected response buffer is
-     * malformed; this helper does not skip it and search for a later writable
-     * descriptor.
+    /* Walk the fixed-shape descriptor chain ('vq_desc[0]' is the request,
+     * optional command data follows, and the first writable descriptor is the
+     * response buffer). A writable descriptor that is too small means the
+     * expected response buffer is malformed; this helper does not skip it and
+     * search for a later writable descriptor.
      *
      * TODO: Support generic descriptor-chain parsing.
      */
-    for (int i = 1; i < max_desc; i++) {
-        if (!(vq_desc[i].flags & VIRTIO_DESC_F_WRITE))
-            continue;
-
-        if (vq_desc[i].len < response_size)
-            return -1;
-
-        return i;
+    if (response_size <= UINT32_MAX) {
+        for (int i = 1; i < VIRTIO_GPU_MAX_DESC; i++) {
+            if (!(vq_desc[i].flags & VIRTIO_DESC_F_WRITE))
+                continue;
+            if (vq_desc[i].len < response_size)
+                break;
+            return &vq_desc[i];
+        }
     }
 
-    return -1;
+    return NULL;
 }
 
 uint32_t virtio_gpu_write_ctrl_response(
@@ -162,16 +158,18 @@ void virtio_gpu_get_display_info_handler(virtio_gpu_state_t *vgpu,
         return;
     }
 
-    int resp_idx = virtio_gpu_get_response_desc(
-        vq_desc, VIRTIO_GPU_MAX_DESC, sizeof(struct virtio_gpu_resp_disp_info));
-    if (resp_idx < 0) {
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_resp_disp_info));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
 
     struct virtio_gpu_resp_disp_info *response = virtio_gpu_mem_guest_to_host(
-        vgpu, vq_desc[resp_idx].addr, sizeof(struct virtio_gpu_resp_disp_info));
+        vgpu, response_desc->addr, sizeof(struct virtio_gpu_resp_disp_info));
     if (!response) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -198,11 +196,11 @@ void virtio_gpu_get_display_info_handler(virtio_gpu_state_t *vgpu,
         response->pmodes[i].enabled = PRIV(vgpu)->scanouts[i].enabled;
     }
 
-    *plen = sizeof(*response);
     if (request->flags & VIRTIO_GPU_FLAG_FENCE) {
         response->hdr.flags = VIRTIO_GPU_FLAG_FENCE;
         response->hdr.fence_id = request->fence_id;
     }
+    *plen = sizeof(*response);
 }
 
 static uint8_t virtio_gpu_generate_edid_checksum(uint8_t *edid, size_t size)
@@ -541,9 +539,10 @@ void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
         return;
     }
 
-    int resp_idx = virtio_gpu_get_response_desc(
-        vq_desc, VIRTIO_GPU_MAX_DESC, sizeof(struct virtio_gpu_resp_edid));
-    if (resp_idx < 0) {
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_resp_edid));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -553,8 +552,10 @@ void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
         fprintf(stderr, VIRTIO_GPU_LOG_PREFIX "%s(): invalid scanout id %u\n",
                 __func__, request->scanout);
         *plen = virtio_gpu_write_ctrl_response(
-            vgpu, &request->hdr, &vq_desc[resp_idx],
+            vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -562,8 +563,9 @@ void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
         &PRIV(vgpu)->scanouts[request->scanout];
 
     struct virtio_gpu_resp_edid *response = virtio_gpu_mem_guest_to_host(
-        vgpu, vq_desc[resp_idx].addr, sizeof(struct virtio_gpu_resp_edid));
+        vgpu, response_desc->addr, sizeof(struct virtio_gpu_resp_edid));
     if (!response) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -574,12 +576,11 @@ void virtio_gpu_get_edid_handler(virtio_gpu_state_t *vgpu,
     virtio_gpu_generate_edid((uint8_t *) response->edid, scanout->width,
                              scanout->height);
 
-    /* return write length */
-    *plen = sizeof(*response);
     if (request->hdr.flags & VIRTIO_GPU_FLAG_FENCE) {
         response->hdr.flags = VIRTIO_GPU_FLAG_FENCE;
         response->hdr.fence_id = request->hdr.fence_id;
     }
+    *plen = sizeof(*response);
 }
 
 void virtio_gpu_cmd_undefined_handler(virtio_gpu_state_t *vgpu,
@@ -616,6 +617,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
     for (int i = 0; i < VIRTIO_GPU_MAX_DESC; i++) {
         if (desc_idx >= queue->QueueNum) {
             virtio_gpu_set_fail(vgpu);
+            *plen = 0;
             return -1;
         }
 
@@ -630,6 +632,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
          */
         if (desc[1] != 0) {
             virtio_gpu_set_fail(vgpu);
+            *plen = 0;
             return -1;
         }
 
@@ -648,6 +651,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
         vgpu, vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
     if (!header) {
         virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return -1;
     }
 
@@ -656,6 +660,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
     if ((queue_index == VIRTIO_GPU_CONTROLQ && is_cursor_cmd) ||
         (queue_index == VIRTIO_GPU_CURSORQ && !is_cursor_cmd)) {
         virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return -1;
     }
 
@@ -665,15 +670,16 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
      * TODO: Support generic descriptor-chain parsing.
      */
     if (vq_desc[VIRTIO_GPU_MAX_DESC - 1].flags & VIRTIO_DESC_F_NEXT) {
-        int resp_idx = virtio_gpu_get_response_desc(
-            vq_desc, VIRTIO_GPU_MAX_DESC, sizeof(struct virtio_gpu_ctrl_hdr));
-        if (resp_idx < 0) {
+        const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+            vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+        if (!response_desc) {
             fprintf(stderr,
                     VIRTIO_GPU_LOG_PREFIX
                     "%s(): descriptor chain exceeds supported length and has "
                     "no usable response descriptor\n",
                     __func__);
             virtio_gpu_set_fail(vgpu);
+            *plen = 0;
             return -1;
         }
 
@@ -681,7 +687,7 @@ static int virtio_gpu_desc_handler(virtio_gpu_state_t *vgpu,
                 VIRTIO_GPU_LOG_PREFIX
                 "%s(): descriptor chain exceeds supported length\n",
                 __func__);
-        *plen = virtio_gpu_write_ctrl_response(vgpu, header, &vq_desc[resp_idx],
+        *plen = virtio_gpu_write_ctrl_response(vgpu, header, response_desc,
                                                VIRTIO_GPU_RESP_ERR_UNSPEC);
         if (!*plen) {
             virtio_gpu_set_fail(vgpu);
@@ -790,6 +796,14 @@ static void virtio_gpu_queue_notify_handler(virtio_gpu_state_t *vgpu, int index)
         ram[vq_used_addr + 1] = len;    /* 'virtq_used_elem.len' (le32) */
         queue->last_avail++;
         new_used++;
+
+        /* A sub-handler may have written a usable error response above and
+         * then marked the device for reset. Deliver that response through the
+         * used.idx update below and stop consuming further descriptors so the
+         * guest can observe the fail signal and reset the queue.
+         */
+        if (vgpu->Status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
+            break;
     }
 
     /* Update 'virtq_used.idx' (keep 'virtq_used.flags' in low 16 bits). */

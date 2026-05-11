@@ -363,12 +363,26 @@ struct virtio_gpu_cmd_backend {
 void *virtio_gpu_mem_guest_to_host(virtio_gpu_state_t *vgpu,
                                    uint32_t addr,
                                    uint32_t size);
+
+/* Validate 'vq_desc[0]' as a readable request of the requested size and return
+ * a host pointer to its contents. Returns NULL on malformed descriptors or
+ * guest-memory translation failure.
+ */
 void *virtio_gpu_get_request(virtio_gpu_state_t *vgpu,
                              struct virtq_desc *vq_desc,
                              size_t request_size);
-int virtio_gpu_get_response_desc(struct virtq_desc *vq_desc,
-                                 int max_desc,
-                                 size_t response_size);
+
+/* Find the first writable descriptor that holds at least 'response_size'
+ * bytes. Returns NULL if no usable response descriptor is present.
+ */
+const struct virtq_desc *virtio_gpu_get_response_desc(
+    struct virtq_desc *vq_desc,
+    size_t response_size);
+
+/* Write a ctrl_hdr response and echo fence metadata from 'request'. Returns the
+ * number of response bytes written, or 0 if the response descriptor cannot be
+ * mapped.
+ */
 uint32_t virtio_gpu_write_ctrl_response(
     virtio_gpu_state_t *vgpu,
     const struct virtio_gpu_ctrl_hdr *request,

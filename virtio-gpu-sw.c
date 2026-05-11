@@ -217,20 +217,6 @@ static struct vgpu_sw_resource_2d *vgpu_sw_get_resource_2d(uint32_t resource_id)
     return NULL;
 }
 
-static const struct virtq_desc *vgpu_sw_get_response_desc(
-    struct virtq_desc *vq_desc,
-    size_t response_size,
-    uint32_t *plen)
-{
-    int resp_idx = virtio_gpu_get_response_desc(vq_desc, VIRTIO_GPU_MAX_DESC,
-                                                response_size);
-    if (resp_idx >= 0)
-        return &vq_desc[resp_idx];
-
-    *plen = 0;
-    return NULL;
-}
-
 static struct virtio_gpu_scanout_info *vgpu_sw_get_scanout(
     virtio_gpu_state_t *vgpu,
     uint32_t scanout_id)
@@ -387,10 +373,13 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
                                                struct virtq_desc *vq_desc,
                                                uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_res_create_2d *request = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_res_create_2d));
@@ -414,6 +403,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -424,6 +415,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -440,6 +433,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -475,6 +470,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -500,6 +497,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen =
             virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
     res_2d->stride = (uint32_t) stride;
@@ -518,6 +517,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen =
             virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -531,6 +532,8 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
         *plen =
             virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -553,16 +556,21 @@ static void vgpu_sw_resource_create_2d_handler(virtio_gpu_state_t *vgpu,
 
     *plen = virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
                                                struct virtq_desc *vq_desc,
                                                uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_res_unref *request = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_res_unref));
@@ -582,6 +590,8 @@ static void vgpu_sw_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -609,16 +619,21 @@ static void vgpu_sw_cmd_resource_unref_handler(virtio_gpu_state_t *vgpu,
 
     *plen = virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
                                             struct virtq_desc *vq_desc,
                                             uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_set_scanout *request = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_set_scanout));
@@ -636,6 +651,8 @@ static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -663,6 +680,8 @@ static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -678,6 +697,8 @@ static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -694,6 +715,8 @@ static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -707,16 +730,21 @@ static void vgpu_sw_cmd_set_scanout_handler(virtio_gpu_state_t *vgpu,
 leave:
     *plen = virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
                                                struct virtq_desc *vq_desc,
                                                uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_res_flush *request = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_res_flush));
@@ -735,6 +763,8 @@ static void vgpu_sw_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -749,6 +779,8 @@ static void vgpu_sw_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -784,16 +816,21 @@ static void vgpu_sw_cmd_resource_flush_handler(virtio_gpu_state_t *vgpu,
 
     *plen = virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
                                                     struct virtq_desc *vq_desc,
                                                     uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_trans_to_host_2d *req = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_trans_to_host_2d));
@@ -812,6 +849,8 @@ static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &req->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -823,6 +862,8 @@ static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
                 __func__, req->resource_id);
         *plen = virtio_gpu_write_ctrl_response(vgpu, &req->hdr, response_desc,
                                                VIRTIO_GPU_RESP_ERR_UNSPEC);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -840,6 +881,8 @@ static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &req->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -850,6 +893,8 @@ static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &req->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -861,11 +906,15 @@ static void vgpu_sw_cmd_transfer_to_host_2d_handler(virtio_gpu_state_t *vgpu,
                 __func__);
         *plen = virtio_gpu_write_ctrl_response(vgpu, &req->hdr, response_desc,
                                                VIRTIO_GPU_RESP_ERR_UNSPEC);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
     *plen = virtio_gpu_write_ctrl_response(vgpu, &req->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_resource_attach_backing_handler(
@@ -873,10 +922,13 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
     struct virtq_desc *vq_desc,
     uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_res_attach_backing *backing_info = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_res_attach_backing));
@@ -904,6 +956,8 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &backing_info->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -921,6 +975,8 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &backing_info->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -941,6 +997,8 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &backing_info->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -953,6 +1011,8 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
         *plen = virtio_gpu_write_ctrl_response(vgpu, &backing_info->hdr,
                                                response_desc,
                                                VIRTIO_GPU_RESP_ERR_UNSPEC);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -980,6 +1040,8 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
             *plen = virtio_gpu_write_ctrl_response(
                 vgpu, &backing_info->hdr, response_desc,
                 VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+            if (!*plen)
+                virtio_gpu_set_fail(vgpu);
             return;
         }
 
@@ -1002,12 +1064,16 @@ static void vgpu_sw_cmd_resource_attach_backing_handler(
             *plen = virtio_gpu_write_ctrl_response(
                 vgpu, &backing_info->hdr, response_desc,
                 VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
+            if (!*plen)
+                virtio_gpu_set_fail(vgpu);
             return;
         }
     }
 
     *plen = virtio_gpu_write_ctrl_response(
         vgpu, &backing_info->hdr, response_desc, VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static void vgpu_sw_cmd_resource_detach_backing_handler(
@@ -1015,10 +1081,13 @@ static void vgpu_sw_cmd_resource_detach_backing_handler(
     struct virtq_desc *vq_desc,
     uint32_t *plen)
 {
-    const struct virtq_desc *response_desc = vgpu_sw_get_response_desc(
-        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr), plen);
-    if (!response_desc)
+    const struct virtq_desc *response_desc = virtio_gpu_get_response_desc(
+        vq_desc, sizeof(struct virtio_gpu_ctrl_hdr));
+    if (!response_desc) {
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
         return;
+    }
 
     struct virtio_gpu_res_detach_backing *request = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_res_detach_backing));
@@ -1038,6 +1107,8 @@ static void vgpu_sw_cmd_resource_detach_backing_handler(
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc,
             VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -1048,6 +1119,8 @@ static void vgpu_sw_cmd_resource_detach_backing_handler(
                 __func__, request->resource_id);
         *plen = virtio_gpu_write_ctrl_response(
             vgpu, &request->hdr, response_desc, VIRTIO_GPU_RESP_ERR_UNSPEC);
+        if (!*plen)
+            virtio_gpu_set_fail(vgpu);
         return;
     }
 
@@ -1058,6 +1131,8 @@ static void vgpu_sw_cmd_resource_detach_backing_handler(
 
     *plen = virtio_gpu_write_ctrl_response(vgpu, &request->hdr, response_desc,
                                            VIRTIO_GPU_RESP_OK_NODATA);
+    if (!*plen)
+        virtio_gpu_set_fail(vgpu);
 }
 
 static int32_t vgpu_sw_decode_cursor_coord(uint32_t coord)
@@ -1080,27 +1155,37 @@ static void vgpu_sw_cmd_update_cursor_handler(virtio_gpu_state_t *vgpu,
     struct virtio_gpu_update_cursor *cursor = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_update_cursor));
     if (!cursor) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
 
-    /* Normal cursorq commands have no response descriptor. Current Linux sends
-     * cursor buffers through 'virtio_gpu_queue_cursor()' without fencing and
-     * with a single out descriptor, so keep this path unfenced-only for now.
+    /* Cursorq commands have no response descriptor. There is no way to ACK a
+     * fence, so reject fenced cursor commands at the device boundary instead
+     * of silently applying them and leaving the guest blocked waiting for the
+     * fence response.
+     *
+     * Current Linux sends cursor buffers through 'virtio_gpu_queue_cursor()'
+     * without fencing and with a single out descriptor, so list it as an TODO.
      *
      * TODO: Support fenced cursor commands by handling a response descriptor,
      * echoing the fence id, and auditing every cursor success/error path to
      * emit a proper control response instead of len=0.
      */
-    if (cursor->hdr.flags & VIRTIO_GPU_FLAG_FENCE)
+    if (cursor->hdr.flags & VIRTIO_GPU_FLAG_FENCE) {
         fprintf(stderr,
                 VIRTIO_GPU_LOG_PREFIX
                 "%s(): fenced cursor command is unsupported\n",
                 __func__);
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
+        return;
+    }
 
     struct virtio_gpu_scanout_info *scanout =
         vgpu_sw_get_scanout(vgpu, cursor->pos.scanout_id);
     if (!scanout) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -1125,6 +1210,7 @@ static void vgpu_sw_cmd_update_cursor_handler(virtio_gpu_state_t *vgpu,
     if (!res_2d) {
         fprintf(stderr, VIRTIO_GPU_LOG_PREFIX "%s(): invalid resource id %u\n",
                 __func__, cursor->resource_id);
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -1134,6 +1220,7 @@ static void vgpu_sw_cmd_update_cursor_handler(virtio_gpu_state_t *vgpu,
         fprintf(stderr,
                 VIRTIO_GPU_LOG_PREFIX "%s(): invalid cursor size %ux%u\n",
                 __func__, res_2d->width, res_2d->height);
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
@@ -1173,25 +1260,35 @@ static void vgpu_sw_cmd_move_cursor_handler(virtio_gpu_state_t *vgpu,
     struct virtio_gpu_update_cursor *cursor = virtio_gpu_get_request(
         vgpu, vq_desc, sizeof(struct virtio_gpu_update_cursor));
     if (!cursor) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
 
-    /* Normal cursorq commands have no response descriptor. Current Linux sends
-     * cursor buffers through 'virtio_gpu_queue_cursor()' without fencing and
-     * with a single out descriptor, so keep this path unfenced-only for now.
+    /* Cursorq commands have no response descriptor. There is no way to ACK a
+     * fence, so reject fenced cursor commands at the device boundary instead
+     * of silently applying them and leaving the guest blocked waiting for the
+     * fence response.
+     *
+     * Current Linux sends cursor buffers through 'virtio_gpu_queue_cursor()'
+     * without fencing and with a single out descriptor, so list it as an TODO.
      *
      * TODO: Support fenced cursor commands by handling a response descriptor,
      * echoing the fence id, and auditing every cursor success/error path to
      * emit a proper control response instead of len=0.
      */
-    if (cursor->hdr.flags & VIRTIO_GPU_FLAG_FENCE)
+    if (cursor->hdr.flags & VIRTIO_GPU_FLAG_FENCE) {
         fprintf(stderr,
                 VIRTIO_GPU_LOG_PREFIX
                 "%s(): fenced cursor command is unsupported\n",
                 __func__);
+        virtio_gpu_set_fail(vgpu);
+        *plen = 0;
+        return;
+    }
 
     if (!vgpu_sw_get_scanout(vgpu, cursor->pos.scanout_id)) {
+        virtio_gpu_set_fail(vgpu);
         *plen = 0;
         return;
     }
