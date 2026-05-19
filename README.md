@@ -9,7 +9,7 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - UART: 8250/16550
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
-- Four types of I/O support using VirtIO standard:
+- I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
     - virtio-net is mapped as TAP interface.
     - virtio-snd uses [PortAudio](https://github.com/PortAudio/portaudio) for sound playback on the host with one limitations:
@@ -19,7 +19,11 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
             - For instance, the following buffer/period size settings on `aplay` has been tested
               with broken and stutter effects yet complete with no any errors: `aplay --buffer-size=32768 --period-size=4096 /usr/share/sounds/alsa/Front_Center.wav`.
     - virtio-input exposes SDL-backed keyboard and mouse devices to the guest.
-      - You can exit the SDL window by pressing Ctrl+A+G
+    - virtio-gpu exposes a minimal 2D DRM/KMS device to the guest. Linux can
+      bind the `virtio_gpu` driver and create `/dev/dri/card0`.
+      - Only 2D scanout is currently supported; 3D, virgl, and blob resources
+        are not implemented yet.
+    - Press Ctrl+Alt+G to release the mouse cursor from the SDL window.
 
 ## Prerequisites
 
@@ -54,10 +58,20 @@ Build the emulator:
 $ make
 ```
 
-Download prebuilt Linux kernel image:
+Download the prebuilt guest artifacts and run the default check:
 ```shell
 $ make check
 ```
+
+With the default external-root build, `make check` uses `Image`, `minimal.dtb`,
+and `ext4.img`, and boots `semu` headlessly with an equivalent command line:
+
+```shell
+$ ./semu -k Image -c 1 -b minimal.dtb -H -d ext4.img
+```
+
+If `ENABLE_EXTERNAL_ROOT=0` is used, `make check` switches to the legacy
+initramfs path and passes `-i rootfs.cpio` instead of `-d ext4.img`.
 
 Please be patient while `semu` is running.
 
@@ -75,6 +89,32 @@ buildroot login:
 Enter `root` to access shell.
 
 You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwards press X)
+
+To test virtio-gpu with a visible SDL window, run `semu` manually without `-H`.
+Make sure `sdl2-config` is in `PATH`, then build the emulator, DTB, kernel, and
+test tools disk. Press `Ctrl+Alt+G` to release the mouse cursor from the SDL
+window:
+
+```shell
+$ sdl2-config --version
+$ make semu minimal.dtb Image test-tools.img
+$ ./semu -k Image -c 1 -b minimal.dtb -d test-tools.img
+```
+
+Log in as `root`, source the test-tools image environment, and run one of
+the DirectFB2 examples:
+
+```
+# . /root/local-env.sh
+# df_drivertest
+```
+
+The installed DirectFB2 examples come from the upstream DirectFB-examples
+project and can be listed in the guest with:
+
+```
+# ls /usr/local/bin/df_*
+```
 
 ## Usage
 
@@ -103,6 +143,10 @@ entirely. This is faster, avoids the RCU-stall the kernel hits when
 unpacking a large cpio, and matches how real systems deploy. The
 `ext4.img` is built from `rootfs.cpio` via `scripts/rootfs_ext4.sh`,
 which requires `fakeroot` and `mkfs.ext4`.
+
+The rolling `prebuilt` release provides an optional `test-tools.img.bz2` for
+larger test/user tools that should not inflate `rootfs.cpio` or the default
+`ext4.img`. Use `make test-tools.img` to download it.
 
 If `fakeroot` is missing, the build falls back to the legacy initramfs
 path (`-i rootfs.cpio`) automatically and prints a one-line warning. To
@@ -164,21 +208,23 @@ To build everything, simply run:
 $ make build-image
 ```
 
-This command invokes the underlying script: `scripts/build-image.sh`, which also offers more flexible usage options.
+This command invokes the underlying script: `scripts/build-image.sh --all`, which also offers more flexible usage options.
 
 ### Script Usage
 
 ```
-./scripts/build-image.sh [--buildroot] [--linux] [--all] [--no-ext4] [--clean-build] [--help]
+./scripts/build-image.sh [--buildroot] [--linux] [--directfb2-test] [--all] [--no-ext4] [--clean-build] [--help]
 
 Options:
   --buildroot         Build Buildroot userland (produces rootfs.cpio and,
                       unless --no-ext4 is given, ext4.img for vda boot)
+  --directfb2-test    Build test-tools.img with the DirectFB2 test payload
   --linux             Build the Linux kernel
   --all               Build both Buildroot and Linux
   --no-ext4           Skip ext4.img generation; produce only rootfs.cpio
                       (matches the legacy ENABLE_EXTERNAL_ROOT=0 path)
-  --clean-build       Remove buildroot/ and/or linux/ before building
+  --clean-build       Remove buildroot/ and/or linux/ before building;
+                      with --directfb2-test, also remove DirectFB2 build outputs
   --help              Show this message
 ```
 
@@ -201,6 +247,28 @@ Build Buildroot for the legacy initramfs-only path (no ext4):
 ```
 $ scripts/build-image.sh --buildroot --no-ext4
 ```
+
+`test-tools.img` is the shared optional disk for test payloads that should
+not live in the default `rootfs.cpio` or `ext4.img`. This keeps the default
+guest image small while still allowing larger tools to be collected in one
+place.
+
+Build Buildroot and the test tools image with the DirectFB2 test payload. Add
+`--x11` when the test tools image should use an X11-enabled rootfs:
+
+```
+$ scripts/build-image.sh --x11 --directfb2-test
+```
+
+To add a new test tool, extend the `test-tools.img` build path in
+`scripts/build-image.sh` so the tool is staged into `extra_packages`, then
+update `target/local-env.sh` if the tool needs an additional binary or library
+search path.
+
+The build script copies `target/local-env.sh` to `/root/local-env.sh` in the
+test tools image. After booting the VM, source it once to pick up paths such
+as `/usr/local/bin` and `/usr/local/lib`, instead of running overlaid tools
+through full paths like `/usr/local/bin/df_*`.
 
 Force a clean build:
 
