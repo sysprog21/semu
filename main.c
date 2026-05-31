@@ -1010,6 +1010,7 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     emu->sswi.ssip = calloc(vm->n_hart, sizeof(uint32_t));
     emu->sswi.n_hart = vm->n_hart;
 #if SEMU_HAS(VIRTIOSND)
+    emu->vsnd.wake_fd = -1;
     if (!virtio_snd_init(&(emu->vsnd)))
         fprintf(stderr, "No virtio-snd functioned\n");
     emu->vsnd.ram = emu->ram;
@@ -1064,6 +1065,9 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
             return EXIT_FAILURE;
         }
     }
+#if SEMU_HAS(VIRTIOSND)
+    emu->vsnd.wake_fd = emu->wake_fd[1];
+#endif
 #endif
 
     emu->peripheral_update_ctr = 0;
