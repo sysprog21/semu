@@ -1049,16 +1049,22 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
         ram[vq_used_addr + 1] = len;    /* virtq_used_elem.len (le32) */
         queue->last_avail++;
         new_used++;
+        /* Check le32 len field of struct virtq_used_elem on the spec  */
+        vsnd->ram[queue->QueueUsed] &= MASK(16); /* Reset low 16 bits to zero */
+        vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
+
+        /* Publish used-ring writes before making the IRQ visible to the guest. */
+        if (!(ram[queue->QueueAvail] & 1)) {
+            __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
+                              __ATOMIC_RELEASE);
+            if (vsnd->wake_fd >= 0) {
+                char wake_byte = 1;
+                if (write(vsnd->wake_fd, &wake_byte, 1) < 0) {
+                    /* ignore error */
+                }
+            }
+        }
     }
-
-    /* Check le32 len field of struct virtq_used_elem on the spec  */
-    vsnd->ram[queue->QueueUsed] &= MASK(16); /* Reset low 16 bits to zero */
-    vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
-
-    /* Publish used-ring writes before making the IRQ visible to the guest. */
-    if (!(ram[queue->QueueAvail] & 1))
-        __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
-                          __ATOMIC_RELEASE);
 }
 
 /* TX thread context */
