@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -21,6 +22,13 @@
 #include <sys/time.h>
 #else
 #include <sys/timerfd.h>
+#endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+#if defined(__linux__)
+#include <pty.h>
+#else
+#include <util.h>
+#endif
 #endif
 
 #include "coro.h"
@@ -76,6 +84,7 @@ static uint32_t *mem_page_table(const hart_t *hart, uint32_t ppn)
     return NULL;
 }
 
+#if SEMU_HAS(UART8250)
 static void emu_update_uart_interrupts(vm_t *vm)
 {
     emu_state_t *data = PRIV(vm->hart[0]);
@@ -86,6 +95,7 @@ static void emu_update_uart_interrupts(vm_t *vm)
         data->plic.active &= ~IRQ_UART_BIT;
     plic_update_interrupts(vm, &data->plic);
 }
+#endif
 
 #if SEMU_HAS(VIRTIONET)
 static void emu_update_vnet_interrupts(vm_t *vm)
@@ -157,6 +167,18 @@ static void emu_update_vgpu_interrupts(vm_t *vm)
 }
 #endif
 
+#if SEMU_HAS(VIRTIOCONSOLE)
+static void emu_update_vconsole_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vconsole.InterruptStatus)
+        data->plic.active |= IRQ_VCONSOLE_BIT;
+    else
+        data->plic.active &= ~IRQ_VCONSOLE_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
 static void emu_update_timer_interrupt(hart_t *hart)
 {
     emu_state_t *data = PRIV(hart);
@@ -223,10 +245,18 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
     if (emu->peripheral_update_ctr-- == 0) {
         emu->peripheral_update_ctr = 64;
 
+#if SEMU_HAS(VIRTIOCONSOLE)
+        virtio_console_refresh_rx(&emu->vconsole);
+        if (emu->vconsole.InterruptStatus)
+            emu_update_vconsole_interrupts(vm);
+#endif
+
+#if SEMU_HAS(UART8250)
         u8250_check_ready(&emu->uart);
         u8250_flush_out(&emu->uart);
         if (emu->uart.in_ready)
             emu_update_uart_interrupts(vm);
+#endif
 
 #if SEMU_HAS(VIRTIONET)
         virtio_net_refresh_queue(&emu->vnet);
@@ -272,6 +302,10 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
         if (g_window.window_is_closed())
             emu->stopped = true;
 #endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+        if (emu->vconsole.InterruptStatus)
+            emu_update_vconsole_interrupts(vm);
+#endif
     }
 }
 
@@ -294,10 +328,12 @@ static void mem_load(hart_t *hart,
         case 0x2: /* PLIC (0 - 0x3F) */
             plic_read(hart, &data->plic, addr & 0x3FFFFFF, width, value);
             return;
+#if SEMU_HAS(UART8250)
         case 0x40: /* UART */
             u8250_read(hart, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(hart->vm);
             return;
+#endif
 #if SEMU_HAS(VIRTIONET)
         case 0x41: /* virtio-net */
             virtio_net_read(hart, &data->vnet, addr & 0xFFFFF, width, value);
@@ -350,6 +386,13 @@ static void mem_load(hart_t *hart,
             virtio_gpu_read(hart, &data->vgpu, addr & 0xFFFFF, width, value);
             return;
 #endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+        case 0x52: /* virtio-console */
+            virtio_console_read(hart, &data->vconsole, addr & 0xFFFFF, width,
+                                value);
+            emu_update_vconsole_interrupts(hart->vm);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_LOAD_FAULT, hart->exc_val);
@@ -375,10 +418,12 @@ static void mem_store(hart_t *hart,
             plic_write(hart, &data->plic, addr & 0x3FFFFFF, width, value);
             plic_update_interrupts(hart->vm, &data->plic);
             return;
+#if SEMU_HAS(UART8250)
         case 0x40: /* UART */
             u8250_write(hart, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(hart->vm);
             return;
+#endif
 #if SEMU_HAS(VIRTIONET)
         case 0x41: /* virtio-net */
             virtio_net_write(hart, &data->vnet, addr & 0xFFFFF, width, value);
@@ -441,6 +486,13 @@ static void mem_store(hart_t *hart,
         case 0x4B: /* virtio-gpu */
             virtio_gpu_write(hart, &data->vgpu, addr & 0xFFFFF, width, value);
             emu_update_vgpu_interrupts(hart->vm);
+            return;
+#endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+        case 0x52: /* virtio-console */
+            virtio_console_write(hart, &data->vconsole, addr & 0xFFFFF, width,
+                                 value);
+            emu_update_vconsole_interrupts(hart->vm);
             return;
 #endif
         }
@@ -685,6 +737,56 @@ struct mapper {
 
 static struct mapper mapper[N_MAPPERS] = {0};
 static int map_index = 0;
+
+#if SEMU_HAS(VIRTIOCONSOLE)
+static char vconsole_link_path[PATH_MAX];
+static bool vconsole_link_created = false;
+
+static void cleanup_vconsole_link(void)
+{
+    if (!vconsole_link_created)
+        return;
+    unlink(vconsole_link_path);
+    vconsole_link_created = false;
+}
+
+static bool semu_init_vconsole_pty(virtio_console_state_t *vcon,
+                                   const char *path)
+{
+    int master_fd = -1;
+    int slave_fd = -1;
+    char slave_name[PATH_MAX];
+
+    if (openpty(&master_fd, &slave_fd, slave_name, NULL, NULL) < 0) {
+        perror("openpty");
+        return false;
+    }
+
+    if (path) {
+        unlink(path);
+        if (symlink(slave_name, path) < 0) {
+            perror("symlink");
+            close(master_fd);
+            close(slave_fd);
+            return false;
+        }
+
+        snprintf(vconsole_link_path, sizeof(vconsole_link_path), "%s", path);
+        vconsole_link_created = true;
+        atexit(cleanup_vconsole_link);
+        fprintf(stderr, "virtio-console host endpoint: %s -> %s\n", path,
+                slave_name);
+    } else {
+        fprintf(stderr, "virtio-console host endpoint: %s\n", slave_name);
+    }
+
+    vcon->in_fd = master_fd;
+    vcon->out_fd = master_fd;
+    close(slave_fd);
+    return true;
+}
+#endif
+
 static void unmap_files(void)
 {
     while (map_index--) {
@@ -731,7 +833,8 @@ static void usage(const char *execpath)
 {
     fprintf(stderr,
             "Usage: %s -k linux-image [-b dtb] [-i initrd-image] [-d "
-            "disk-image] [-s shared-directory] [-H]\n",
+            "disk-image] [-s shared-directory] [-H] "
+            "[--virtio-console-path path]\n",
             execpath);
 }
 
@@ -745,10 +848,11 @@ static void handle_options(int argc,
                            int *hart_count,
                            bool *debug,
                            bool *headless,
-                           char **shared_dir)
+                           char **shared_dir,
+                           char **vconsole_path)
 {
     *kernel_file = *dtb_file = *initrd_file = *disk_file = *net_dev =
-        *shared_dir = NULL;
+        *shared_dir = *vconsole_path = NULL;
 
     int optidx = 0;
     struct option opts[] = {
@@ -756,10 +860,12 @@ static void handle_options(int argc,
         {"initrd", 1, NULL, 'i'},     {"disk", 1, NULL, 'd'},
         {"netdev", 1, NULL, 'n'},     {"smp", 1, NULL, 'c'},
         {"gdbstub", 0, NULL, 'g'},    {"help", 0, NULL, 'h'},
-        {"shared_dir", 1, NULL, 's'}, {"headless", 0, NULL, 'H'}};
+        {"shared_dir", 1, NULL, 's'}, {"headless", 0, NULL, 'H'},
+        {"virtio-console-path", 1, NULL, 'p'}};
 
     int c;
-    while ((c = getopt_long(argc, argv, "k:b:i:d:n:c:s:ghH", opts, &optidx)) !=
+    while ((c =
+                getopt_long(argc, argv, "k:b:i:d:n:c:s:p:ghH", opts, &optidx)) !=
            -1) {
         switch (c) {
         case 'k':
@@ -798,6 +904,9 @@ static void handle_options(int argc,
         }
         case 's':
             *shared_dir = optarg;
+            break;
+        case 'p':
+            *vconsole_path = optarg;
             break;
         case 'g':
             *debug = true;
@@ -866,6 +975,7 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     char *disk_file;
     char *netdev;
     char *shared_dir;
+    char *vconsole_path;
     int hart_count = 1;
     bool debug = false;
     bool headless = false;
@@ -875,7 +985,7 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     vm_t *vm = &emu->vm;
     handle_options(argc, argv, &kernel_file, &dtb_file, &initrd_file,
                    &disk_file, &netdev, &hart_count, &debug, &headless,
-                   &shared_dir);
+                   &shared_dir, &vconsole_path);
 #if !SEMU_HAS(VIRTIOINPUT) && !SEMU_HAS(VIRTIOGPU)
     (void) headless;
 #endif
@@ -939,6 +1049,17 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
      * (legacy boot path; not used when the guest boots from /dev/vda).
      */
     if (initrd_file) {
+        struct stat st;
+        if (stat(initrd_file, &st) < 0) {
+            fprintf(stderr, "could not stat %s\n", initrd_file);
+            return 2;
+        }
+        if ((uint64_t) st.st_size > INITRD_SIZE) {
+            fprintf(stderr,
+                    "initrd image %s is too large: %zu bytes > %u bytes\n",
+                    initrd_file, (size_t) st.st_size, INITRD_SIZE);
+            return 2;
+        }
         uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
         ram_loc = ((char *) emu->ram) + initrd_addr;
         map_file(&ram_loc, initrd_file);
@@ -976,10 +1097,12 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     }
 
     /* Set up peripherals */
+#if SEMU_HAS(UART8250)
     emu->uart.in_fd = 0, emu->uart.out_fd = 1;
     emu->uart.waiting_hart_id = UINT32_MAX;
     emu->uart.has_waiting_hart = false;
     capture_keyboard_input(); /* set up uart */
+#endif
 #if SEMU_HAS(VIRTIONET)
     /* Always set ram pointer, even if netdev is not configured.
      * Device tree may still expose the device to guest.
@@ -1034,6 +1157,13 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     uint32_t scanout_id =
         virtio_gpu_register_scanout(&(emu->vgpu), SCREEN_WIDTH, SCREEN_HEIGHT);
     vgpu_display_set_scanout_count(scanout_id + 1U);
+#endif
+
+#if SEMU_HAS(VIRTIOCONSOLE)
+    emu->vconsole.ram = emu->ram;
+    if (!semu_init_vconsole_pty(&emu->vconsole, vconsole_path))
+        return 1;
+    virtio_console_init(&(emu->vconsole));
 #endif
 
 #if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
@@ -1444,6 +1574,7 @@ static void semu_run(emu_state_t *emu)
             return;
         }
 
+#if SEMU_HAS(UART8250)
         if (isatty(emu->uart.in_fd)) {
             struct kevent kev_uart;
             EV_SET(&kev_uart, emu->uart.in_fd, EVFILT_READ, EV_ADD | EV_ENABLE,
@@ -1455,6 +1586,7 @@ static void semu_run(emu_state_t *emu)
                 return;
             }
         }
+#endif
 #else
         int wfi_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
         if (wfi_timer_fd < 0) {
@@ -1477,7 +1609,7 @@ static void semu_run(emu_state_t *emu)
 
         /* Poll-based event loop for I/O monitoring:
          * - Timer fd: 1 descriptor for periodic timer (kqueue/timerfd)
-         * - UART fd: 1 descriptor for keyboard input
+         * - UART fd: 1 descriptor for keyboard input, when enabled
          */
         struct pollfd *pfds = NULL;
         size_t poll_capacity = 0;
@@ -1488,10 +1620,13 @@ static void semu_run(emu_state_t *emu)
              */
             if (signal_received)
                 break;
-            /* Only need fds for timer and UART (no coroutine I/O),
+            /* Only need fds for timer and optional UART (no coroutine I/O),
              * plus an optional wake pipe when a window backend is enabled.
              */
-            size_t needed = 2;
+            size_t needed = 1;
+#if SEMU_HAS(UART8250)
+            needed++;
+#endif
 #if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
             if (emu->wake_fd[0] >= 0)
                 needed++;
@@ -1520,7 +1655,7 @@ static void semu_run(emu_state_t *emu)
              * modifies flags.
              *
              * - If no harts are STARTED, block indefinitely (wait for IPI)
-             * - If all STARTED harts are idle (WFI or UART waiting), block
+             * - If all STARTED harts are idle (WFI or console waiting), block
              * - Otherwise, use non-blocking poll (timeout=0)
              */
             int poll_timeout = 0;
@@ -1529,10 +1664,13 @@ static void semu_run(emu_state_t *emu)
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
                     started_harts++;
-                    /* Count hart as idle if it's in WFI or waiting for UART */
-                    if (vm->hart[i]->in_wfi ||
-                        (emu->uart.has_waiting_hart &&
-                         emu->uart.waiting_hart_id == i)) {
+                    bool waiting_for_console = false;
+#if SEMU_HAS(UART8250)
+                    waiting_for_console = emu->uart.has_waiting_hart &&
+                                          emu->uart.waiting_hart_id == i;
+#endif
+                    /* Count hart as idle if it's in WFI or waiting for console */
+                    if (vm->hart[i]->in_wfi || waiting_for_console) {
                         idle_harts++;
                     }
                 }
@@ -1573,6 +1711,7 @@ static void semu_run(emu_state_t *emu)
             }
 #endif
 
+#if SEMU_HAS(UART8250)
             /* Add UART input fd (stdin for keyboard input).
              * Only add UART when:
              * 1. Single-hart configuration (n_hart == 1), OR
@@ -1592,6 +1731,7 @@ static void semu_run(emu_state_t *emu)
                 pfds[pfd_count] = (struct pollfd) {emu->uart.in_fd, POLLIN, 0};
                 pfd_count++;
             }
+#endif
 
 #if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
             /* Always watch the wake pipe so that backend work such as input

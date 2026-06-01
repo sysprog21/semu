@@ -6,11 +6,12 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - Privilege levels: S and U modes
 - Control and status registers (CSR)
 - Virtual memory system: RV32 MMU
-- UART: 8250/16550
+- UART: 8250/16550 console
 - PLIC (platform-level interrupt controller): 32 interrupts, no priority
 - Standard SBI, with the timer extension
 - I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
+    - virtio-console exposes an additional guest console as `/dev/hvc0`.
     - virtio-net is mapped as TAP interface.
     - virtio-snd uses [PortAudio](https://github.com/PortAudio/portaudio) for sound playback on the host with one limitations:
         - As some unknown issues in guest Linux OS (confirmed in v6.7 and v6.12), you need
@@ -67,7 +68,7 @@ With the default external-root build, `make check` uses `Image`, `minimal.dtb`,
 and `ext4.img`, and boots `semu` headlessly with an equivalent command line:
 
 ```shell
-$ ./semu -k Image -c 1 -b minimal.dtb -H -d ext4.img
+$ ./semu -k Image -c 1 -b minimal.dtb -H -d ext4.img --virtio-console-path /tmp/semu-hvc0
 ```
 
 If `ENABLE_EXTERNAL_ROOT=0` is used, `make check` switches to the legacy
@@ -89,6 +90,33 @@ buildroot login:
 Enter `root` to access shell.
 
 You can exit the emulator using: \<Ctrl-a x\>. (press Ctrl+A, leave it, afterwards press X)
+
+By default, `make check` enables both the 8250 UART console and
+virtio-console. The UART is the primary console, so boot logs and the main
+login prompt appear in the terminal that ran `make check`. The virtio-console
+device is also exposed to the guest as `/dev/hvc0`, and `make check` creates a
+host endpoint at `/tmp/semu-hvc0`.
+
+Open another host terminal to attach to the virtio-console:
+
+```shell
+$ screen /tmp/semu-hvc0
+```
+
+Inside the guest, confirm both consoles are active with:
+
+```shell
+# cat /proc/consoles
+# grep hvc0 /etc/inittab
+```
+
+To use only one console implementation at build time, override
+`SEMU_CONSOLE`:
+
+```shell
+$ make check SEMU_CONSOLE=uart8250
+$ make check SEMU_CONSOLE=virtio
+```
 
 To test virtio-gpu with a visible SDL window, run `semu` manually without `-H`.
 Make sure `sdl2-config` is in `PATH`, then build the emulator, DTB, kernel, and
@@ -119,7 +147,7 @@ project and can be listed in the guest with:
 ## Usage
 
 ```shell
-./semu -k linux-image [-b dtb-file] [-d disk-image] [-i initrd-image] [-s shared-directory] [-H]
+./semu -k linux-image [-b dtb-file] [-d disk-image] [-i initrd-image] [-s shared-directory] [-H] [--virtio-console-path path]
 ```
 
 * `linux-image` is the path to the Linux kernel `Image`.
@@ -129,6 +157,9 @@ project and can be listed in the guest with:
   from `rootfs.cpio` via `scripts/rootfs_ext4.sh`.
 * `shared-directory` is optional, as it specifies the path of a directory on the host that will be shared with the guest operating system through virtio-fs, enabling file access from the guest via a virtual filesystem mount.
 * `-H` (or `--headless`) skips SDL window creation; useful for CI and `make check`.
+* `virtio-console-path` is optional, as it creates a host-side symlink to the
+  pseudo-terminal connected to the guest `/dev/hvc0`. The default used by
+  `make check` is `/tmp/semu-hvc0`.
 * `initrd-image` is optional and only used on the *legacy* boot path.
   The default `minimal.dtb` built with `ENABLE_EXTERNAL_ROOT=1` does not
   advertise initrd placement, so `-i` there requires either

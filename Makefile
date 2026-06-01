@@ -215,6 +215,37 @@ ifeq ($(call has, VIRTIOGPU), 1)
     OBJS_EXTRA += vgpu-display.o
 endif
 
+# console
+SEMU_CONSOLE ?= both
+SEMU_CONSOLE := $(strip $(SEMU_CONSOLE))
+override ENABLE_VIRTIOCONSOLE := 0
+override ENABLE_UART8250 := 0
+ifeq ($(SEMU_CONSOLE),virtio)
+    override ENABLE_VIRTIOCONSOLE := 1
+else ifeq ($(SEMU_CONSOLE),both)
+    override ENABLE_VIRTIOCONSOLE := 1
+    override ENABLE_UART8250 := 1
+else ifeq ($(SEMU_CONSOLE),uart8250)
+    override ENABLE_UART8250 := 1
+else ifeq ($(SEMU_CONSOLE),uart)
+    override ENABLE_UART8250 := 1
+else
+    $(error SEMU_CONSOLE must be virtio, uart8250, or both)
+endif
+
+$(call set-feature, VIRTIOCONSOLE)
+$(call set-feature, UART8250)
+
+ifeq ($(call has, VIRTIOCONSOLE), 1)
+    OBJS_EXTRA += virtio-console.o
+    VIRTIO_CONSOLE_PATH ?= /tmp/semu-hvc0
+    OPTS += --virtio-console-path $(VIRTIO_CONSOLE_PATH)
+endif
+
+ifeq ($(call has, UART8250), 1)
+    OBJS_EXTRA += uart.o
+endif
+
 ifneq ($(filter 1,$(call has, VIRTIOGPU) $(call has, VIRTIOINPUT)),)
     OBJS_EXTRA += window-sw.o
 endif
@@ -227,7 +258,6 @@ OBJS := \
 	ram.o \
 	utils.o \
 	plic.o \
-	uart.o \
 	main.o \
 	aclint.o \
 	coro.o \
