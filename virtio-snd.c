@@ -646,23 +646,10 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
     props->pp.hdr.hdr.code = VIRTIO_SND_R_PCM_PREPARE;
     props->v.stream_id = stream_id;
 
-    uint32_t channels = props->pp.channels;
     uint32_t rate = pcm_rate_tbl[props->pp.rate];
 
-    /* Rather use the period_bytes/buffer_bytes set by driver,
-     * we calculate bps rate to achieve the strema's desired parameters
-     * suggested by [1].
-     */
-    /* Reference:
-     * [1]
-     * https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-sound/src/audio_backends/alsa.rs#L153
-     */
-    /* Calculate bps rate. */
-    uint32_t bps_rate = channels * VSND_CNFA_FRAME_SZ * rate;
-    /* Calculate period bytes for ~100ms interrupt period. */
-    uint32_t cnfa_period_bytes = bps_rate / 10;
-    /* Calculate the period size (in frames) for CNFA . */
-    uint32_t cnfa_period_frames = cnfa_period_bytes / VSND_CNFA_FRAME_SZ;
+    /* Calculate the period size (in frames) from the guest's period_bytes */
+    uint32_t cnfa_period_frames = props->pp.period_bytes / VSND_CNFA_FRAME_SZ;
 
     INIT_LIST_HEAD(&props->buf_queue_head);
     props->lock.releasing = 0;
@@ -727,6 +714,14 @@ static void virtio_snd_read_pcm_stop(const virtio_snd_pcm_hdr_t *query,
     }
 
     virtio_snd_prop_t *props = &vsnd_props[stream_id];
+
+    /* Wait for PortAudio to consume all pending buffers before stopping. */
+    pthread_mutex_lock(&props->lock.lock);
+    while (props->lock.buf_ev_notify > 0)
+        pthread_cond_wait(&props->lock.writable, &props->lock.lock);
+    props->lock.releasing = 1;
+    pthread_cond_broadcast(&props->lock.readable);
+    pthread_mutex_unlock(&props->lock.lock);
 
     /* Control the callback to stop playing */
     props->pp.hdr.hdr.code = VIRTIO_SND_R_PCM_STOP;
@@ -1049,16 +1044,22 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
         ram[vq_used_addr + 1] = len;    /* virtq_used_elem.len (le32) */
         queue->last_avail++;
         new_used++;
+        /* Check le32 len field of struct virtq_used_elem on the spec  */
+        vsnd->ram[queue->QueueUsed] &= MASK(16); /* Reset low 16 bits to zero */
+        vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
+
+        /* Publish used-ring writes before making the IRQ visible to the guest. */
+        if (!(ram[queue->QueueAvail] & 1)) {
+            __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
+                              __ATOMIC_RELEASE);
+            if (vsnd->wake_fd >= 0) {
+                char wake_byte = 1;
+                if (write(vsnd->wake_fd, &wake_byte, 1) < 0) {
+                    /* ignore error */
+                }
+            }
+        }
     }
-
-    /* Check le32 len field of struct virtq_used_elem on the spec  */
-    vsnd->ram[queue->QueueUsed] &= MASK(16); /* Reset low 16 bits to zero */
-    vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
-
-    /* Publish used-ring writes before making the IRQ visible to the guest. */
-    if (!(ram[queue->QueueAvail] & 1))
-        __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
-                          __ATOMIC_RELEASE);
 }
 
 /* TX thread context */
