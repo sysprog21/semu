@@ -10,26 +10,39 @@
     #size-cells = <1>;
     model = "semu";
 
+#if SEMU_FEATURE_UART8250
     aliases {
         serial0 = "/soc@F0000000/serial@4000000";
     };
+#endif
 
     chosen {
 #if SEMU_FEATURE_EXTERNAL_ROOT && SEMU_FEATURE_VIRTIOBLK
         /* External rootfs on virtio-blk; skip initrd unpack entirely.
-         * - quiet/loglevel=3: suppress non-error printk so the UART path
-         *   (MMIO -> device handler -> fputc) does not dominate boot
-         * - lpj=260000: skip the BogoMIPS calibration loop; the value
-         *   matches what calibration would print at the current
-         *   timebase-frequency
+         * lpj=260000 skips the BogoMIPS calibration loop; the value matches
+         * what calibration would print at the current timebase-frequency.
          * Note: rootflags=noatime makes ext4 root mount fail under the
          * prebuilt Linux Image; do not add it back without re-testing.
          */
-        bootargs = "earlycon console=ttyS0 root=/dev/vda rw rootwait quiet loglevel=3 lpj=260000";
+#if SEMU_FEATURE_VIRTIOCONSOLE && SEMU_FEATURE_UART8250
+        bootargs = "earlycon console=hvc0 console=ttyS0 root=/dev/vda rw rootwait lpj=260000";
         stdout-path = "serial0";
+#elif SEMU_FEATURE_VIRTIOCONSOLE
+        bootargs = "console=hvc0 root=/dev/vda rw rootwait lpj=260000";
+#elif SEMU_FEATURE_UART8250
+        bootargs = "earlycon console=ttyS0 root=/dev/vda rw rootwait lpj=260000";
+        stdout-path = "serial0";
+#endif
 #else
+#if SEMU_FEATURE_VIRTIOCONSOLE && SEMU_FEATURE_UART8250
+        bootargs = "earlycon console=hvc0 console=ttyS0";
+        stdout-path = "serial0";
+#elif SEMU_FEATURE_VIRTIOCONSOLE
+        bootargs = "console=hvc0";
+#elif SEMU_FEATURE_UART8250
         bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
+#endif
         linux,initrd-start = <0x1f700000>; /* @403 MiB (503 * 1024 * 1024)     */
         linux,initrd-end = <0x1fefffff>;   /* @511 MiB (511 * 1024 * 1024 - 1) */
 #endif
@@ -54,6 +67,7 @@
         ranges = <0x0 0xF0000000 0x10000000>;
         interrupt-parent = <&plic0>;
 
+#if SEMU_FEATURE_UART8250
         serial@4000000 {
             compatible = "ns16550";
             reg = <0x4000000 0x100000>;
@@ -61,6 +75,7 @@
             no-loopback-test;
             clock-frequency = <5000000>; /* the baudrate divisor is ignored */
         };
+#endif
 
 #if SEMU_FEATURE_VIRTIONET
         net0: virtio@4100000 {
@@ -121,6 +136,14 @@
             compatible = "virtio,mmio";
             reg = <0x4b00000 0x200>;
             interrupts = <9>;
+        };
+#endif
+
+#if SEMU_FEATURE_VIRTIOCONSOLE
+        console0: virtio@5200000 {
+            compatible = "virtio,mmio";
+            reg = <0x5200000 0x200>;
+            interrupts = <10>;
         };
 #endif
     };

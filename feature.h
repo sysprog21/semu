@@ -37,5 +37,15 @@
 #define SEMU_FEATURE_VIRTIOGPU 1
 #endif
 
+/* virtio-console */
+#ifndef SEMU_FEATURE_VIRTIOCONSOLE
+#define SEMU_FEATURE_VIRTIOCONSOLE 1
+#endif
+
+/* 8250/16550 UART console */
+#ifndef SEMU_FEATURE_UART8250
+#define SEMU_FEATURE_UART8250 0
+#endif
+
 /* Feature test macro */
 #define SEMU_HAS(x) SEMU_FEATURE_##x
