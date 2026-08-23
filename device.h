@@ -466,6 +466,7 @@ typedef struct {
     uint32_t InterruptStatus;
     /* supplied by environment */
     uint32_t *ram;
+    int wake_fd;
     /* implementation-specific */
     void *priv;
 } virtio_snd_state_t;
