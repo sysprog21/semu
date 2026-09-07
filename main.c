@@ -23,6 +23,7 @@
 #include <sys/timerfd.h>
 #endif
 
+#include "console.h"
 #include "coro.h"
 #include "device.h"
 #include "mini-gdbstub/include/gdbstub.h"
@@ -1009,10 +1010,11 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     }
 
     /* Set up peripherals */
-    emu->uart.in_fd = 0, emu->uart.out_fd = 1;
+    emu->uart.in_fd = STDIN_FILENO;
+    emu->uart.out_fd = STDOUT_FILENO;
     emu->uart.waiting_hart_id = UINT32_MAX;
     emu->uart.has_waiting_hart = false;
-    capture_keyboard_input(); /* set up uart */
+    host_console_setup(STDIN_FILENO, STDOUT_FILENO);
 #if SEMU_HAS(VIRTIONET)
     /* Always set ram pointer, even if netdev is not configured.
      * Device tree may still expose the device to guest.

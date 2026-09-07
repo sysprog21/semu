@@ -227,6 +227,7 @@ OBJS := \
 	ram.o \
 	utils.o \
 	plic.o \
+	console.o \
 	uart.o \
 	main.o \
 	aclint.o \
