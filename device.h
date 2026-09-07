@@ -50,6 +50,7 @@ void plic_write(hart_t *core,
                 uint32_t value);
 /* UART */
 
+#if SEMU_HAS(UART8250)
 #define IRQ_UART 1
 #define IRQ_UART_BIT (1 << IRQ_UART)
 
@@ -84,6 +85,7 @@ void u8250_write(hart_t *core,
                  uint32_t value);
 void u8250_check_ready(u8250_state_t *uart);
 void u8250_flush_out(u8250_state_t *uart);
+#endif /* SEMU_HAS(UART8250) */
 
 /* virtio-net */
 
@@ -346,6 +348,57 @@ uint32_t virtio_gpu_register_scanout(virtio_gpu_state_t *vgpu,
                                      uint32_t height);
 #endif /* SEMU_HAS(VIRTIOGPU) */
 
+/* VirtIO-Console */
+
+#if SEMU_HAS(VIRTIOCONSOLE)
+
+#define IRQ_VCONSOLE 10
+#define IRQ_VCONSOLE_BIT (1 << IRQ_VCONSOLE)
+
+typedef struct {
+    uint32_t QueueNum;
+    uint32_t QueueDesc;
+    uint32_t QueueAvail;
+    uint32_t QueueUsed;
+    uint16_t last_avail;
+    bool ready;
+} virtio_console_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t DeviceFeaturesSel;
+    uint32_t DriverFeatures;
+    uint32_t DriverFeaturesSel;
+    /* queue config */
+    uint32_t QueueSel;
+    virtio_console_queue_t queues[2];
+    /* status */
+    uint32_t Status;
+    uint32_t InterruptStatus;
+    /* supplied by environment */
+    uint32_t *ram;
+    int in_fd;
+    int out_fd;
+} virtio_console_state_t;
+
+void virtio_console_read(hart_t *core,
+                         virtio_console_state_t *vcon,
+                         uint32_t addr,
+                         uint8_t width,
+                         uint32_t *value);
+void virtio_console_write(hart_t *core,
+                          virtio_console_state_t *vcon,
+                          uint32_t addr,
+                          uint8_t width,
+                          uint32_t value);
+void virtio_console_refresh(virtio_console_state_t *vcon);
+void virtio_console_init(virtio_console_state_t *vcon,
+                         uint32_t *ram,
+                         int in_fd,
+                         int out_fd);
+
+#endif /* SEMU_HAS(VIRTIOCONSOLE) */
+
 /* ACLINT MTIMER */
 typedef struct {
     /* A MTIMER device has two separate base addresses: one for the MTIME
@@ -557,7 +610,9 @@ typedef struct {
     uint32_t *disk;
     vm_t vm;
     plic_state_t plic;
+#if SEMU_HAS(UART8250)
     u8250_state_t uart;
+#endif
 #if SEMU_HAS(VIRTIONET)
     virtio_net_state_t vnet;
 #endif
@@ -580,13 +635,16 @@ typedef struct {
 #if SEMU_HAS(VIRTIOGPU)
     virtio_gpu_state_t vgpu;
 #endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+    virtio_console_state_t vconsole;
+#endif
 #if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
     /* Use self-pipe trick to unblock the emulator loop when the window backend
      * has queued work, such as input events or window shutdown. When all harts
      * are idle, 'semu_run()' can call 'poll(-1)' and block indefinitely
-     * waiting for timer or UART events. The window-event thread has no way to
-     * wake that blocked 'poll()' other than writing to a file descriptor it is
-     * watching.
+     * waiting for timer or console events. The window-event thread has no way
+     * to wake that blocked 'poll()' other than writing to a file descriptor it
+     * is watching.
      *
      * 'wake_fd[0]' (read end) is added to 'pfds[]' so 'poll()' monitors it.
      * 'wake_fd[1]' (write end) is handed to the window backend, which

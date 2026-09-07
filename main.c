@@ -77,6 +77,7 @@ static uint32_t *mem_page_table(const hart_t *hart, uint32_t ppn)
     return NULL;
 }
 
+#if SEMU_HAS(UART8250)
 static void emu_update_uart_interrupts(vm_t *vm)
 {
     emu_state_t *data = PRIV(vm->hart[0]);
@@ -86,6 +87,40 @@ static void emu_update_uart_interrupts(vm_t *vm)
     else
         data->plic.active &= ~IRQ_UART_BIT;
     plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
+#if SEMU_HAS(VIRTIOCONSOLE)
+static void emu_update_vconsole_interrupts(vm_t *vm)
+{
+    emu_state_t *data = PRIV(vm->hart[0]);
+    if (data->vconsole.InterruptStatus)
+        data->plic.active |= IRQ_VCONSOLE_BIT;
+    else
+        data->plic.active &= ~IRQ_VCONSOLE_BIT;
+    plic_update_interrupts(vm, &data->plic);
+}
+#endif
+
+static int emu_console_input_fd(const emu_state_t *emu)
+{
+#if SEMU_HAS(UART8250)
+    return emu->uart.in_fd;
+#else
+    return emu->vconsole.in_fd;
+#endif
+}
+
+static bool emu_hart_waiting_for_console(const emu_state_t *emu,
+                                         uint32_t hart_id)
+{
+#if SEMU_HAS(UART8250)
+    return emu->uart.has_waiting_hart && emu->uart.waiting_hart_id == hart_id;
+#else
+    (void) emu;
+    (void) hart_id;
+    return false;
+#endif
 }
 
 #if SEMU_HAS(VIRTIONET)
@@ -224,10 +259,16 @@ static inline void emu_tick_peripherals(emu_state_t *emu)
     if (emu->peripheral_update_ctr-- == 0) {
         emu->peripheral_update_ctr = 64;
 
+#if SEMU_HAS(UART8250)
         u8250_check_ready(&emu->uart);
         u8250_flush_out(&emu->uart);
         if (emu->uart.in_ready)
             emu_update_uart_interrupts(vm);
+#else
+        virtio_console_refresh(&emu->vconsole);
+        if (emu->vconsole.InterruptStatus)
+            emu_update_vconsole_interrupts(vm);
+#endif
 
 #if SEMU_HAS(VIRTIONET)
         virtio_net_refresh_queue(&emu->vnet);
@@ -295,10 +336,12 @@ static void mem_load(hart_t *hart,
         case 0x2: /* PLIC (0 - 0x3F) */
             plic_read(hart, &data->plic, addr & 0x3FFFFFF, width, value);
             return;
+#if SEMU_HAS(UART8250)
         case 0x40: /* UART */
             u8250_read(hart, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(hart->vm);
             return;
+#endif
 #if SEMU_HAS(VIRTIONET)
         case 0x41: /* virtio-net */
             virtio_net_read(hart, &data->vnet, addr & 0xFFFFF, width, value);
@@ -351,6 +394,12 @@ static void mem_load(hart_t *hart,
             virtio_gpu_read(hart, &data->vgpu, addr & 0xFFFFF, width, value);
             return;
 #endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+        case 0x4C: /* virtio-console */
+            virtio_console_read(hart, &data->vconsole, addr & 0xFFFFF, width,
+                                value);
+            return;
+#endif
         }
     }
     vm_set_exception(hart, RV_EXC_LOAD_FAULT, hart->exc_val);
@@ -376,10 +425,12 @@ static void mem_store(hart_t *hart,
             plic_write(hart, &data->plic, addr & 0x3FFFFFF, width, value);
             plic_update_interrupts(hart->vm, &data->plic);
             return;
+#if SEMU_HAS(UART8250)
         case 0x40: /* UART */
             u8250_write(hart, &data->uart, addr & 0xFFFFF, width, value);
             emu_update_uart_interrupts(hart->vm);
             return;
+#endif
 #if SEMU_HAS(VIRTIONET)
         case 0x41: /* virtio-net */
             virtio_net_write(hart, &data->vnet, addr & 0xFFFFF, width, value);
@@ -442,6 +493,13 @@ static void mem_store(hart_t *hart,
         case 0x4B: /* virtio-gpu */
             virtio_gpu_write(hart, &data->vgpu, addr & 0xFFFFF, width, value);
             emu_update_vgpu_interrupts(hart->vm);
+            return;
+#endif
+#if SEMU_HAS(VIRTIOCONSOLE)
+        case 0x4C: /* virtio-console */
+            virtio_console_write(hart, &data->vconsole, addr & 0xFFFFF, width,
+                                 value);
+            emu_update_vconsole_interrupts(hart->vm);
             return;
 #endif
         }
@@ -1010,10 +1068,14 @@ static int semu_init(emu_state_t *emu, int argc, char **argv)
     }
 
     /* Set up peripherals */
+#if SEMU_HAS(UART8250)
     emu->uart.in_fd = STDIN_FILENO;
     emu->uart.out_fd = STDOUT_FILENO;
     emu->uart.waiting_hart_id = UINT32_MAX;
     emu->uart.has_waiting_hart = false;
+#else
+    virtio_console_init(&emu->vconsole, emu->ram, STDIN_FILENO, STDOUT_FILENO);
+#endif
     host_console_setup(STDIN_FILENO, STDOUT_FILENO);
 #if SEMU_HAS(VIRTIONET)
     /* Always set ram pointer, even if netdev is not configured.
@@ -1444,14 +1506,14 @@ static void semu_run(emu_state_t *emu)
          *
          * Architecture:
          * - Each hart runs as an independent coroutine
-         * - Peripherals (VirtIO-Net, UART, etc.) use inline polling
+         * - Peripherals (VirtIO-Net, console, etc.) use inline polling
          * - Main loop acts as scheduler, resuming hart coroutines round-robin
-         * - poll() monitors timer and UART for power management
+         * - poll() monitors timer and console input for power management
          *
          * Power management optimization:
          * - When all harts execute WFI (Wait For Interrupt), scheduler blocks
          *   in poll() with timeout=-1 (indefinite) until:
-         *   * UART input arrives (keyboard)
+         *   * Console input arrives
          *   * Timer expires (1ms periodic timer for guest timer emulation)
          * - This avoids busy-waiting when guest OS is idle
          *
@@ -1479,12 +1541,13 @@ static void semu_run(emu_state_t *emu)
             return;
         }
 
-        if (isatty(emu->uart.in_fd)) {
-            struct kevent kev_uart;
-            EV_SET(&kev_uart, emu->uart.in_fd, EVFILT_READ, EV_ADD | EV_ENABLE,
-                   0, 0, NULL);
-            if (kevent(kq, &kev_uart, 1, NULL, 0, NULL) < 0) {
-                perror("kevent uart setup");
+        int console_fd = emu_console_input_fd(emu);
+        if (isatty(console_fd)) {
+            struct kevent kev_console;
+            EV_SET(&kev_console, console_fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0,
+                   0, NULL);
+            if (kevent(kq, &kev_console, 1, NULL, 0, NULL) < 0) {
+                perror("kevent console setup");
                 close(kq);
                 emu->exit_code = -1;
                 return;
@@ -1512,7 +1575,7 @@ static void semu_run(emu_state_t *emu)
 
         /* Poll-based event loop for I/O monitoring:
          * - Timer fd: 1 descriptor for periodic timer (kqueue/timerfd)
-         * - UART fd: 1 descriptor for keyboard input
+         * - Console fd: 1 descriptor for host input
          */
         struct pollfd *pfds = NULL;
         size_t poll_capacity = 0;
@@ -1523,7 +1586,7 @@ static void semu_run(emu_state_t *emu)
              */
             if (signal_received)
                 break;
-            /* Only need fds for timer and UART (no coroutine I/O),
+            /* Only need fds for the timer and console (no coroutine I/O),
              * plus an optional wake pipe when a window backend is enabled.
              */
             size_t needed = 2;
@@ -1555,7 +1618,7 @@ static void semu_run(emu_state_t *emu)
              * modifies flags.
              *
              * - If no harts are STARTED, block indefinitely (wait for IPI)
-             * - If all STARTED harts are idle (WFI or UART waiting), block
+             * - If all STARTED harts are idle (WFI or console waiting), block
              * - Otherwise, use non-blocking poll (timeout=0)
              */
             int poll_timeout = 0;
@@ -1564,10 +1627,11 @@ static void semu_run(emu_state_t *emu)
             for (uint32_t i = 0; i < vm->n_hart; i++) {
                 if (vm->hart[i]->hsm_status == SBI_HSM_STATE_STARTED) {
                     started_harts++;
-                    /* Count hart as idle if it's in WFI or waiting for UART */
+                    /* Count a hart as idle while it is in WFI or blocked on the
+                     * selected console frontend.
+                     */
                     if (vm->hart[i]->in_wfi ||
-                        (emu->uart.has_waiting_hart &&
-                         emu->uart.waiting_hart_id == i)) {
+                        emu_hart_waiting_for_console(emu, i)) {
                         idle_harts++;
                     }
                 }
@@ -1608,23 +1672,26 @@ static void semu_run(emu_state_t *emu)
             }
 #endif
 
-            /* Add UART input fd (stdin for keyboard input).
-             * Only add UART when:
+            /* Add the selected console input fd.
+             * Only add it when:
              * 1. Single-hart configuration (n_hart == 1), OR
              * 2. Boot not complete (!boot_complete), OR
              * 3. All harts are active (idle_harts == 0), OR
-             * 4. A hart is actively waiting for UART input
+             * 4. A hart is actively waiting for console input
              *
-             * This prevents UART (which is always "readable" on TTY) from
+             * This prevents an always-readable input from
              * preventing poll() sleep when harts are idle. Trade-off: user
              * input (Ctrl+A x) may be delayed by up to poll_timeout (10ms)
              * when harts are idle, which is acceptable for an emulator.
              */
-            bool need_uart = (vm->n_hart == 1) || !boot_complete ||
-                             (idle_harts == 0) || emu->uart.has_waiting_hart;
-            if (emu->uart.in_fd >= 0 && pfd_count < poll_capacity &&
-                need_uart) {
-                pfds[pfd_count] = (struct pollfd) {emu->uart.in_fd, POLLIN, 0};
+            bool need_console =
+                (vm->n_hart == 1) || !boot_complete || (idle_harts == 0);
+#if SEMU_HAS(UART8250)
+            need_console |= emu->uart.has_waiting_hart;
+#endif
+            int console_fd = emu_console_input_fd(emu);
+            if (console_fd >= 0 && pfd_count < poll_capacity && need_console) {
+                pfds[pfd_count] = (struct pollfd) {console_fd, POLLIN, 0};
                 pfd_count++;
             }
 
@@ -1665,7 +1732,7 @@ static void semu_run(emu_state_t *emu)
             /* Execute poll() to wait for I/O events.
              * - timeout=0: non-blocking poll when harts are active
              * - timeout=10: short sleep when some harts idle
-             * - timeout=-1: blocking poll when all harts idle (WFI or UART
+             * - timeout=-1: blocking poll when all harts idle (WFI or console
              *   wait)
              *
              * When pfd_count==0, poll() acts as a pure sleep mechanism.
@@ -1715,7 +1782,7 @@ static void semu_run(emu_state_t *emu)
             /* Resume all hart coroutines (round-robin scheduling).
              * Each hart executes a batch of instructions, then yields back.
              * Harts in WFI will have their in_wfi flag cleared by interrupt
-             * handlers (ACLINT, PLIC, UART) when interrupts are injected.
+             * handlers (ACLINT, PLIC, console) when interrupts are injected.
              *
              * Note: We must always resume harts after poll() returns, even if
              * all harts appear idle. The in_wfi flag is only cleared when
