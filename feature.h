@@ -2,6 +2,14 @@
 
 /* enable/disable (compile time) features in this header */
 
+#ifndef SEMU_FEATURE_VIRTIOCONSOLE
+#define SEMU_FEATURE_VIRTIOCONSOLE 1
+#endif
+
+#ifndef SEMU_FEATURE_UART8250
+#define SEMU_FEATURE_UART8250 0
+#endif
+
 /* virtio-blk */
 #ifndef SEMU_FEATURE_VIRTIOBLK
 #define SEMU_FEATURE_VIRTIOBLK 1
