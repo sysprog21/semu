@@ -581,7 +581,7 @@ typedef struct {
 #if SEMU_HAS(VIRTIOGPU)
     virtio_gpu_state_t vgpu;
 #endif
-#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
+#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU) || SEMU_HAS(VIRTIOSND)
     /* Use self-pipe trick to unblock the emulator loop when the window backend
      * has queued work, such as input events or window shutdown. When all harts
      * are idle, 'semu_run()' can call 'poll(-1)' and block indefinitely
