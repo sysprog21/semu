@@ -464,6 +464,7 @@ typedef struct {
     /* status */
     uint32_t Status;
     uint32_t InterruptStatus;
+    bool wake_pending;
     /* supplied by environment */
     uint32_t *ram;
     /* implementation-specific */
@@ -483,6 +484,7 @@ void virtio_snd_write(hart_t *core,
                       uint32_t value);
 
 bool virtio_snd_init(virtio_snd_state_t *vsnd);
+void virtio_snd_cleanup(virtio_snd_state_t *vsnd);
 #endif /* SEMU_HAS(VIRTIOSND) */
 
 /* VirtIO-File-System */
@@ -581,18 +583,18 @@ typedef struct {
 #if SEMU_HAS(VIRTIOGPU)
     virtio_gpu_state_t vgpu;
 #endif
-#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
+#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU) || SEMU_HAS(VIRTIOSND)
     /* Use self-pipe trick to unblock the emulator loop when the window backend
-     * has queued work, such as input events or window shutdown. When all harts
-     * are idle, 'semu_run()' can call 'poll(-1)' and block indefinitely
-     * waiting for timer or UART events. The window-event thread has no way to
-     * wake that blocked 'poll()' other than writing to a file descriptor it is
-     * watching.
+     * or virtio-snd TX worker has queued work, such as input events, window
+     * shutdown, or completed PCM buffers. When all harts are idle, 'semu_run()'
+     * can call 'poll(-1)' and block indefinitely waiting for timer or UART
+     * events. Background threads have no way to wake that blocked 'poll()'
+     * other than writing to a file descriptor it is watching.
      *
      * 'wake_fd[0]' (read end) is added to 'pfds[]' so 'poll()' monitors it.
-     * 'wake_fd[1]' (write end) is handed to the window backend, which
-     * writes one byte when backend work arrives to make 'wake_fd[0]'
-     * readable and return 'poll()' immediately.
+     * 'wake_fd[1]' (write end) is written by the window backend and virtio-snd
+     * TX worker when work arrives to make 'wake_fd[0]' readable and return
+     * 'poll()' immediately.
      */
     int wake_fd[2];
 #endif
