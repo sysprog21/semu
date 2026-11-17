@@ -11,6 +11,8 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - Standard SBI, with the timer extension
 - I/O support using VirtIO standard:
     - virtio-blk acquires disk image from the host.
+    - virtio-console provides a paravirtualized console.
+    - virtio-rng provides entropy to the guest.
     - virtio-net is mapped as TAP interface.
     - virtio-snd uses [PortAudio](https://github.com/PortAudio/portaudio) for sound playback on the host with one limitations:
         - As some unknown issues in guest Linux OS (confirmed in v6.7 and v6.12), you need

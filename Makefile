@@ -215,6 +215,27 @@ ifeq ($(call has, VIRTIOGPU), 1)
     OBJS_EXTRA += vgpu-display.o
 endif
 
+# Guest console: UART-8250 or virtio-console
+SEMU_CONSOLE ?= virtio
+SEMU_CONSOLE := $(strip $(SEMU_CONSOLE))
+override ENABLE_UART8250 := 0
+override ENABLE_VIRTIOCONSOLE := 0
+ifeq ($(SEMU_CONSOLE),uart8250)
+    override ENABLE_UART8250 := 1
+else ifeq ($(SEMU_CONSOLE),virtio)
+    override ENABLE_VIRTIOCONSOLE := 1
+else
+    $(error SEMU_CONSOLE must be either uart8250 or virtio)
+endif
+$(call set-feature, UART8250)
+$(call set-feature, VIRTIOCONSOLE)
+
+ifeq ($(call has, UART8250), 1)
+    OBJS_EXTRA += uart.o
+else
+    OBJS_EXTRA += virtio-console.o
+endif
+
 ifneq ($(filter 1,$(call has, VIRTIOGPU) $(call has, VIRTIOINPUT)),)
     OBJS_EXTRA += window-sw.o
 endif
@@ -227,7 +248,7 @@ OBJS := \
 	ram.o \
 	utils.o \
 	plic.o \
-	uart.o \
+	console.o \
 	main.o \
 	aclint.o \
 	coro.o \
