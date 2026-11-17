@@ -161,6 +161,10 @@ jobs:
       run: make
       shell: bash
       timeout-minutes: 5
+    - name: unit test
+      run: make unit-test
+      shell: bash
+      timeout-minutes: 5
     - name: automated test
       run: .ci/autorun.sh
       shell: bash
@@ -256,6 +260,10 @@ jobs:
       run: make
       shell: bash
       timeout-minutes: 20
+    - name: unit test
+      run: make unit-test
+      shell: bash
+      timeout-minutes: 5
     - name: automated test
       run: .ci/autorun.sh
       shell: bash

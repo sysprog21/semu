@@ -2,6 +2,8 @@
 *.o.d
 *.sw*
 semu
+/tests/test_vsnd_wake
+/tests/*.dSYM/
 
 # Linux-specific
 *.dtb

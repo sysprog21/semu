@@ -1,9 +1,11 @@
 #include <inttypes.h>
 #include <math.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <portaudio.h>
 
@@ -318,6 +320,8 @@ static int vsnd_dev_cnt = 0;
 static pthread_mutex_t virtio_snd_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t virtio_snd_tx_cond = PTHREAD_COND_INITIALIZER;
 static int tx_ev_notify;
+static pthread_mutex_t virtio_snd_wake_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int wake_write_fd = -1;
 
 /* vsnd virtq callback type */
 typedef int (*vsnd_virtq_cb)(virtio_snd_state_t *,       /* vsnd state */
@@ -332,7 +336,7 @@ static int virtio_snd_stream_cb(const void *input,
                                 const PaStreamCallbackTimeInfo *time_info,
                                 PaStreamCallbackFlags status_flags,
                                 void *user_data);
-static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index);
+static bool virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index);
 static void __virtio_snd_frame_enqueue(void *payload,
                                        uint32_t n,
                                        uint32_t stream_id);
@@ -473,13 +477,16 @@ static int virtio_snd_io_desc_flush_handler(virtio_snd_state_t *vsnd,
     VSND_TX_QUEUE_BODY(0);
 }
 
-static void virtio_snd_set_fail(virtio_snd_state_t *vsnd)
+static bool virtio_snd_set_fail(virtio_snd_state_t *vsnd)
 {
     uint32_t status = __atomic_fetch_or(
         &vsnd->Status, VIRTIO_STATUS__DEVICE_NEEDS_RESET, __ATOMIC_ACQ_REL);
-    if (status & VIRTIO_STATUS__DRIVER_OK)
+    if (status & VIRTIO_STATUS__DRIVER_OK) {
         __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__CONF_CHANGE,
                           __ATOMIC_RELEASE);
+        return true;
+    }
+    return false;
 }
 
 /* Check whether the address is valid or not */
@@ -674,9 +681,12 @@ static void virtio_snd_read_pcm_prepare(const virtio_snd_pcm_hdr_t *query,
         .suggestedLatency = 0.1, /* 100 ms */
         .hostApiSpecificStreamInfo = NULL,
     };
+    sigset_t old_mask;
+    semu_block_term_signals(&old_mask);
     PaError err = Pa_OpenStream(&props->pa_stream, NULL, /* no input */
                                 &params, rate, cnfa_period_frames, paClipOff,
                                 virtio_snd_stream_cb, &props->v);
+    pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
     if (err != paNoError) {
         fprintf(stderr, "Cannot create PortAudio\n");
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
@@ -703,7 +713,10 @@ static void virtio_snd_read_pcm_start(const virtio_snd_pcm_hdr_t *query,
 
     /* Control the callback to start playing */
     props->pp.hdr.hdr.code = VIRTIO_SND_R_PCM_START;
+    sigset_t old_mask;
+    semu_block_term_signals(&old_mask);
     PaError err = Pa_StartStream(props->pa_stream);
+    pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
     if (err != paNoError) {
         fprintf(stderr, "get error in pcm_start\n");
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
@@ -995,14 +1008,14 @@ tx_frame_enqueue_final:
     pthread_mutex_unlock(&props->lock.lock);
 }
 
-static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
+static bool virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
 {
     uint32_t *ram = vsnd->ram;
     virtio_snd_queue_t *queue = &vsnd->queues[index & 0x03];
     uint32_t status = __atomic_load_n(&vsnd->Status, __ATOMIC_ACQUIRE);
 
     if (status & VIRTIO_STATUS__DEVICE_NEEDS_RESET)
-        return;
+        return false;
 
     if (!((status & VIRTIO_STATUS__DRIVER_OK) && queue->ready))
         return virtio_snd_set_fail(vsnd);
@@ -1013,7 +1026,7 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
         return virtio_snd_set_fail(vsnd);
 
     if (queue->last_avail == new_avail)
-        return;
+        return false;
 
     /* Process them */
     uint16_t new_used = ram[queue->QueueUsed] >> 16; /* virtq_used.idx (le16) */
@@ -1056,9 +1069,34 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
     vsnd->ram[queue->QueueUsed] |= ((uint32_t) new_used) << 16; /* len */
 
     /* Publish used-ring writes before making the IRQ visible to the guest. */
-    if (!(ram[queue->QueueAvail] & 1))
+    if (!(ram[queue->QueueAvail] & 1)) {
         __atomic_fetch_or(&vsnd->InterruptStatus, VIRTIO_INT__USED_RING,
                           __ATOMIC_RELEASE);
+        return true;
+    }
+
+    return false;
+}
+
+void virtio_snd_set_wake_fd(int fd)
+{
+    pthread_mutex_lock(&virtio_snd_wake_mutex);
+    wake_write_fd = fd;
+    pthread_mutex_unlock(&virtio_snd_wake_mutex);
+}
+
+static void virtio_snd_wake(void)
+{
+    pthread_mutex_lock(&virtio_snd_wake_mutex);
+    if (wake_write_fd >= 0) {
+        char byte = 1;
+        /* Best-effort wakeup: the pipe is non-blocking, and the byte value has
+         * no meaning beyond making the read end readable.
+         */
+        ssize_t bytes_written = write(wake_write_fd, &byte, 1);
+        (void) bytes_written;
+    }
+    pthread_mutex_unlock(&virtio_snd_wake_mutex);
 }
 
 /* TX thread context */
@@ -1074,7 +1112,8 @@ static void *func(void *args)
         tx_ev_notify--;
         pthread_mutex_unlock(&virtio_snd_mutex);
 
-        virtio_queue_notify_handler(vsnd, 2);
+        if (virtio_queue_notify_handler(vsnd, VSND_QUEUE_TX))
+            virtio_snd_wake();
     }
     pthread_exit(NULL);
 }
@@ -1285,13 +1324,20 @@ bool virtio_snd_init(virtio_snd_state_t *vsnd)
         0; /* virtio-snd device does not support control elements */
 
     tx_ev_notify = 0;
+    /* Threads inherit the creator's signal mask, so block SIGINT/SIGTERM while
+     * spawning the TX worker and initializing PortAudio host threads.
+     */
+    sigset_t old_mask;
+    semu_block_term_signals(&old_mask);
     pthread_t tid;
     if (pthread_create(&tid, NULL, func, vsnd) != 0) {
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
         fprintf(stderr, "cannot create TX thread\n");
         return false;
     }
     /* Initialize PortAudio */
     PaError err = Pa_Initialize();
+    pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
     if (err != paNoError) {
         printf("PortAudio error: %s\n", Pa_GetErrorText(err));
         Pa_Terminate();

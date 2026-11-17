@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pthread.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -118,3 +120,17 @@ static inline void list_del_init(struct list_head *node)
 
 #define LIST_HEAD_INIT(name) {.prev = (&name), .next = (&name)}
 #define LIST_HEAD(name) struct list_head name = LIST_HEAD_INIT(name)
+
+/* Block SIGINT and SIGTERM on the calling thread, optionally saving the
+ * previous signal mask in 'old_mask'. Callers spawning helper threads should
+ * bracket thread creation with this helper and restore 'old_mask' via
+ * pthread_sigmask(SIG_SETMASK, &old_mask, NULL).
+ */
+static inline void semu_block_term_signals(sigset_t *old_mask)
+{
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &set, old_mask);
+}
