@@ -483,6 +483,7 @@ void virtio_snd_write(hart_t *core,
                       uint32_t value);
 
 bool virtio_snd_init(virtio_snd_state_t *vsnd);
+void virtio_snd_set_wake_fd(int fd);
 #endif /* SEMU_HAS(VIRTIOSND) */
 
 /* VirtIO-File-System */
@@ -581,21 +582,19 @@ typedef struct {
 #if SEMU_HAS(VIRTIOGPU)
     virtio_gpu_state_t vgpu;
 #endif
-#if SEMU_HAS(VIRTIOINPUT) || SEMU_HAS(VIRTIOGPU)
-    /* Use self-pipe trick to unblock the emulator loop when the window backend
-     * has queued work, such as input events or window shutdown. When all harts
-     * are idle, 'semu_run()' can call 'poll(-1)' and block indefinitely
-     * waiting for timer or UART events. The window-event thread has no way to
-     * wake that blocked 'poll()' other than writing to a file descriptor it is
-     * watching.
+    /* Use self-pipe trick to unblock the emulator loop when another thread or
+     * the signal handler has queued work, such as input events, window
+     * shutdown, completed PCM buffers, or SIGINT/SIGTERM. When all harts are
+     * idle, 'semu_run()' can call 'poll(-1)' and block indefinitely waiting for
+     * timer or UART events. Background threads have no way to wake that
+     * blocked 'poll()' other than writing to a file descriptor it is watching.
      *
      * 'wake_fd[0]' (read end) is added to 'pfds[]' so 'poll()' monitors it.
-     * 'wake_fd[1]' (write end) is handed to the window backend, which
-     * writes one byte when backend work arrives to make 'wake_fd[0]'
-     * readable and return 'poll()' immediately.
+     * 'wake_fd[1]' (write end) is written when work arrives to make
+     * 'wake_fd[0]' readable and return 'poll()' immediately. Both are -1 when
+     * the pipe is not created (single-hart mode).
      */
     int wake_fd[2];
-#endif
     /* ACLINT */
     mtimer_state_t mtimer;
     mswi_state_t mswi;

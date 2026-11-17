@@ -129,30 +129,31 @@ ifeq ($(call has, VIRTIOSND), 1)
     PA_LIB := portaudio/lib/.libs/libportaudio.a
     PA_CFLAGS := -Iportaudio/include
     PA_CONFIG_PARAMS :=
-    LDFLAGS += $(PA_LIB)
+    PA_LDFLAGS := $(PA_LIB)
     CFLAGS += $(PA_CFLAGS)
 
     ifeq ($(UNAME_S),Linux)
-        LDFLAGS += -lasound -lrt
+        PA_LDFLAGS += -lasound -lrt
         PA_CONFIG_PARAMS += --with-alsa
         # Check PulseAudio installation
         ifeq (0, $(call check-pa))
-            LDFLAGS += -lpulse
+            PA_LDFLAGS += -lpulse
             PA_CONFIG_PARAMS += --with-pulseaudio
         endif
         ifeq (0, $(call check-jack2))
-            LDFLAGS += -ljack
+            PA_LDFLAGS += -ljack
             PA_CONFIG_PARAMS += --with-jack
         endif
     endif
     ifeq ($(UNAME_S),Darwin)
-        LDFLAGS += -framework CoreServices -framework CoreFoundation -framework AudioUnit -framework AudioToolbox -framework CoreAudio
+        PA_LDFLAGS += -framework CoreServices -framework CoreFoundation -framework AudioUnit -framework AudioToolbox -framework CoreAudio
     endif
 
     # PortAudio requires libm, yet we set -lm in the end of LDFLAGS
     # so that the other libraries will be benefited for no need to set
     # -lm separately.
-    LDFLAGS += -lpthread
+    PA_LDFLAGS += -lpthread
+    LDFLAGS += $(PA_LDFLAGS)
 
 portaudio/Makefile:
 	git submodule update --init portaudio
@@ -383,12 +384,30 @@ check: $(BIN) minimal.dtb $(KERNEL_DATA) $(INITRD_DEP) $(DISKIMG_FILE) $(SHARED_
 	@$(call notice, Ready to launch Linux kernel. Please be patient.)
 	$(Q)./$(BIN) $(strip $(KERNEL_OPT) $(DTB_OPT) $(HEADLESS_OPT) $(INITRD_OPT) $(DISKIMG_OPT) $(VIRTIOFS_OPT) $(SMP_OPT) $(NETDEV_OPT))
 
+UNIT_TEST_BINS :=
+ifeq ($(call has, VIRTIOSND), 1)
+UNIT_TEST_BINS += tests/test_vsnd_wake
+tests/test_vsnd_wake: tests/test_vsnd_wake.c virtio-snd.o $(PA_LIB) $(BUILD_CONFIG_STAMP)
+	$(VECHO) "  LD\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -I. $< virtio-snd.o $(PA_LDFLAGS) -lm
+endif
+
+.PHONY: unit-test
+unit-test: $(UNIT_TEST_BINS)
+	@if [ -z "$(UNIT_TEST_BINS)" ]; then \
+	    echo "No unit tests enabled for current build configuration."; \
+	fi
+	@for bin in $(UNIT_TEST_BINS); do \
+	    ./$$bin || exit 1; \
+	done
+
 ARTIFACTS ?= all
 .PHONY: build-artifacts
 build-artifacts:
 	scripts/build-artifacts.sh $(ARTIFACTS)
 
 clean:
+	$(Q)$(RM) -r tests/test_vsnd_wake tests/test_vsnd_wake.dSYM
 	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
 	$(Q)$(RM) -r $(BUILDROOT_OUTPUT_DIRS)
 	$(Q)if [ -f mini-gdbstub/Makefile ]; then \
