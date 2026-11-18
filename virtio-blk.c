@@ -196,31 +196,36 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     uint64_t sector = header->sector;
     uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
 
+    /* Include the status byte in every completed request. */
+    *plen = sizeof(*status);
+
     /* Check sector index and data length are valid */
     uint64_t disk_size = (uint64_t) PRIV(vblk)->capacity * DISK_BLK_SIZE;
     uint64_t offset = sector * DISK_BLK_SIZE;
-    if (sector >= PRIV(vblk)->capacity || vq_desc[1].len > disk_size - offset) {
-        *status = VIRTIO_BLK_S_IOERR;
-        return -1;
+    if (type == VIRTIO_BLK_T_IN || type == VIRTIO_BLK_T_OUT) {
+        if (sector >= PRIV(vblk)->capacity ||
+            vq_desc[1].len > disk_size - offset) {
+            *status = VIRTIO_BLK_S_IOERR;
+            return 0;
+        }
     }
 
     /* Process the data */
     switch (type) {
     case VIRTIO_BLK_T_IN:
         virtio_blk_read_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
+        *plen += vq_desc[1].len;
         break;
     case VIRTIO_BLK_T_OUT:
         virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     default:
-        fprintf(stderr, "unsupported virtio-blk operation!\n");
         *status = VIRTIO_BLK_S_UNSUPP;
-        return -1;
+        return 0;
     }
 
     /* Return the device status */
     *status = VIRTIO_BLK_S_OK;
-    *plen = vq_desc[1].len;
 
     return 0;
 }
